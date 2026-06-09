@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=My Personal Drive
+Exec=MyPersonalDrive
+Icon=MyPersonalDrive
+Type=Application
+Categories=Utility;
+Comment=A drive app for your personal files.
+Terminal=false

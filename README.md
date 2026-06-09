@@ -39,8 +39,9 @@ Use the release script from the repository root:
 
 This produces:
 
-- `dist/linux-x64/` — published self-contained app files
-- `dist/MyPersonalDrive-linux-x64.tar.gz` — packaged Linux release
+- `dist/MyPersonalDrive-x86_64.AppImage` — A standalone AppImage that includes a desktop entry and icon for integration with the Linux apps menu.
+- `dist/publish/` — The raw self-contained published app files.
+- `dist/MyPersonalDrive.AppDir` — The AppDir structure used to build the AppImage.
 
 ## Notes
 

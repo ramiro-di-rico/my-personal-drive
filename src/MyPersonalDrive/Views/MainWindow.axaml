@@ -1,0 +1,110 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:MyPersonalDrive.ViewModels"
+        x:Class="MyPersonalDrive.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="MyPersonalDrive"
+        Width="1280"
+        Height="800">
+  <Grid RowDefinitions="Auto,Auto,Auto,*" ColumnDefinitions="*,Auto">
+    <Border Grid.Row="0" Grid.ColumnSpan="2" Padding="16" Background="#20242D">
+      <StackPanel Spacing="8">
+        <TextBlock FontSize="20" Text="Proton Drive browser" />
+        <TextBlock Opacity="0.8" Text="Point the app at the Proton Drive CLI, then browse /my-files." />
+      </StackPanel>
+    </Border>
+
+    <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8" Margin="16">
+      <TextBox Width="420"
+               PlaceholderText="Path to proton-drive executable"
+               Text="{Binding CliPath, Mode=TwoWay}" />
+      <Button Content="Browse" Click="BrowseCliPath" />
+      <Button Content="Authenticate" Command="{Binding AuthenticateCommand}" />
+      <Button Content="Logout" Command="{Binding LogoutCommand}" />
+      <Button Content="Refresh" Command="{Binding RefreshCommand}" />
+    </StackPanel>
+
+    <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="16" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+      <Border Grid.Column="0" Padding="12,10" Background="#151922" CornerRadius="6">
+        <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" Spacing="8" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:BreadcrumbSegmentViewModel">
+              <Button Command="{Binding OpenCommand}"
+                      Content="{Binding Label}"
+                      IsEnabled="{Binding CanNavigate}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </Border>
+
+      <Button Grid.Column="1" Content="Upload" Command="{Binding UploadCommand}" />
+      <Button Grid.Column="2" Content="Back" Command="{Binding BackCommand}" />
+    </Grid>
+
+    <Grid Grid.Row="3" Grid.Column="0" Margin="16">
+      <TreeView ItemsSource="{Binding RootItems}">
+        <TreeView.ItemTemplate>
+          <DataTemplate x:DataType="vm:DriveNodeViewModel">
+            <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+              <Button Grid.Column="0"
+                      Command="{Binding RowCommand}"
+                      HorizontalAlignment="Stretch"
+                      HorizontalContentAlignment="Left">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock Text="{Binding Icon}" />
+                  <TextBlock Text="{Binding DisplayName}" />
+                </StackPanel>
+              </Button>
+
+              <Button Grid.Column="1"
+                      Content="Download"
+                      Margin="8,0,0,0"
+                      Command="{Binding DownloadCommand}"
+                      IsVisible="{Binding IsFile}" />
+            </Grid>
+          </DataTemplate>
+        </TreeView.ItemTemplate>
+      </TreeView>
+
+      <Border Background="#00000080"
+              IsVisible="{Binding IsLoading}">
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
+          <ProgressBar Width="220" IsIndeterminate="True" />
+          <TextBlock HorizontalAlignment="Center" Text="Loading..." />
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Border Grid.Row="3" Grid.Column="1" Margin="0,16,16,16" Padding="16" Width="340" Background="#151922">
+      <StackPanel Spacing="10">
+        <TextBlock FontSize="18" Text="Status" />
+        <TextBlock TextWrapping="Wrap" Text="{Binding StatusMessage}" />
+        <TextBlock FontWeight="Bold" Text="Selected item" />
+        <TextBlock Text="{Binding SelectedName}" />
+        <TextBlock FontWeight="Bold" Text="Type" />
+        <TextBlock Text="{Binding SelectedKind}" />
+        <TextBlock FontWeight="Bold" Text="Path" />
+        <TextBlock TextWrapping="Wrap" Text="{Binding SelectedPath}" />
+        <TextBlock FontWeight="Bold" Text="Size" />
+        <TextBlock Text="{Binding SelectedSize}" />
+        <TextBlock FontWeight="Bold" Text="Modified" />
+        <TextBlock TextWrapping="Wrap" Text="{Binding SelectedModified}" />
+        <TextBlock FontWeight="Bold" Text="Owner" />
+        <TextBlock TextWrapping="Wrap" Text="{Binding SelectedOwner}" />
+        <TextBlock FontWeight="Bold" Text="Shared" />
+        <TextBlock Text="{Binding SelectedShared}" />
+        <TextBlock FontWeight="Bold" Text="Current folder" />
+        <TextBlock TextWrapping="Wrap" Text="{Binding CurrentPath}" />
+        <TextBlock FontWeight="Bold" Text="Selected CLI" />
+        <TextBlock TextWrapping="Wrap" Text="{Binding CliPath}" />
+        <TextBlock FontWeight="Bold" Text="Root" />
+        <TextBlock Text="{Binding RootPath}" />
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>

@@ -29,19 +29,23 @@ dotnet run
 
 On first launch, point the app to the `proton-drive` executable. After authentication, the app stores the CLI path and auth state locally so it can reopen in the same state next time.
 
-## Linux release
+## Linux Build and Installation
 
-Use the release script from the repository root:
+To build and package the application for Linux:
 
 ```bash
-./scripts/release-linux.sh
+./scripts/publish-linux.sh
 ```
 
-This produces:
+This creates a standalone package and a tarball in `artifacts/linux-x64/`.
 
-- `dist/MyPersonalDrive-x86_64.AppImage` — A standalone AppImage that includes a desktop entry and icon for integration with the Linux apps menu.
-- `dist/publish/` — The raw self-contained published app files.
-- `dist/MyPersonalDrive.AppDir` — The AppDir structure used to build the AppImage.
+To install the application to your local system (includes desktop entry and icon integration):
+
+```bash
+./scripts/install-linux.sh
+```
+
+The app will be installed to `~/.local/share/MyPersonalDrive`.
 
 ## Notes
 

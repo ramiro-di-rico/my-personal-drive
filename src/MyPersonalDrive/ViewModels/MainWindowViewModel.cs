@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using Avalonia.Threading;
 
 namespace MyPersonalDrive.ViewModels;
 
@@ -10,11 +12,20 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly AppSettingsService _settings;
     private readonly Stack<string> _navigationHistory = new();
     private readonly string _rootPath = "/my-files";
+    private const int MaxCommandLogLines = 200;
+    private readonly List<string> _commandLogLines = new();
     private string _cliPath;
     private string _currentPath = "/my-files";
     private string _statusMessage = "Select a Proton Drive CLI executable to begin.";
     private bool _isLoading;
     private bool _isAuthenticated;
+    private bool _isCommandConsoleVisible = true;
+    private double _commandConsoleMaxHeight = 180;
+    private double _commandConsoleOpacity = 1;
+    private bool _commandConsoleHitTestVisible = true;
+    private string _activeCommand = "Idle";
+    private string _commandLogText = "No CLI command running.";
+    private string _commandConsoleToggleLabel = "Hide CLI activity";
     private string _selectedName = "None";
     private string _selectedKind = "None";
     private string _selectedPath = "None";
@@ -31,6 +42,9 @@ public sealed class MainWindowViewModel : ObservableObject
         var appSettings = settings.Load();
         _cliPath = appSettings.CliPath;
         _isAuthenticated = appSettings.IsAuthenticated;
+        _service.CommandStarted += OnCommandStarted;
+        _service.CommandOutput += OnCommandOutput;
+        _service.CommandFinished += OnCommandFinished;
 
         RootItems = new ObservableCollection<DriveNodeViewModel>();
         BreadcrumbItems = new ObservableCollection<BreadcrumbSegmentViewModel>();
@@ -41,6 +55,9 @@ public sealed class MainWindowViewModel : ObservableObject
         RefreshCommand = new AsyncCommand(RefreshAsync, CanRefresh);
         BackCommand = new AsyncCommand(GoBackAsync, CanGoBack);
         UploadCommand = new AsyncCommand(UploadAsync, CanUpload);
+        ToggleCommandConsoleCommand = new AsyncCommand(ToggleCommandConsoleAsync);
+        DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity);
+        ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity);
     }
 
     public ObservableCollection<DriveNodeViewModel> RootItems { get; }
@@ -57,9 +74,17 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public AsyncCommand UploadCommand { get; }
 
+    public AsyncCommand ToggleCommandConsoleCommand { get; }
+
+    public AsyncCommand DownloadActivityCommand { get; }
+
+    public AsyncCommand ClearActivityCommand { get; }
+
     public Func<Task<IReadOnlyList<string>>>? RequestUploadFilesAsync { get; set; }
 
     public Func<Task<string?>>? RequestDownloadFolderAsync { get; set; }
+
+    public Func<Task<string?>>? RequestSaveActivityAsync { get; set; }
 
     public string CliPath
     {
@@ -113,6 +138,18 @@ public sealed class MainWindowViewModel : ObservableObject
         set => SetProperty(ref _statusMessage, value);
     }
 
+    public string ActiveCommand
+    {
+        get => _activeCommand;
+        private set => SetProperty(ref _activeCommand, value);
+    }
+
+    public string CommandLogText
+    {
+        get => _commandLogText;
+        private set => SetProperty(ref _commandLogText, value);
+    }
+
     public string SelectedName
     {
         get => _selectedName;
@@ -155,6 +192,46 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _selectedShared, value);
     }
 
+    public bool IsCommandConsoleVisible
+    {
+        get => _isCommandConsoleVisible;
+        private set
+        {
+            if (SetProperty(ref _isCommandConsoleVisible, value))
+            {
+                CommandConsoleMaxHeight = value ? 180 : 0;
+                CommandConsoleOpacity = value ? 1 : 0;
+                CommandConsoleHitTestVisible = value;
+                CommandConsoleToggleLabel = value ? "Hide CLI activity" : "Show CLI activity";
+                RaiseCommandStates();
+            }
+        }
+    }
+
+    public double CommandConsoleMaxHeight
+    {
+        get => _commandConsoleMaxHeight;
+        private set => SetProperty(ref _commandConsoleMaxHeight, value);
+    }
+
+    public double CommandConsoleOpacity
+    {
+        get => _commandConsoleOpacity;
+        private set => SetProperty(ref _commandConsoleOpacity, value);
+    }
+
+    public bool CommandConsoleHitTestVisible
+    {
+        get => _commandConsoleHitTestVisible;
+        private set => SetProperty(ref _commandConsoleHitTestVisible, value);
+    }
+
+    public string CommandConsoleToggleLabel
+    {
+        get => _commandConsoleToggleLabel;
+        private set => SetProperty(ref _commandConsoleToggleLabel, value);
+    }
+
     public async Task InitializeAsync()
     {
         if (!string.IsNullOrWhiteSpace(CliPath) && IsAuthenticated)
@@ -177,6 +254,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool CanGoBack() => !IsLoading && IsAuthenticated && _navigationHistory.Count > 0;
 
     private bool CanUpload() => !IsLoading && IsAuthenticated;
+
+    private bool CanDownloadActivity() => _commandLogLines.Count > 0;
+
+    private bool CanClearActivity() => _commandLogLines.Count > 0;
 
     private async Task AuthenticateAsync()
     {
@@ -353,6 +434,31 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public async Task TrashItemAsync(DriveItem item)
+    {
+        if (item.IsFolder)
+        {
+            return;
+        }
+
+        try
+        {
+            IsLoading = true;
+            StatusMessage = $"Moving {item.Name} to trash...";
+            await _service.TrashItemAsync(item.Path);
+            StatusMessage = $"Moved {item.Name} to trash.";
+            await RefreshAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = FormatCliError(item.Path, ex.Message);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
     private async Task HandleRowClickAsync(DriveItem item)
     {
         SelectItem(item);
@@ -377,7 +483,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
             foreach (var item in items.OrderByDescending(item => item.IsFolder).ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
             {
-                RootItems.Add(new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync));
+                RootItems.Add(new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync));
             }
 
             CurrentPath = path;
@@ -471,6 +577,76 @@ public sealed class MainWindowViewModel : ObservableObject
         RefreshCommand.RaiseCanExecuteChanged();
         BackCommand.RaiseCanExecuteChanged();
         UploadCommand.RaiseCanExecuteChanged();
+        DownloadActivityCommand.RaiseCanExecuteChanged();
+        ClearActivityCommand.RaiseCanExecuteChanged();
+    }
+
+    private async Task ToggleCommandConsoleAsync()
+    {
+        IsCommandConsoleVisible = !IsCommandConsoleVisible;
+        await Task.CompletedTask;
+    }
+
+    private async Task DownloadActivityAsync()
+    {
+        var picker = RequestSaveActivityAsync;
+        if (picker is null)
+        {
+            StatusMessage = "Activity export is not available.";
+            return;
+        }
+
+        var path = await picker();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        await File.WriteAllTextAsync(path, CommandLogText);
+        StatusMessage = $"Saved CLI activity to {path}.";
+    }
+
+    private async Task ClearActivityAsync()
+    {
+        _commandLogLines.Clear();
+        CommandLogText = "No CLI command running.";
+        ActiveCommand = "Idle";
+        RaiseCommandStates();
+        await Task.CompletedTask;
+    }
+
+    private void OnCommandStarted(object? sender, CliCommandStartedEventArgs e)
+        => Dispatcher.UIThread.Post(() =>
+        {
+            ActiveCommand = e.CommandText;
+            AppendCommandLine($"> {e.CommandText}");
+        });
+
+    private void OnCommandOutput(object? sender, CliCommandOutputEventArgs e)
+        => Dispatcher.UIThread.Post(() =>
+        {
+            AppendCommandLine(e.IsError ? $"[err] {e.Text}" : e.Text);
+        });
+
+    private void OnCommandFinished(object? sender, CliCommandFinishedEventArgs e)
+        => Dispatcher.UIThread.Post(() =>
+        {
+            AppendCommandLine(e.Succeeded
+                ? $"[done] exit {e.ExitCode}"
+                : $"[fail] exit {e.ExitCode}");
+            ActiveCommand = "Idle";
+        });
+
+    private void AppendCommandLine(string line)
+    {
+        _commandLogLines.Add(line);
+        if (_commandLogLines.Count > MaxCommandLogLines)
+        {
+            _commandLogLines.RemoveAt(0);
+        }
+
+        CommandLogText = string.Join(Environment.NewLine, _commandLogLines);
+        RaiseCommandStates();
     }
 
     private static string FormatCliError(string path, string message)

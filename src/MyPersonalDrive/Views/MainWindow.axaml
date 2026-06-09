@@ -6,7 +6,7 @@
         Title="MyPersonalDrive"
         Width="1280"
         Height="800">
-  <Grid RowDefinitions="Auto,Auto,Auto,*" ColumnDefinitions="*,Auto">
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" ColumnDefinitions="*,Auto">
     <Border Grid.Row="0" Grid.ColumnSpan="2" Padding="16" Background="#20242D">
       <StackPanel Spacing="8">
         <TextBlock FontSize="20" Text="Proton Drive browser" />
@@ -50,7 +50,7 @@
       <TreeView ItemsSource="{Binding RootItems}">
         <TreeView.ItemTemplate>
           <DataTemplate x:DataType="vm:DriveNodeViewModel">
-            <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+            <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,6">
               <Button Grid.Column="0"
                       Command="{Binding RowCommand}"
                       HorizontalAlignment="Stretch"
@@ -65,6 +65,12 @@
                       Content="Download"
                       Margin="8,0,0,0"
                       Command="{Binding DownloadCommand}"
+                      IsVisible="{Binding IsFile}" />
+
+              <Button Grid.Column="2"
+                      Content="Trash"
+                      Margin="8,0,0,0"
+                      Command="{Binding TrashCommand}"
                       IsVisible="{Binding IsFile}" />
             </Grid>
           </DataTemplate>
@@ -104,6 +110,38 @@
         <TextBlock TextWrapping="Wrap" Text="{Binding CliPath}" />
         <TextBlock FontWeight="Bold" Text="Root" />
         <TextBlock Text="{Binding RootPath}" />
+      </StackPanel>
+    </Border>
+
+    <Border Grid.Row="4" Grid.ColumnSpan="2" Margin="16,0,16,16" Padding="12" Background="#11151D" CornerRadius="6">
+      <StackPanel Spacing="8">
+        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
+          <TextBlock FontSize="16" FontWeight="Bold" Text="CLI activity" />
+          <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding ActiveCommand}" />
+          <Button Grid.Column="2"
+                  Command="{Binding ToggleCommandConsoleCommand}"
+                  Content="{Binding CommandConsoleToggleLabel}" />
+          <Button Grid.Column="3"
+                  Command="{Binding DownloadActivityCommand}"
+                  Content="Download all" />
+          <Button Grid.Column="4"
+                  Command="{Binding ClearActivityCommand}"
+                  Content="Clear" />
+        </Grid>
+        <Border MaxHeight="{Binding CommandConsoleMaxHeight}"
+                Opacity="{Binding CommandConsoleOpacity}"
+                IsHitTestVisible="{Binding CommandConsoleHitTestVisible}"
+                ClipToBounds="True">
+          <Border.Transitions>
+            <Transitions>
+              <DoubleTransition Property="MaxHeight" Duration="0:0:0.35" />
+              <DoubleTransition Property="Opacity" Duration="0:0:0.35" />
+            </Transitions>
+          </Border.Transitions>
+          <ScrollViewer Height="140">
+            <TextBlock TextWrapping="Wrap" Text="{Binding CommandLogText}" />
+          </ScrollViewer>
+        </Border>
       </StackPanel>
     </Border>
   </Grid>

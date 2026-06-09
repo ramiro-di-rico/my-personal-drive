@@ -10,7 +10,14 @@ public sealed class ProtonDriveService
     public ProtonDriveService(IProtonDriveCliExecutor executor)
     {
         _executor = executor;
+        _executor.CommandStarted += (_, args) => CommandStarted?.Invoke(this, args);
+        _executor.CommandOutput += (_, args) => CommandOutput?.Invoke(this, args);
+        _executor.CommandFinished += (_, args) => CommandFinished?.Invoke(this, args);
     }
+
+    public event EventHandler<CliCommandStartedEventArgs>? CommandStarted;
+    public event EventHandler<CliCommandOutputEventArgs>? CommandOutput;
+    public event EventHandler<CliCommandFinishedEventArgs>? CommandFinished;
 
     public async Task<IReadOnlyList<DriveItem>> LoadFolderAsync(string path, CancellationToken cancellationToken = default)
     {
@@ -29,6 +36,9 @@ public sealed class ProtonDriveService
 
     public Task DownloadFileAsync(string path, string localFolder, CancellationToken cancellationToken = default)
         => _executor.ExecuteAsync($"filesystem download {Quote(path)} {Quote(localFolder)}", cancellationToken);
+
+    public Task TrashItemAsync(string path, CancellationToken cancellationToken = default)
+        => _executor.ExecuteAsync($"filesystem trash {Quote(path)}", cancellationToken);
 
     public Task UploadFilesAsync(IReadOnlyList<string> localPaths, string parentPath, CancellationToken cancellationToken = default)
     {

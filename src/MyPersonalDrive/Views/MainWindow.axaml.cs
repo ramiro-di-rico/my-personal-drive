@@ -43,6 +43,7 @@ public partial class MainWindow : Window
 
         viewModel.RequestUploadFilesAsync = PickUploadFilesAsync;
         viewModel.RequestDownloadFolderAsync = PickDownloadFolderAsync;
+        viewModel.RequestSaveActivityAsync = PickSaveActivityAsync;
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -80,5 +81,17 @@ public partial class MainWindow : Window
         });
 
         return folders.Count == 0 ? null : folders[0].Path.LocalPath;
+    }
+
+    private async Task<string?> PickSaveActivityAsync()
+    {
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save CLI activity",
+            SuggestedFileName = "cli-activity.log",
+            DefaultExtension = "log"
+        });
+
+        return file?.Path.LocalPath;
     }
 }

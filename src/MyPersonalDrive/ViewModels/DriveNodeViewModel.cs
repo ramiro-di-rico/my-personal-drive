@@ -6,14 +6,17 @@ public sealed class DriveNodeViewModel : ObservableObject
 {
     private readonly Func<DriveItem, Task> _handleRowClickAsync;
     private readonly Func<DriveItem, Task> _downloadItemAsync;
+    private readonly Func<DriveItem, Task> _trashItemAsync;
 
-    public DriveNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Func<DriveItem, Task> downloadItemAsync)
+    public DriveNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Func<DriveItem, Task> downloadItemAsync, Func<DriveItem, Task> trashItemAsync)
     {
         Item = item;
         _handleRowClickAsync = handleRowClickAsync;
         _downloadItemAsync = downloadItemAsync;
+        _trashItemAsync = trashItemAsync;
         RowCommand = new AsyncCommand(HandleRowClickAsync);
         DownloadCommand = new AsyncCommand(DownloadAsync, () => !Item.IsFolder);
+        TrashCommand = new AsyncCommand(TrashAsync, () => !Item.IsFolder);
     }
 
     public DriveItem Item { get; }
@@ -42,6 +45,8 @@ public sealed class DriveNodeViewModel : ObservableObject
 
     public AsyncCommand DownloadCommand { get; }
 
+    public AsyncCommand TrashCommand { get; }
+
     private async Task HandleRowClickAsync()
     {
         await _handleRowClickAsync(Item);
@@ -55,5 +60,15 @@ public sealed class DriveNodeViewModel : ObservableObject
         }
 
         await _downloadItemAsync(Item);
+    }
+
+    private async Task TrashAsync()
+    {
+        if (Item.IsFolder)
+        {
+            return;
+        }
+
+        await _trashItemAsync(Item);
     }
 }

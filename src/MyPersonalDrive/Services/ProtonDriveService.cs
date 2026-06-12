@@ -40,10 +40,26 @@ public sealed class ProtonDriveService
     public Task TrashItemAsync(string path, CancellationToken cancellationToken = default)
         => _executor.ExecuteAsync($"filesystem trash {Quote(path)}", cancellationToken);
 
-    public Task UploadFilesAsync(IReadOnlyList<string> localPaths, string parentPath, CancellationToken cancellationToken = default)
+    public Task RenameItemAsync(string path, string newName, CancellationToken cancellationToken = default)
+        => _executor.ExecuteAsync($"filesystem rename {Quote(path)} {Quote(newName)}", cancellationToken);
+
+    public Task CopyItemAsync(string sourcePath, string targetParentPath, string? newName = null, CancellationToken cancellationToken = default)
+    {
+        var nameArg = string.IsNullOrEmpty(newName) ? "" : $" -n {Quote(newName)}";
+        return _executor.ExecuteAsync($"filesystem copy{nameArg} {Quote(sourcePath)} {Quote(targetParentPath)}", cancellationToken);
+    }
+
+    public Task UploadFilesAsync(IReadOnlyList<string> localPaths, string parentPath, UploadConflictStrategy strategy = UploadConflictStrategy.None, CancellationToken cancellationToken = default)
     {
         var fileArguments = string.Join(" ", localPaths.Select(Quote));
-        return _executor.ExecuteAsync($"filesystem upload {fileArguments} {Quote(parentPath)}", cancellationToken);
+        var strategyFlag = strategy switch
+        {
+            UploadConflictStrategy.KeepBoth => " -c keep-both",
+            UploadConflictStrategy.Replace => " -c replace",
+            UploadConflictStrategy.Skip => " -c skip",
+            _ => string.Empty
+        };
+        return _executor.ExecuteAsync($"filesystem upload{strategyFlag} {fileArguments} {Quote(parentPath)}", cancellationToken);
     }
 
     private static IReadOnlyList<DriveItem> ParseListing(string output, string parentPath)

@@ -18,10 +18,18 @@
       <TextBox Width="420"
                PlaceholderText="Path to proton-drive executable"
                Text="{Binding CliPath, Mode=TwoWay}" />
-      <Button Content="Browse" Click="BrowseCliPath" />
-      <Button Content="Authenticate" Command="{Binding AuthenticateCommand}" />
-      <Button Content="Logout" Command="{Binding LogoutCommand}" />
-      <Button Content="Refresh" Command="{Binding RefreshCommand}" />
+      <Button ToolTip.Tip="Select proton-drive executable" Click="BrowseCliPath">
+        <TextBlock Text="📂" />
+      </Button>
+      <Button ToolTip.Tip="Authenticate to Proton Drive" Command="{Binding AuthenticateCommand}">
+        <TextBlock Text="🔑" />
+      </Button>
+      <Button ToolTip.Tip="Logout from Proton Drive" Command="{Binding LogoutCommand}">
+        <TextBlock Text="🚪" />
+      </Button>
+      <Button ToolTip.Tip="Refresh folder content" Command="{Binding RefreshCommand}">
+        <TextBlock Text="🔄" />
+      </Button>
     </StackPanel>
 
     <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="16" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
@@ -36,23 +44,29 @@
             <DataTemplate x:DataType="vm:BreadcrumbSegmentViewModel">
               <Button Command="{Binding OpenCommand}"
                       Content="{Binding Label}"
+                      ToolTip.Tip="{Binding Label}"
                       IsEnabled="{Binding CanNavigate}" />
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
       </Border>
 
-      <Button Grid.Column="1" Content="Upload" Command="{Binding UploadCommand}" />
-      <Button Grid.Column="2" Content="Back" Command="{Binding BackCommand}" />
+      <Button Grid.Column="1" ToolTip.Tip="Upload files" Command="{Binding UploadCommand}">
+        <TextBlock Text="📤" />
+      </Button>
+      <Button Grid.Column="2" ToolTip.Tip="Go back" Command="{Binding BackCommand}">
+        <TextBlock Text="⬅️" />
+      </Button>
     </Grid>
 
     <Grid Grid.Row="3" Grid.Column="0" Margin="16">
       <TreeView ItemsSource="{Binding RootItems}">
         <TreeView.ItemTemplate>
           <DataTemplate x:DataType="vm:DriveNodeViewModel">
-            <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,6">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" Margin="0,0,0,6">
               <Button Grid.Column="0"
                       Command="{Binding RowCommand}"
+                      ToolTip.Tip="Select item or open folder"
                       HorizontalAlignment="Stretch"
                       HorizontalContentAlignment="Left">
                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -62,16 +76,34 @@
               </Button>
 
               <Button Grid.Column="1"
-                      Content="Download"
+                      ToolTip.Tip="Create a copy"
                       Margin="8,0,0,0"
-                      Command="{Binding DownloadCommand}"
-                      IsVisible="{Binding IsFile}" />
+                      Command="{Binding CopyCommand}">
+                <TextBlock Text="👯" />
+              </Button>
 
               <Button Grid.Column="2"
-                      Content="Trash"
+                      ToolTip.Tip="Rename item"
+                      Margin="8,0,0,0"
+                      Command="{Binding RenameCommand}">
+                <TextBlock Text="✏️" />
+              </Button>
+
+              <Button Grid.Column="3"
+                      ToolTip.Tip="Download file"
+                      Margin="8,0,0,0"
+                      Command="{Binding DownloadCommand}"
+                      IsVisible="{Binding IsFile}">
+                <TextBlock Text="📥" />
+              </Button>
+
+              <Button Grid.Column="4"
+                      ToolTip.Tip="Move to trash"
                       Margin="8,0,0,0"
                       Command="{Binding TrashCommand}"
-                      IsVisible="{Binding IsFile}" />
+                      IsVisible="{Binding IsFile}">
+                <TextBlock Text="🗑️" />
+              </Button>
             </Grid>
           </DataTemplate>
         </TreeView.ItemTemplate>
@@ -120,13 +152,19 @@
           <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding ActiveCommand}" />
           <Button Grid.Column="2"
                   Command="{Binding ToggleCommandConsoleCommand}"
-                  Content="{Binding CommandConsoleToggleLabel}" />
+                  ToolTip.Tip="{Binding CommandConsoleToggleLabel}">
+            <TextBlock Text="🖥️" />
+          </Button>
           <Button Grid.Column="3"
                   Command="{Binding DownloadActivityCommand}"
-                  Content="Download all" />
+                  ToolTip.Tip="Download activity log">
+            <TextBlock Text="💾" />
+          </Button>
           <Button Grid.Column="4"
                   Command="{Binding ClearActivityCommand}"
-                  Content="Clear" />
+                  ToolTip.Tip="Clear activity log">
+            <TextBlock Text="🧹" />
+          </Button>
         </Grid>
         <Border MaxHeight="{Binding CommandConsoleMaxHeight}"
                 Opacity="{Binding CommandConsoleOpacity}"

@@ -7,16 +7,22 @@ public sealed class DriveNodeViewModel : ObservableObject
     private readonly Func<DriveItem, Task> _handleRowClickAsync;
     private readonly Func<DriveItem, Task> _downloadItemAsync;
     private readonly Func<DriveItem, Task> _trashItemAsync;
+    private readonly Func<DriveItem, Task> _renameItemAsync;
+    private readonly Func<DriveItem, Task> _copyItemAsync;
 
-    public DriveNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Func<DriveItem, Task> downloadItemAsync, Func<DriveItem, Task> trashItemAsync)
+    public DriveNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Func<DriveItem, Task> downloadItemAsync, Func<DriveItem, Task> trashItemAsync, Func<DriveItem, Task> renameItemAsync, Func<DriveItem, Task> copyItemAsync)
     {
         Item = item;
         _handleRowClickAsync = handleRowClickAsync;
         _downloadItemAsync = downloadItemAsync;
         _trashItemAsync = trashItemAsync;
+        _renameItemAsync = renameItemAsync;
+        _copyItemAsync = copyItemAsync;
         RowCommand = new AsyncCommand(HandleRowClickAsync);
         DownloadCommand = new AsyncCommand(DownloadAsync, () => !Item.IsFolder);
         TrashCommand = new AsyncCommand(TrashAsync, () => !Item.IsFolder);
+        RenameCommand = new AsyncCommand(RenameAsync);
+        CopyCommand = new AsyncCommand(CopyAsync);
     }
 
     public DriveItem Item { get; }
@@ -47,6 +53,10 @@ public sealed class DriveNodeViewModel : ObservableObject
 
     public AsyncCommand TrashCommand { get; }
 
+    public AsyncCommand RenameCommand { get; }
+
+    public AsyncCommand CopyCommand { get; }
+
     private async Task HandleRowClickAsync()
     {
         await _handleRowClickAsync(Item);
@@ -70,5 +80,15 @@ public sealed class DriveNodeViewModel : ObservableObject
         }
 
         await _trashItemAsync(Item);
+    }
+
+    private async Task RenameAsync()
+    {
+        await _renameItemAsync(Item);
+    }
+
+    private async Task CopyAsync()
+    {
+        await _copyItemAsync(Item);
     }
 }

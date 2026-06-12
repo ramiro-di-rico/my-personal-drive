@@ -82,6 +82,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public Func<Task<IReadOnlyList<string>>>? RequestUploadFilesAsync { get; set; }
 
+    public Func<IReadOnlyList<string>, Task<UploadConflictStrategy>>? RequestConflictStrategyAsync { get; set; }
+
+    public Func<string, Task<string?>>? RequestRenameAsync { get; set; }
+
+    public Func<string, Task<string?>>? RequestCopyNameAsync { get; set; }
+
     public Func<Task<string?>>? RequestDownloadFolderAsync { get; set; }
 
     public Func<Task<string?>>? RequestSaveActivityAsync { get; set; }
@@ -382,11 +388,31 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        var strategy = UploadConflictStrategy.None;
+        if (RequestConflictStrategyAsync is not null)
+        {
+            var remoteFileNames = RootItems.Select(ni => ni.Item.Name).ToHashSet();
+            var conflictingFiles = files
+                .Select(Path.GetFileName)
+                .Where(name => name is not null && remoteFileNames.Contains(name))
+                .ToList();
+
+            if (conflictingFiles.Count > 0)
+            {
+                strategy = await RequestConflictStrategyAsync(conflictingFiles!);
+                if (strategy == UploadConflictStrategy.None)
+                {
+                    StatusMessage = "Upload cancelled.";
+                    return;
+                }
+            }
+        }
+
         try
         {
             IsLoading = true;
             StatusMessage = $"Uploading {files.Count} file(s) to {CurrentPath}...";
-            await _service.UploadFilesAsync(files, CurrentPath);
+            await _service.UploadFilesAsync(files, CurrentPath, strategy);
             StatusMessage = $"Uploaded {files.Count} file(s) to {CurrentPath}.";
         }
         catch (InvalidOperationException ex)
@@ -423,6 +449,73 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusMessage = $"Downloading {item.Name}...";
             await _service.DownloadFileAsync(item.Path, folder);
             StatusMessage = $"Downloaded {item.Name} to {folder}.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = FormatCliError(item.Path, ex.Message);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    public async Task RenameItemAsync(DriveItem item)
+    {
+        var requester = RequestRenameAsync;
+        if (requester is null)
+        {
+            StatusMessage = "Rename is not available.";
+            return;
+        }
+
+        var newName = await requester(item.Name);
+        if (string.IsNullOrWhiteSpace(newName) || newName == item.Name)
+        {
+            return;
+        }
+
+        try
+        {
+            IsLoading = true;
+            StatusMessage = $"Renaming {item.Name} to {newName}...";
+            await _service.RenameItemAsync(item.Path, newName);
+            StatusMessage = $"Renamed {item.Name} to {newName}.";
+            await RefreshAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = FormatCliError(item.Path, ex.Message);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    public async Task CopyItemAsync(DriveItem item)
+    {
+        var requester = RequestCopyNameAsync;
+        if (requester is null)
+        {
+            StatusMessage = "Copy is not available.";
+            return;
+        }
+
+        var newName = await requester(item.Name);
+        if (newName == null)
+        {
+            return;
+        }
+
+        try
+        {
+            IsLoading = true;
+            var displayTarget = string.IsNullOrEmpty(newName) ? "original name" : newName;
+            StatusMessage = $"Creating a copy of {item.Name} as {displayTarget} in {CurrentPath}...";
+            await _service.CopyItemAsync(item.Path, CurrentPath, string.IsNullOrEmpty(newName) ? null : newName);
+            StatusMessage = $"Copied {item.Name} successfully.";
+            await RefreshAsync();
         }
         catch (InvalidOperationException ex)
         {
@@ -483,7 +576,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
             foreach (var item in items.OrderByDescending(item => item.IsFolder).ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
             {
-                RootItems.Add(new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync));
+                RootItems.Add(new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync));
             }
 
             CurrentPath = path;

@@ -26,6 +26,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _activeCommand = "Idle";
     private string _commandLogText = "No CLI command running.";
     private string _commandConsoleToggleLabel = "Hide CLI activity";
+    private string _commandConsoleToggleGlyph = "▼";
     private string _selectedName = "None";
     private string _selectedKind = "None";
     private string _selectedPath = "None";
@@ -209,6 +210,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 CommandConsoleOpacity = value ? 1 : 0;
                 CommandConsoleHitTestVisible = value;
                 CommandConsoleToggleLabel = value ? "Hide CLI activity" : "Show CLI activity";
+                CommandConsoleToggleGlyph = value ? "▼" : "▲";
                 RaiseCommandStates();
             }
         }
@@ -236,6 +238,12 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _commandConsoleToggleLabel;
         private set => SetProperty(ref _commandConsoleToggleLabel, value);
+    }
+
+    public string CommandConsoleToggleGlyph
+    {
+        get => _commandConsoleToggleGlyph;
+        private set => SetProperty(ref _commandConsoleToggleGlyph, value);
     }
 
     public async Task InitializeAsync()

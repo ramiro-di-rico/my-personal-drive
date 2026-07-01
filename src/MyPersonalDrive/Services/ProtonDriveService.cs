@@ -43,6 +43,9 @@ public sealed class ProtonDriveService
     public Task RenameItemAsync(string path, string newName, CancellationToken cancellationToken = default)
         => _executor.ExecuteAsync($"filesystem rename {Quote(path)} {Quote(newName)}", cancellationToken);
 
+    public Task CreateFolderAsync(string parentPath, string name, CancellationToken cancellationToken = default)
+        => _executor.ExecuteAsync($"filesystem create-folder {Quote(parentPath)} {Quote(name)}", cancellationToken);
+
     public Task CopyItemAsync(string sourcePath, string targetParentPath, string? newName = null, CancellationToken cancellationToken = default)
     {
         var nameArg = string.IsNullOrEmpty(newName) ? "" : $" -n {Quote(newName)}";

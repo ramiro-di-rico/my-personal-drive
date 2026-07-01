@@ -46,6 +46,7 @@ public partial class MainWindow : Window
         viewModel.RequestConflictStrategyAsync = PickConflictStrategyAsync;
         viewModel.RequestRenameAsync = PromptForRenameAsync;
         viewModel.RequestCopyNameAsync = PromptForCopyNameAsync;
+        viewModel.RequestCreateFolderAsync = PromptForNewFolderNameAsync;
         viewModel.RequestDownloadFolderAsync = PickDownloadFolderAsync;
         viewModel.RequestSaveActivityAsync = PickSaveActivityAsync;
     }
@@ -132,6 +133,66 @@ public partial class MainWindow : Window
         var cancelButton = (Button)buttonsPanel.Children[1];
 
         renameButton.Click += (_, _) =>
+        {
+            result = textBox.Text;
+            dialog.Close();
+        };
+
+        cancelButton.Click += (_, _) =>
+        {
+            result = null;
+            dialog.Close();
+        };
+
+        await dialog.ShowDialog(this);
+        return result;
+    }
+
+    private async Task<string?> PromptForNewFolderNameAsync()
+    {
+        var textBox = new TextBox
+        {
+            PlaceholderText = "New folder name",
+            Width = 350,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch
+        };
+
+        var dialog = new Window
+        {
+            Title = "Create Folder",
+            Width = 400,
+            Height = 180,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Spacing = 15,
+                Margin = new Avalonia.Thickness(20),
+                Children =
+                {
+                    new TextBlock { Text = "Enter name for the new folder:", FontWeight = Avalonia.Media.FontWeight.Bold },
+                    textBox,
+                    new StackPanel
+                    {
+                        Spacing = 10,
+                        Orientation = Avalonia.Layout.Orientation.Horizontal,
+                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                        Children =
+                        {
+                            new Button { Content = "Create", IsDefault = true, Width = 80 },
+                            new Button { Content = "Cancel", IsCancel = true, Width = 80 }
+                        }
+                    }
+                }
+            }
+        };
+
+        string? result = null;
+        var panel = (StackPanel)dialog.Content;
+        var buttonsPanel = (StackPanel)panel.Children[2];
+        var createButton = (Button)buttonsPanel.Children[0];
+        var cancelButton = (Button)buttonsPanel.Children[1];
+
+        createButton.Click += (_, _) =>
         {
             result = textBox.Text;
             dialog.Close();

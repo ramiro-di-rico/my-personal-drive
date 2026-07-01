@@ -56,6 +56,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RefreshCommand = new AsyncCommand(RefreshAsync, CanRefresh);
         BackCommand = new AsyncCommand(GoBackAsync, CanGoBack);
         UploadCommand = new AsyncCommand(UploadAsync, CanUpload);
+        CreateFolderCommand = new AsyncCommand(CreateFolderAsync, CanCreateFolder);
         ToggleCommandConsoleCommand = new AsyncCommand(ToggleCommandConsoleAsync);
         DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity);
         ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity);
@@ -75,6 +76,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public AsyncCommand UploadCommand { get; }
 
+    public AsyncCommand CreateFolderCommand { get; }
+
     public AsyncCommand ToggleCommandConsoleCommand { get; }
 
     public AsyncCommand DownloadActivityCommand { get; }
@@ -88,6 +91,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public Func<string, Task<string?>>? RequestRenameAsync { get; set; }
 
     public Func<string, Task<string?>>? RequestCopyNameAsync { get; set; }
+
+    public Func<Task<string?>>? RequestCreateFolderAsync { get; set; }
 
     public Func<Task<string?>>? RequestDownloadFolderAsync { get; set; }
 
@@ -269,6 +274,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private bool CanUpload() => !IsLoading && IsAuthenticated;
 
+    private bool CanCreateFolder() => !IsLoading && IsAuthenticated;
+
     private bool CanDownloadActivity() => _commandLogLines.Count > 0;
 
     private bool CanClearActivity() => _commandLogLines.Count > 0;
@@ -434,6 +441,39 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         await RefreshAsync();
+    }
+
+    private async Task CreateFolderAsync()
+    {
+        var requester = RequestCreateFolderAsync;
+        if (requester is null)
+        {
+            StatusMessage = "Create folder is not available.";
+            return;
+        }
+
+        var folderName = await requester();
+        if (string.IsNullOrWhiteSpace(folderName))
+        {
+            return;
+        }
+
+        try
+        {
+            IsLoading = true;
+            StatusMessage = $"Creating folder '{folderName}' in {CurrentPath}...";
+            await _service.CreateFolderAsync(CurrentPath, folderName);
+            StatusMessage = $"Created folder '{folderName}' in {CurrentPath}.";
+            await RefreshAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = FormatCliError(CurrentPath, ex.Message);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 
     public async Task DownloadItemAsync(DriveItem item)
@@ -678,6 +718,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RefreshCommand.RaiseCanExecuteChanged();
         BackCommand.RaiseCanExecuteChanged();
         UploadCommand.RaiseCanExecuteChanged();
+        CreateFolderCommand.RaiseCanExecuteChanged();
         DownloadActivityCommand.RaiseCanExecuteChanged();
         ClearActivityCommand.RaiseCanExecuteChanged();
     }

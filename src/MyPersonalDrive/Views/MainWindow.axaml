@@ -32,7 +32,7 @@
       </Button>
     </StackPanel>
 
-    <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="16" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+    <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="16" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
       <Border Grid.Column="0" Padding="12,10" Background="#151922" CornerRadius="6">
         <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
           <ItemsControl.ItemsPanel>
@@ -54,7 +54,10 @@
       <Button Grid.Column="1" ToolTip.Tip="Go back" Command="{Binding BackCommand}">
         <TextBlock Text="⬅️" />
       </Button>
-      <Button Grid.Column="2" ToolTip.Tip="Upload files" Command="{Binding UploadCommand}">
+      <Button Grid.Column="2" ToolTip.Tip="Create folder" Command="{Binding CreateFolderCommand}">
+        <TextBlock Text="📁" />
+      </Button>
+      <Button Grid.Column="3" ToolTip.Tip="Upload files" Command="{Binding UploadCommand}">
         <TextBlock Text="📤" />
       </Button>
     </Grid>

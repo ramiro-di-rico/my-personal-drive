@@ -10,10 +10,12 @@ public sealed class AppSettingsService
     public AppSettingsService()
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var folder = Path.Combine(appData, "MyPersonalDrive");
-        Directory.CreateDirectory(folder);
-        _settingsPath = Path.Combine(folder, "settings.json");
+        BaseFolder = Path.Combine(appData, "MyPersonalDrive");
+        Directory.CreateDirectory(BaseFolder);
+        _settingsPath = Path.Combine(BaseFolder, "settings.json");
     }
+
+    public string BaseFolder { get; }
 
     public AppSettings Load()
     {

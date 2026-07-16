@@ -9,14 +9,17 @@ namespace MyPersonalDrive.ViewModels;
 public sealed class MainWindowViewModel : ObservableObject
 {
     private readonly ProtonDriveService _service;
+    private readonly DriveCacheService _cacheService;
     private readonly AppSettingsService _settings;
     private readonly Stack<string> _navigationHistory = new();
+    private CancellationTokenSource? _cts;
     private readonly string _rootPath = "/my-files";
     private const int MaxCommandLogLines = 200;
     private readonly List<string> _commandLogLines = new();
     private string _cliPath;
     private string _currentPath = "/my-files";
     private string _statusMessage = "Select a Proton Drive CLI executable to begin.";
+    private bool _isWarning;
     private bool _isLoading;
     private bool _isAuthenticated;
     private bool _isCommandConsoleVisible = true;
@@ -35,9 +38,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _selectedOwner = "None";
     private string _selectedShared = "None";
 
-    public MainWindowViewModel(ProtonDriveService service, AppSettingsService settings)
+    public MainWindowViewModel(ProtonDriveService service, DriveCacheService cacheService, AppSettingsService settings)
     {
         _service = service;
+        _cacheService = cacheService;
         _settings = settings;
 
         var appSettings = settings.Load();
@@ -147,7 +151,19 @@ public sealed class MainWindowViewModel : ObservableObject
     public string StatusMessage
     {
         get => _statusMessage;
-        set => SetProperty(ref _statusMessage, value);
+        set
+        {
+            if (SetProperty(ref _statusMessage, value))
+            {
+                IsWarning = false;
+            }
+        }
+    }
+
+    public bool IsWarning
+    {
+        get => _isWarning;
+        private set => SetProperty(ref _isWarning, value);
     }
 
     public string ActiveCommand
@@ -357,7 +373,8 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        _navigationHistory.Push(CurrentPath);
+        var previousPath = CurrentPath;
+        _navigationHistory.Push(previousPath);
         RaiseCommandStates();
 
         try
@@ -366,7 +383,13 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            if (_navigationHistory.Count > 0)
+            if (CurrentPath == path)
+            {
+                CurrentPath = previousPath;
+                UpdateBreadcrumbs(previousPath);
+            }
+
+            if (_navigationHistory.Count > 0 && _navigationHistory.Peek() == previousPath)
             {
                 _navigationHistory.Pop();
                 RaiseCommandStates();
@@ -429,18 +452,17 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusMessage = $"Uploading {files.Count} file(s) to {CurrentPath}...";
             await _service.UploadFilesAsync(files, CurrentPath, strategy);
             StatusMessage = $"Uploaded {files.Count} file(s) to {CurrentPath}.";
+
+            _ = RefreshAsync(); // Refresh in background
         }
         catch (InvalidOperationException ex)
         {
             StatusMessage = FormatCliError(CurrentPath, ex.Message);
-            return;
         }
         finally
         {
             IsLoading = false;
         }
-
-        await RefreshAsync();
     }
 
     private async Task CreateFolderAsync()
@@ -464,7 +486,12 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusMessage = $"Creating folder '{folderName}' in {CurrentPath}...";
             await _service.CreateFolderAsync(CurrentPath, folderName);
             StatusMessage = $"Created folder '{folderName}' in {CurrentPath}.";
-            await RefreshAsync();
+            
+            // Update DB immediately
+            var newFolderPath = ProtonDriveService.CombinePath(CurrentPath, folderName);
+            await _cacheService.AddOrUpdateItemAsync(CurrentPath, new DriveItem(newFolderPath, folderName, true));
+
+            _ = RefreshAsync(); // Refresh in background
         }
         catch (InvalidOperationException ex)
         {
@@ -529,7 +556,14 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusMessage = $"Renaming {item.Name} to {newName}...";
             await _service.RenameItemAsync(item.Path, newName);
             StatusMessage = $"Renamed {item.Name} to {newName}.";
-            await RefreshAsync();
+
+            // Update DB immediately
+            var parentPath = GetParentPath(item.Path);
+            var newPath = ProtonDriveService.CombinePath(parentPath, newName);
+            await _cacheService.RemoveItemAsync(item.Path);
+            await _cacheService.AddOrUpdateItemAsync(parentPath, item with { Path = newPath, Name = newName });
+
+            _ = RefreshAsync(); // Refresh in background
         }
         catch (InvalidOperationException ex)
         {
@@ -556,14 +590,16 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        var displayTarget = string.IsNullOrEmpty(newName) ? item.Name : newName;
+
         try
         {
             IsLoading = true;
-            var displayTarget = string.IsNullOrEmpty(newName) ? "original name" : newName;
             StatusMessage = $"Creating a copy of {item.Name} as {displayTarget} in {CurrentPath}...";
             await _service.CopyItemAsync(item.Path, CurrentPath, string.IsNullOrEmpty(newName) ? null : newName);
             StatusMessage = $"Copied {item.Name} successfully.";
-            await RefreshAsync();
+            
+            _ = RefreshAsync(); // Refresh in background
         }
         catch (InvalidOperationException ex)
         {
@@ -588,7 +624,11 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusMessage = $"Moving {item.Name} to trash...";
             await _service.TrashItemAsync(item.Path);
             StatusMessage = $"Moved {item.Name} to trash.";
-            await RefreshAsync();
+
+            // Update DB immediately
+            await _cacheService.RemoveItemAsync(item.Path);
+            
+            _ = RefreshAsync(); // Refresh in background
         }
         catch (InvalidOperationException ex)
         {
@@ -614,42 +654,133 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task LoadFolderAsync(string path, bool clearSelection)
     {
+        _cts?.Cancel();
+        _cts = new CancellationTokenSource();
+        var token = _cts.Token;
+
         try
         {
             IsLoading = true;
             StatusMessage = $"Loading {path}...";
 
-            var items = await _service.LoadFolderAsync(path);
-            RootItems.Clear();
-
-            foreach (var item in items.OrderByDescending(item => item.IsFolder).ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
-            {
-                RootItems.Add(new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync));
-            }
-
+            // Always update current path and breadcrumbs immediately to show transition
+            var previousPath = CurrentPath;
             CurrentPath = path;
             UpdateBreadcrumbs(path);
-
+            
             if (clearSelection)
             {
                 ClearSelection();
             }
 
-            StatusMessage = $"Loaded {RootItems.Count} items from {path}.";
+            // 1. Load from DB
+            var cachedItems = await _cacheService.GetCachedItemsAsync(path);
+            bool hasCache = cachedItems.Count > 0;
+            
+            if (hasCache)
+            {
+                DisplayItems(cachedItems);
+                StatusMessage = $"Showing cached items for {path}. Fetching latest from CLI...";
+                IsLoading = false;
+
+                // Fire and forget CLI fetch to keep UI responsive and command finished
+                _ = FetchFromCliAndUpdateCacheAsync(path, clearSelection, token);
+                return;
+            }
+            else
+            {
+                // Clear items while waiting for CLI
+                DisplayItems(Array.Empty<DriveItem>());
+                await FetchFromCliAndUpdateCacheAsync(path, clearSelection, token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Ignore
         }
         catch (InvalidOperationException ex)
         {
-            if (ex.Message.Contains("login first", StringComparison.OrdinalIgnoreCase))
-            {
-                IsAuthenticated = false;
-            }
-
-            StatusMessage = FormatCliError(path, ex.Message);
-            throw;
+            HandleLoadError(path, ex);
         }
         finally
         {
-            IsLoading = false;
+            if (CurrentPath == path && !token.IsCancellationRequested)
+            {
+                IsLoading = false;
+            }
+        }
+    }
+
+    private async Task FetchFromCliAndUpdateCacheAsync(string path, bool clearSelection, CancellationToken token)
+    {
+        try
+        {
+            // 2. Fetch from CLI
+            var items = await _service.LoadFolderAsync(path, token);
+
+            // 3. Update DB
+            await _cacheService.SyncItemsAsync(path, items);
+
+            // 4. Update UI if we are still on the same path
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (CurrentPath == path && !token.IsCancellationRequested)
+                {
+                    DisplayItems(items);
+                    UpdateBreadcrumbs(path);
+
+                    if (clearSelection)
+                    {
+                        ClearSelection();
+                    }
+
+                    StatusMessage = $"Loaded {RootItems.Count} items from {path}.";
+                    IsLoading = false;
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // Ignore
+        }
+        catch (InvalidOperationException ex)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => HandleLoadError(path, ex));
+        }
+    }
+
+    private void HandleLoadError(string path, InvalidOperationException ex)
+    {
+        if (ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
+            ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+        {
+            StatusMessage = $"Warning: The path '{path}' no longer exists.";
+            IsWarning = true;
+            return;
+        }
+
+        if (ex.Message.Contains("login first", StringComparison.OrdinalIgnoreCase))
+        {
+            IsAuthenticated = false;
+        }
+
+        StatusMessage = FormatCliError(path, ex.Message);
+        IsWarning = true;
+        
+        // If we are still trying to load this path and failed
+        if (CurrentPath == path)
+        {
+             // Re-throw if it's a fatal error we want to propagate, 
+             // but here we mostly want to show the message.
+        }
+    }
+
+    private void DisplayItems(IEnumerable<DriveItem> items)
+    {
+        RootItems.Clear();
+        foreach (var item in items.OrderByDescending(item => item.IsFolder).ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            RootItems.Add(new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync));
         }
     }
 
@@ -806,5 +937,21 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         return $"Failed to load {path}: {message}";
+    }
+
+    private static string GetParentPath(string path)
+    {
+        if (string.IsNullOrEmpty(path) || path == "/")
+        {
+            return "/";
+        }
+
+        var lastSlash = path.LastIndexOf('/');
+        if (lastSlash <= 0)
+        {
+            return "/";
+        }
+
+        return path[..lastSlash];
     }
 }

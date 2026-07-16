@@ -19,10 +19,11 @@ public partial class App : Application
             var locator = new ProtonDriveCliLocator(settings);
             var executor = new ProtonDriveCliExecutor(locator);
             var service = new ProtonDriveService(executor);
+            var cacheService = new DriveCacheService(Path.Combine(settings.BaseFolder, "cache.db"));
 
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(service, settings)
+                DataContext = new MainWindowViewModel(service, cacheService, settings)
             };
         }
 

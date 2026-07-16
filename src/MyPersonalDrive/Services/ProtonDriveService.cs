@@ -266,7 +266,7 @@ public sealed class ProtonDriveService
         return items;
     }
 
-    private static string CombinePath(string parentPath, string name)
+    public static string CombinePath(string parentPath, string name)
     {
         if (string.IsNullOrWhiteSpace(parentPath) || parentPath == "/")
         {

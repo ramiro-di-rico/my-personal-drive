@@ -66,12 +66,15 @@
       <TreeView ItemsSource="{Binding RootItems}">
         <TreeView.ItemTemplate>
           <DataTemplate x:DataType="vm:DriveNodeViewModel">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" Margin="0,0,0,6">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" 
+                  Margin="0,0,0,6"
+                  Background="Transparent">
               <Button Grid.Column="0"
                       Command="{Binding RowCommand}"
                       ToolTip.Tip="Select item or open folder"
                       HorizontalAlignment="Stretch"
-                      HorizontalContentAlignment="Left">
+                      HorizontalContentAlignment="Left"
+                      Focusable="False">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <TextBlock Text="{Binding Icon}" />
                   <TextBlock Text="{Binding DisplayName}" />
@@ -111,20 +114,42 @@
           </DataTemplate>
         </TreeView.ItemTemplate>
       </TreeView>
-
-      <Border Background="#00000080"
-              IsVisible="{Binding IsLoading}">
-        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
-          <ProgressBar Width="220" IsIndeterminate="True" />
-          <TextBlock HorizontalAlignment="Center" Text="Loading..." />
-        </StackPanel>
-      </Border>
     </Grid>
 
     <Border Grid.Row="3" Grid.Column="1" Margin="0,16,16,16" Padding="16" Width="340" Background="#151922">
       <StackPanel Spacing="10">
         <TextBlock FontSize="18" Text="Status" />
-        <TextBlock TextWrapping="Wrap" Text="{Binding StatusMessage}" />
+        <Border Name="StatusBorder"
+                Padding="8" 
+                CornerRadius="4" 
+                Classes.warning="{Binding IsWarning}"
+                IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Name="WarningIcon"
+                       Text="⚠️" 
+                       VerticalAlignment="Center"
+                       IsVisible="{Binding IsWarning}" />
+            <TextBlock Name="StatusText"
+                       TextWrapping="Wrap" 
+                       Text="{Binding StatusMessage}" 
+                       VerticalAlignment="Center" />
+          </StackPanel>
+          <Border.Styles>
+            <Style Selector="Border#StatusBorder">
+              <Setter Property="Background" Value="Transparent" />
+            </Style>
+            <Style Selector="Border#StatusBorder.warning">
+              <Setter Property="Background" Value="#FFF3CD" />
+            </Style>
+            <Style Selector="TextBlock#StatusText">
+              <Setter Property="Foreground" Value="White" />
+            </Style>
+            <Style Selector="Border#StatusBorder.warning TextBlock#StatusText">
+              <Setter Property="Foreground" Value="#856404" />
+            </Style>
+          </Border.Styles>
+        </Border>
+        
         <TextBlock FontWeight="Bold" Text="Selected item" />
         <TextBlock Text="{Binding SelectedName}" />
         <TextBlock FontWeight="Bold" Text="Type" />
@@ -150,6 +175,11 @@
 
     <Border Grid.Row="4" Grid.ColumnSpan="2" Margin="16,0,16,16" Padding="12" Background="#11151D" CornerRadius="6">
       <StackPanel Spacing="8">
+        <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsLoading}">
+          <ProgressBar Width="120" IsIndeterminate="True" />
+          <TextBlock VerticalAlignment="Center" Text="Loading..." />
+        </StackPanel>
+        
         <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
           <TextBlock FontSize="16" FontWeight="Bold" Text="CLI activity" />
           <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding ActiveCommand}" />

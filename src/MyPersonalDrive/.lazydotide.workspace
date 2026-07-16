@@ -1,0 +1,32 @@
+{
+  "explorerVisible": true,
+  "outputVisible": false,
+  "sidePanelVisible": false,
+  "splitRatio": 0.68,
+  "outputPanelHeight": 18,
+  "explorerColumnWidth": 26,
+  "sidePanelColumnWidth": 30,
+  "wrapMode": "NoWrap",
+  "activeOutputTab": 1,
+  "openFiles": [
+    {
+      "path": "Models/DriveItem.cs",
+      "cursorLine": 1,
+      "cursorColumn": 1,
+      "isActive": false
+    },
+    {
+      "path": "Models/UploadConflictStrategy.cs",
+      "cursorLine": 3,
+      "cursorColumn": 11,
+      "isActive": true
+    }
+  ],
+  "expandedPaths": [
+    ".",
+    "Models"
+  ],
+  "selectedExplorerPath": "Models/UploadConflictStrategy.cs",
+  "breakpoints": [],
+  "launchProfiles": []
+}

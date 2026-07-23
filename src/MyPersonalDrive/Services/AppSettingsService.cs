@@ -4,7 +4,6 @@ namespace MyPersonalDrive.Services;
 
 public sealed class AppSettingsService
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
     private readonly string _settingsPath;
 
     public AppSettingsService()
@@ -25,12 +24,12 @@ public sealed class AppSettingsService
         }
 
         var json = File.ReadAllText(_settingsPath);
-        return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+        return JsonSerializer.Deserialize(json, AppJsonContext.Default.AppSettings) ?? new AppSettings();
     }
 
     public void Save(AppSettings settings)
     {
-        var json = JsonSerializer.Serialize(settings, SerializerOptions);
+        var json = JsonSerializer.Serialize(settings, AppJsonContext.Default.AppSettings);
         File.WriteAllText(_settingsPath, json);
     }
 }

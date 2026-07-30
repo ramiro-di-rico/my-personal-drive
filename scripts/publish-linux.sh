@@ -25,6 +25,7 @@ dotnet publish "$PROJECT" \
   -o "$PUBLISH_DIR"
 
 cp "$PUBLISH_DIR/$APP_BINARY_NAME" "$PACKAGE_DIR/$APP_OUTPUT_NAME"
+cp "$PUBLISH_DIR"/*.so "$PACKAGE_DIR/" 2>/dev/null || true
 cp "$ROOT_DIR/src/MyPersonalDrive/Assets/icon.png" "$PACKAGE_DIR/MyPersonalDrive.png"
 cp "$ROOT_DIR/README.md" "$PACKAGE_DIR/README.md"
 chmod +x "$PACKAGE_DIR/$APP_OUTPUT_NAME"

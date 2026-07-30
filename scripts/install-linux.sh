@@ -19,6 +19,7 @@ fi
 
 mkdir -p "$APP_INSTALL_DIR" "$DESKTOP_DIR" "$ICON_DIR"
 cp "$PACKAGE_DIR/MyPersonalDrive" "$APP_BIN"
+cp "$PACKAGE_DIR"/*.so "$APP_INSTALL_DIR/" 2>/dev/null || true
 cp "$PACKAGE_DIR/MyPersonalDrive.png" "$ICON_DIR/MyPersonalDrive.png"
 chmod +x "$APP_BIN"
 

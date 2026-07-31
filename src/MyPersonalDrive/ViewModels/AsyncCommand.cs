@@ -6,12 +6,14 @@ public sealed class AsyncCommand : ICommand
 {
     private readonly Func<Task> _execute;
     private readonly Func<bool>? _canExecute;
+    private readonly Action<Exception>? _onError;
     private bool _isExecuting;
 
-    public AsyncCommand(Func<Task> execute, Func<bool>? canExecute = null)
+    public AsyncCommand(Func<Task> execute, Func<bool>? canExecute = null, Action<Exception>? onError = null)
     {
         _execute = execute;
         _canExecute = canExecute;
+        _onError = onError;
     }
 
     public event EventHandler? CanExecuteChanged;
@@ -31,6 +33,16 @@ public sealed class AsyncCommand : ICommand
         try
         {
             await _execute();
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when navigation cancels an in-flight operation.
+        }
+        catch (Exception ex)
+        {
+            // This method is `async void`: any exception that escapes here terminates the
+            // process. Route it to the caller instead of letting it propagate.
+            _onError?.Invoke(ex);
         }
         finally
         {

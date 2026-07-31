@@ -17,4 +17,7 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.4" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="MyPersonalDrive.Tests" />
+  </ItemGroup>
 </Project>

@@ -50,20 +50,21 @@ public sealed class MainWindowViewModel : ObservableObject
         _service.CommandStarted += OnCommandStarted;
         _service.CommandOutput += OnCommandOutput;
         _service.CommandFinished += OnCommandFinished;
+        _service.ListingParseWarning += OnListingParseWarning;
 
         RootItems = new ObservableCollection<DriveNodeViewModel>();
         BreadcrumbItems = new ObservableCollection<BreadcrumbSegmentViewModel>();
         UpdateBreadcrumbs(_rootPath);
 
-        AuthenticateCommand = new AsyncCommand(AuthenticateAsync, CanAuthenticate);
-        LogoutCommand = new AsyncCommand(LogoutAsync, CanLogout);
-        RefreshCommand = new AsyncCommand(RefreshAsync, CanRefresh);
-        BackCommand = new AsyncCommand(GoBackAsync, CanGoBack);
-        UploadCommand = new AsyncCommand(UploadAsync, CanUpload);
-        CreateFolderCommand = new AsyncCommand(CreateFolderAsync, CanCreateFolder);
-        ToggleCommandConsoleCommand = new AsyncCommand(ToggleCommandConsoleAsync);
-        DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity);
-        ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity);
+        AuthenticateCommand = new AsyncCommand(AuthenticateAsync, CanAuthenticate, HandleUnexpectedError);
+        LogoutCommand = new AsyncCommand(LogoutAsync, CanLogout, HandleUnexpectedError);
+        RefreshCommand = new AsyncCommand(RefreshAsync, CanRefresh, HandleUnexpectedError);
+        BackCommand = new AsyncCommand(GoBackAsync, CanGoBack, HandleUnexpectedError);
+        UploadCommand = new AsyncCommand(UploadAsync, CanUpload, HandleUnexpectedError);
+        CreateFolderCommand = new AsyncCommand(CreateFolderAsync, CanCreateFolder, HandleUnexpectedError);
+        ToggleCommandConsoleCommand = new AsyncCommand(ToggleCommandConsoleAsync, onError: HandleUnexpectedError);
+        DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity, HandleUnexpectedError);
+        ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, HandleUnexpectedError);
     }
 
     public ObservableCollection<DriveNodeViewModel> RootItems { get; }
@@ -308,7 +309,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError("auth login", ex.Message);
+            StatusMessage = FormatCliError("auth login", ex);
         }
         finally
         {
@@ -329,7 +330,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError("auth logout", ex.Message);
+            StatusMessage = FormatCliError("auth logout", ex);
         }
         finally
         {
@@ -362,7 +363,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             _navigationHistory.Push(previousPath);
             RaiseCommandStates();
-            StatusMessage = FormatCliError(previousPath, ex.Message);
+            StatusMessage = FormatCliError(previousPath, ex);
         }
     }
 
@@ -395,7 +396,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 RaiseCommandStates();
             }
 
-            StatusMessage = FormatCliError(path, ex.Message);
+            StatusMessage = FormatCliError(path, ex);
         }
     }
 
@@ -407,7 +408,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(CurrentPath, ex.Message);
+            StatusMessage = FormatCliError(CurrentPath, ex);
         }
     }
 
@@ -457,7 +458,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(CurrentPath, ex.Message);
+            StatusMessage = FormatCliError(CurrentPath, ex);
         }
         finally
         {
@@ -495,7 +496,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(CurrentPath, ex.Message);
+            StatusMessage = FormatCliError(CurrentPath, ex);
         }
         finally
         {
@@ -527,7 +528,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(item.Path, ex.Message);
+            StatusMessage = FormatCliError(item.Path, ex);
         }
         finally
         {
@@ -567,7 +568,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(item.Path, ex.Message);
+            StatusMessage = FormatCliError(item.Path, ex);
         }
         finally
         {
@@ -603,7 +604,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(item.Path, ex.Message);
+            StatusMessage = FormatCliError(item.Path, ex);
         }
         finally
         {
@@ -632,7 +633,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(item.Path, ex.Message);
+            StatusMessage = FormatCliError(item.Path, ex);
         }
         finally
         {
@@ -751,28 +752,22 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void HandleLoadError(string path, InvalidOperationException ex)
     {
-        if (ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
-            ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+        var kind = (ex as CliException)?.Kind ?? CliErrorKind.Unknown;
+
+        if (kind == CliErrorKind.NotFound)
         {
             StatusMessage = $"Warning: The path '{path}' no longer exists.";
             IsWarning = true;
             return;
         }
 
-        if (ex.Message.Contains("login first", StringComparison.OrdinalIgnoreCase))
+        if (kind == CliErrorKind.NotAuthenticated)
         {
             IsAuthenticated = false;
         }
 
-        StatusMessage = FormatCliError(path, ex.Message);
+        StatusMessage = FormatCliError(path, ex);
         IsWarning = true;
-        
-        // If we are still trying to load this path and failed
-        if (CurrentPath == path)
-        {
-             // Re-throw if it's a fatal error we want to propagate, 
-             // but here we mostly want to show the message.
-        }
     }
 
     private void DisplayItems(IEnumerable<DriveItem> items)
@@ -780,7 +775,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RootItems.Clear();
         foreach (var item in items.OrderByDescending(item => item.IsFolder).ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
         {
-            RootItems.Add(new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync));
+            RootItems.Add(new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, HandleUnexpectedError));
         }
     }
 
@@ -797,7 +792,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 ? "/" + segment
                 : currentPath + "/" + segment;
 
-            BreadcrumbItems.Add(new BreadcrumbSegmentViewModel(segment, currentPath, currentPath == path, NavigateIntoAsync));
+            BreadcrumbItems.Add(new BreadcrumbSegmentViewModel(segment, currentPath, currentPath == path, NavigateIntoAsync, HandleUnexpectedError));
         }
     }
 
@@ -875,8 +870,16 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        await File.WriteAllTextAsync(path, CommandLogText);
-        StatusMessage = $"Saved CLI activity to {path}.";
+        try
+        {
+            await File.WriteAllTextAsync(path, CommandLogText);
+            StatusMessage = $"Saved CLI activity to {path}.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            StatusMessage = $"Failed to save CLI activity to {path}: {ex.Message}";
+            IsWarning = true;
+        }
     }
 
     private async Task ClearActivityAsync()
@@ -910,6 +913,9 @@ public sealed class MainWindowViewModel : ObservableObject
             ActiveCommand = "Idle";
         });
 
+    private void OnListingParseWarning(object? sender, string message)
+        => Dispatcher.UIThread.Post(() => AppendCommandLine($"[warn] {message}"));
+
     private void AppendCommandLine(string line)
     {
         _commandLogLines.Add(line);
@@ -922,9 +928,28 @@ public sealed class MainWindowViewModel : ObservableObject
         RaiseCommandStates();
     }
 
-    private static string FormatCliError(string path, string message)
+    /// <summary>
+    /// Catch-all for exceptions that escape a command's Func&lt;Task&gt; and are not the
+    /// expected InvalidOperationException the CLI layer throws. Without this, AsyncCommand's
+    /// async void Execute would let the exception terminate the process.
+    /// </summary>
+    private void HandleUnexpectedError(Exception ex)
     {
-        if (message.Contains("login first", StringComparison.OrdinalIgnoreCase))
+        Dispatcher.UIThread.Post(() =>
+        {
+            CrashLog.Write(ex);
+            StatusMessage = $"Unexpected error: {ex.Message}";
+            IsWarning = true;
+            AppendCommandLine($"[err] Unexpected error: {ex}");
+            IsLoading = false;
+        });
+    }
+
+    private static string FormatCliError(string path, Exception ex)
+    {
+        var kind = (ex as CliException)?.Kind ?? CliErrorKind.Unknown;
+
+        if (kind == CliErrorKind.NotAuthenticated)
         {
             return path == "auth login"
                 ? "Authentication required. Use Authenticate to sign in."
@@ -933,10 +958,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
         if (path == "auth logout")
         {
-            return $"Logout failed: {message}";
+            return $"Logout failed: {ex.Message}";
         }
 
-        return $"Failed to load {path}: {message}";
+        return $"Failed to load {path}: {ex.Message}";
     }
 
     private static string GetParentPath(string path)

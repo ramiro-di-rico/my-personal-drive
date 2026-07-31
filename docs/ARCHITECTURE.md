@@ -316,7 +316,9 @@ current pattern; if more dialogs are added, consider extracting them into their 
 
 ## 9. Technical debt / known risks
 
-List to keep handy when planning any feature:
+List to keep handy when planning any feature.
+**Remediation plan: [PLAN-TECH-DEBT.md](PLAN-TECH-DEBT.md)** — note that items 1, 7 and 8
+compose into three reachable crashes documented there.
 
 1. **No tests.** There is no test project or fakes; `IProtonDriveCliExecutor` is the natural
    seam to introduce them.

@@ -18,7 +18,7 @@ public partial class App : Application
             var settings = new AppSettingsService();
             var locator = new ProtonDriveCliLocator(settings);
             var executor = new ProtonDriveCliExecutor(locator);
-            var service = new ProtonDriveService(executor);
+            var service = new ProtonDriveService(executor, settings.Load().StrictListingParsing);
             var cacheService = new DriveCacheService(Path.Combine(settings.BaseFolder, "cache.db"));
 
             desktop.MainWindow = new MainWindow

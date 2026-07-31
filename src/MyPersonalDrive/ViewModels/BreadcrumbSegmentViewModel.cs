@@ -2,12 +2,12 @@ namespace MyPersonalDrive.ViewModels;
 
 public sealed class BreadcrumbSegmentViewModel
 {
-    public BreadcrumbSegmentViewModel(string label, string path, bool isCurrent, Func<string, Task> navigateAsync)
+    public BreadcrumbSegmentViewModel(string label, string path, bool isCurrent, Func<string, Task> navigateAsync, Action<Exception>? onError = null)
     {
         Label = label;
         Path = path;
         IsCurrent = isCurrent;
-        OpenCommand = new AsyncCommand(() => navigateAsync(path), () => !isCurrent);
+        OpenCommand = new AsyncCommand(() => navigateAsync(path), () => !isCurrent, onError);
     }
 
     public string Label { get; }

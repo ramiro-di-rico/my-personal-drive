@@ -10,7 +10,7 @@ public sealed class DriveNodeViewModel : ObservableObject
     private readonly Func<DriveItem, Task> _renameItemAsync;
     private readonly Func<DriveItem, Task> _copyItemAsync;
 
-    public DriveNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Func<DriveItem, Task> downloadItemAsync, Func<DriveItem, Task> trashItemAsync, Func<DriveItem, Task> renameItemAsync, Func<DriveItem, Task> copyItemAsync)
+    public DriveNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Func<DriveItem, Task> downloadItemAsync, Func<DriveItem, Task> trashItemAsync, Func<DriveItem, Task> renameItemAsync, Func<DriveItem, Task> copyItemAsync, Action<Exception>? onError = null)
     {
         Item = item;
         _handleRowClickAsync = handleRowClickAsync;
@@ -18,11 +18,11 @@ public sealed class DriveNodeViewModel : ObservableObject
         _trashItemAsync = trashItemAsync;
         _renameItemAsync = renameItemAsync;
         _copyItemAsync = copyItemAsync;
-        RowCommand = new AsyncCommand(HandleRowClickAsync);
-        DownloadCommand = new AsyncCommand(DownloadAsync, () => !Item.IsFolder);
-        TrashCommand = new AsyncCommand(TrashAsync, () => !Item.IsFolder);
-        RenameCommand = new AsyncCommand(RenameAsync);
-        CopyCommand = new AsyncCommand(CopyAsync);
+        RowCommand = new AsyncCommand(HandleRowClickAsync, onError: onError);
+        DownloadCommand = new AsyncCommand(DownloadAsync, () => !Item.IsFolder, onError);
+        TrashCommand = new AsyncCommand(TrashAsync, () => !Item.IsFolder, onError);
+        RenameCommand = new AsyncCommand(RenameAsync, onError: onError);
+        CopyCommand = new AsyncCommand(CopyAsync, onError: onError);
     }
 
     public DriveItem Item { get; }

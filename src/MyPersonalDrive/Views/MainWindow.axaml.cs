@@ -7,11 +7,32 @@ namespace MyPersonalDrive.Views;
 
 public partial class MainWindow : Window
 {
+    private SyncWindow? _syncWindow;
+
     public MainWindow()
     {
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
         Opened += OnOpened;
+    }
+
+    private void OpenSyncWindow(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        if (_syncWindow is null)
+        {
+            _syncWindow = new SyncWindow { DataContext = viewModel.SyncPanel };
+            _syncWindow.Closed += (_, _) => _syncWindow = null;
+            _syncWindow.Show(this);
+        }
+        else
+        {
+            _syncWindow.Activate();
+        }
     }
 
     private async void BrowseCliPath(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

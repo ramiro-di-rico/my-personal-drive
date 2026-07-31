@@ -2,7 +2,9 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.ViewModels;
+using MyPersonalDrive.ViewModels.Sync;
 using MyPersonalDrive.Views;
 
 namespace MyPersonalDrive;
@@ -21,9 +23,15 @@ public partial class App : Application
             var service = new ProtonDriveService(executor, settings.Load().StrictListingParsing);
             var cacheService = new DriveCacheService(Path.Combine(settings.BaseFolder, "cache.db"));
 
+            // Same underlying cache.db as cacheService above; SyncStateStore applies the same
+            // shared DriveDatabaseMigrations, so either can be constructed independently.
+            var syncStateStore = new SyncStateStore(Path.Combine(settings.BaseFolder, "cache.db"));
+            var syncExecutor = new SyncExecutor(service, syncStateStore, new LocalScanner(), new RemoteScanner(service));
+            var syncPanelViewModel = new SyncPanelViewModel(syncStateStore, syncExecutor);
+
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(service, cacheService, settings)
+                DataContext = new MainWindowViewModel(service, cacheService, settings, syncPanelViewModel)
             };
         }
 

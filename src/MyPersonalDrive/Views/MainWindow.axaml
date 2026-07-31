@@ -30,6 +30,9 @@
       <Button ToolTip.Tip="Refresh folder content" Command="{Binding RefreshCommand}">
         <TextBlock Text="🔄" />
       </Button>
+      <Button ToolTip.Tip="Local directory sync" Click="OpenSyncWindow">
+        <TextBlock Text="🔁" />
+      </Button>
     </StackPanel>
 
     <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="16" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">

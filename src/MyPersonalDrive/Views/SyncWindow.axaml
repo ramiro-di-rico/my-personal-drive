@@ -1,0 +1,69 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:MyPersonalDrive.ViewModels.Sync"
+        x:Class="MyPersonalDrive.Views.SyncWindow"
+        x:DataType="vm:SyncPanelViewModel"
+        Title="Sync pairs"
+        Width="820"
+        Height="600">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="16">
+    <StackPanel Grid.Row="0" Spacing="8" Margin="0,0,0,12">
+      <TextBlock FontSize="20" Text="Local directory sync" />
+      <TextBlock Opacity="0.8"
+                 TextWrapping="Wrap"
+                 Text="Mirrors a remote Proton Drive folder into a local directory. Only remote → local (download) sync is implemented so far — local changes are never uploaded or deleted remotely." />
+    </StackPanel>
+
+    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
+      <Button Content="➕ Add pair" Command="{Binding AddPairCommand}" />
+      <Button Content="🔄 Refresh" Command="{Binding RefreshCommand}" />
+    </StackPanel>
+
+    <ScrollViewer Grid.Row="2">
+      <StackPanel Spacing="8">
+        <ItemsControl ItemsSource="{Binding Pairs}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:SyncPairViewModel">
+              <Border Padding="12" Margin="0,0,0,8" Background="#151922" CornerRadius="6">
+                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                  <StackPanel Grid.Column="0" Grid.Row="0" Spacing="4">
+                    <TextBlock FontWeight="Bold" Text="{Binding RemotePath}" />
+                    <TextBlock Opacity="0.7" TextWrapping="Wrap" Text="{Binding LocalPath}" />
+                    <TextBlock Opacity="0.6" Text="{Binding DirectionText}" />
+                    <TextBlock Text="{Binding StatusText}" />
+                  </StackPanel>
+
+                  <StackPanel Grid.Column="1" Grid.Row="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+                    <Button ToolTip.Tip="Preview changes before syncing" Command="{Binding PreviewCommand}">
+                      <TextBlock Text="👁️" />
+                    </Button>
+                    <Button ToolTip.Tip="Sync now" Command="{Binding SyncNowCommand}">
+                      <TextBlock Text="▶️" />
+                    </Button>
+                    <Button ToolTip.Tip="Remove this pair" Command="{Binding RemoveCommand}">
+                      <TextBlock Text="🗑️" />
+                    </Button>
+                  </StackPanel>
+
+                  <ProgressBar Grid.Column="0" Grid.ColumnSpan="2" Grid.Row="1"
+                               Margin="0,8,0,0"
+                               IsIndeterminate="True"
+                               IsVisible="{Binding IsBusy}" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </ScrollViewer>
+
+    <Border Grid.Row="3"
+            Margin="0,12,0,0"
+            Padding="10"
+            Background="#11151D"
+            CornerRadius="6"
+            IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+      <TextBlock TextWrapping="Wrap" Text="{Binding StatusMessage}" />
+    </Border>
+  </Grid>
+</Window>

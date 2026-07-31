@@ -63,11 +63,31 @@
         on-demand "Sync now" (F1's actual target), will matter once F3 adds polling.
       - `MoveItemAsync` on `ProtonDriveService` still isn't wired up (only needed once
         `TwoWay`/rename support lands in F2).
-- [ ] **F1 (UI) — not started.** New Sync tab/panel, "new pair" dialog (remote folder picker +
-      local folder picker via `StorageProvider`, following the existing `Request*Async`
-      pattern), dry-run preview display, "Sync now" button, pair list with status. This is the
-      only piece separating the backend from being genuinely usable end-to-end from the app
-      itself rather than from a throwaway harness.
+- [x] **F1 (UI) — done, pending a manual click-through.** New `SyncPanelViewModel` /
+      `SyncPairViewModel` (kept out of `MainWindowViewModel` per docs/PLAN-TECH-DEBT.md's
+      recommendation), a new `SyncWindow` opened via a 🔁 button in `MainWindow`'s header
+      (non-modal, reused on repeat opens rather than stacking windows), an "Add pair" dialog
+      (remote path text box + local folder picker via `StorageProvider`, following the existing
+      `Request*Async` pattern), and a preview dialog showing the dry-run plan's stats + up to
+      50 action lines with a "Run now" button.
+
+      Only lets the user create `RemoteToLocal` pairs (the only direction `SyncExecutor`
+      implements); cheap validations at creation time (remote path must start with `/`, local
+      path can't be empty/`/`/the home directory — the fuller list in §12, like nested-pair
+      detection and free-space estimation, is deliberately not implemented yet).
+
+      **Visually verified** by temporarily wiring an env-var debug switch (reverted before
+      commit — see the diff history, not present on disk) that opened `SyncWindow` directly,
+      since synthetic mouse input doesn't work in this machine's Wayland session (confirmed via
+      `XTestFakeMotionEvent` — the pointer never actually moved). Screenshots confirmed: the
+      empty-state window renders correctly, and a pair seeded directly into `cache.db` renders
+      its remote/local paths, direction, and formatted "Up to date (<time>)" status correctly,
+      with no Avalonia binding errors in the log.
+      **Not yet verified**: an actual end-to-end click-through (Add pair → Preview → Run now)
+      from within the running app. Keyboard-driven input (`XTestFakeKeyEvent`, unlike the mouse
+      equivalent) *did* work in this session — Tab successfully moved focus between controls —
+      so a future session can likely finish this via Tab+Enter navigation instead of a mouse,
+      or by asking the user to click through it directly.
 - [ ] **F2 onward**: not started.
 
 Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`

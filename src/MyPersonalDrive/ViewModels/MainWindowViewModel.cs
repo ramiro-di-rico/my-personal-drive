@@ -38,11 +38,12 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _selectedOwner = "None";
     private string _selectedShared = "None";
 
-    public MainWindowViewModel(ProtonDriveService service, DriveCacheService cacheService, AppSettingsService settings)
+    public MainWindowViewModel(ProtonDriveService service, DriveCacheService cacheService, AppSettingsService settings, Sync.SyncPanelViewModel syncPanel)
     {
         _service = service;
         _cacheService = cacheService;
         _settings = settings;
+        SyncPanel = syncPanel;
 
         var appSettings = settings.Load();
         _cliPath = appSettings.CliPath;
@@ -70,6 +71,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<DriveNodeViewModel> RootItems { get; }
 
     public ObservableCollection<BreadcrumbSegmentViewModel> BreadcrumbItems { get; }
+
+    public Sync.SyncPanelViewModel SyncPanel { get; }
 
     public AsyncCommand AuthenticateCommand { get; }
 

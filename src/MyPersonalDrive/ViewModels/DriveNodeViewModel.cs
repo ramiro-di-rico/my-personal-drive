@@ -41,7 +41,7 @@ public sealed class DriveNodeViewModel : ObservableObject
 
     public string? SizeText => Item.Size is null ? null : $"{Item.Size:n0} bytes";
 
-    public string? ModifiedText => Item.ModifiedAt;
+    public string? ModifiedText => Item.ModifiedAt?.ToLocalTime().ToString("g");
 
     public string? OwnerText => Item.Owner;
 

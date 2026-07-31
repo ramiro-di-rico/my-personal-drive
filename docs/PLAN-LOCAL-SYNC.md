@@ -3,7 +3,43 @@
 > Goal: allow a remote Proton Drive folder (e.g. `/my-files/Documents`) to be kept in sync
 > with a local directory on disk (e.g. `~/ProtonDrive/Documents`).
 > Design document to attack in the future. See [ARCHITECTURE.md](ARCHITECTURE.md) for the
-> current state.
+> current state. Implementation branch: `feature/local-sync`.
+
+## Status
+
+- [x] **F0 — CLI investigation.** Done against a real authenticated account; see Appendix A.
+      Major findings that changed the design: the CLI exposes a stable `uid` that survives
+      rename/move (resolves §11 outright), a client-computed SHA-1 per file
+      (`activeRevision.value.claimedDigests.sha1`, upgrades §5.4 to hash-first), `filesystem
+      move` exists, folder `download` is recursive, and a ~3.5s per-process cold start that
+      raises the priority of the subtree-caching optimization in §6.2.
+- [x] **F0.5 (partial) — preliminary refactors.** From docs/PLAN-TECH-DEBT.md: `CliException`
+      + typed error kinds, the listing-parser empty-vs-unparseable fix, and the test project
+      were already done on `main` before this branch. On this branch: `ProtonDriveService`'s
+      entry parser was rewritten to the real field names from Appendix A (no more guessed
+      aliases); `DriveItem.ModifiedAt` is now `DateTimeOffset?`, sourced from
+      `activeRevision.value.claimedModificationTime`; `DriveItem` gained `NodeId` (`uid`) and
+      `ContentHash` (`claimedDigests.sha1`); `DriveCacheService` gained a `PRAGMA user_version`
+      migration runner (`SqliteMigrationRunner`) and WAL mode.
+      **Not yet done:** `MoveItemAsync` on `ProtonDriveService` (the CLI supports `filesystem
+      move`, not wired up yet — needed once rename/move actions are implemented in the
+      executor).
+- [x] **F1 (partial) — pure core.** `Services/Sync/PathMapper.cs` and
+      `Services/Sync/SyncReconciler.cs`, plus the full model set (`SyncPair`, `NodeFingerprint`,
+      `SyncPlan`, `SyncAction`, `SyncOperation`, `ConflictReason`, `SyncConflict`,
+      `SyncPlanStats`, `SyncBaselineEntry`, and the three enums). The `SyncQueue`/`SyncPairs`/
+      `SyncState`/`SyncLog` tables from §3.1 are created by migration 3, ahead of schedule,
+      so `SyncStateStore` has a schema to write into. 95 tests pass overall (56 of them
+      reconciler/PathMapper-specific — one per decision-table row, both one-way modes,
+      execution ordering, and stats).
+- [ ] **F1 (remaining)**: `SyncStateStore` (CRUD for the new tables), `LocalScanner`,
+      `RemoteScanner` (BFS, given F0 #4/#11a), a minimal `SyncExecutor` for `RemoteToLocal`
+      downloads only, and the UI (new tab/dialogs, dry-run preview). None of this is started.
+- [ ] **F2 onward**: not started.
+
+Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`
+(the "both sides deleted it" decision-table row needs a distinct effect — delete the stale
+`SyncState` row — from `UpdateBaselineOnly`, which means "record the current state").
 
 ---
 
@@ -175,6 +211,11 @@ public enum SyncDirection { TwoWay, RemoteToLocal, LocalToRemote }
 public enum ConflictPolicy { Ask, KeepBoth, PreferLocal, PreferRemote }
 
 /// Fingerprint of a node on one of the two sides. Comparable across snapshots.
+/// Per Appendix A #3/#14 (verified against the real CLI): on the remote side, `NodeId` is the
+/// CLI's stable `uid` (survives rename/move) and `ContentHash` is `activeRevision.value
+/// .claimedDigests.sha1` when present. On the local side, `NodeId` is left null (or `st_ino`,
+/// see §11) and `ContentHash` is a locally-computed SHA-1, so the two sides are directly
+/// comparable without conversion.
 public sealed record NodeFingerprint(string RelativePath, bool IsFolder, long? Size,
     DateTimeOffset? ModifiedAt, string? NodeId, string? ContentHash);
 
@@ -295,16 +336,27 @@ Not optional; the order matters:
 The `SyncPlan` already comes out sorted from the reconciler; `Priority` in `SyncQueue` encodes
 these 5 bands.
 
-### 5.4 Change detection without hashing
+### 5.4 Change detection — hash-first (updated after F0 #14)
 
-Default criterion (cheap): `Size` differs **or** `ModifiedAt` differs beyond a tolerance.
+F0 confirmed the remote side exposes `activeRevision.value.claimedDigests.sha1`, a SHA-1 the
+CLI's own client computed from the original local content at upload time, and it matched a
+locally-computed `sha1sum` exactly in testing. That upgrades hashing from "expensive optional
+tie-breaker" to the primary criterion:
 
-Tie-breaking criterion (expensive, optional per pair — "content verification"):
-SHA-256 of the local file, cached in `SyncState.ContentHash` and invalidated whenever
-`(size, mtime, inode)` changes. Only used when the cheap criterion says "changed" but we want
-to avoid a useless transfer, and **only makes sense if F0 #14 finds a comparable remote hash**.
-If the remote doesn't expose a hash, the local hash is only useful for detecting renames and
-"false changes" (mtime touched without content changing, typical of `touch` or some editors).
+- **When the remote fingerprint has a hash**: a local file is unchanged iff `(Size, SHA-1)` both
+  match the baseline/remote fingerprint. Compute the local SHA-1 with one file read — cheap
+  relative to the ~3.5s CLI round-trip per command (Appendix A #11a), so there's no real cost
+  argument for skipping it. This eliminates mtime-tolerance edge cases entirely for these files:
+  clock skew, `touch` without content change, and the empty-folder-style false positives all
+  become non-issues because content identity is exact.
+- **When it doesn't** (older revisions predating this field, or a non-standard upload path):
+  fall back to `Size` differs **or** `ModifiedAt` differs beyond a tolerance (§5.5).
+- `SyncState.ContentHash` caches the local SHA-1, invalidated whenever `(size, mtime, inode)`
+  changes, so a file that hasn't been touched since the last scan never gets re-hashed.
+
+This does not change the *shape* of the decision table in §5.2 (`changed(X, B)` is still one
+predicate) — it changes what `changed` means: hash-equality when available, size+mtime-tolerance
+otherwise.
 
 ### 5.5 Time tolerance
 
@@ -474,25 +526,34 @@ Bare minimum:
 
 ---
 
-## 11. The rename / identity problem
+## 11. The rename / identity problem — resolved by F0
 
-With the path as the only identity, moving `a/x.pdf` → `b/x.pdf` remotely looks like
-`delete a/x.pdf` + `create b/x.pdf`, and sync **downloads the file again** (correct but
-expensive) or, worse, in TwoWay mode may **re-upload the original from the local baseline**.
+*(Original framing kept below for context; F0 §Appendix A #3/#8 resolved this outright rather
+than requiring the heuristic mitigation this section originally proposed.)*
 
-Mitigations, in order of preference:
+With the path as the only identity, moving `a/x.pdf` → `b/x.pdf` remotely would look like
+`delete a/x.pdf` + `create b/x.pdf`, and sync would **download the file again** (correct but
+expensive) or, worse, in TwoWay mode **re-upload the original from the local baseline**.
 
-1. **If F0 #3 finds a stable ID**: `SyncState.RemoteNodeId` solves the problem completely.
-   Reconciliation is indexed by ID and rename becomes a first-class action (`RenameRemote` /
-   `RenameLocal`), cheap. **Ask this question first.**
-2. **Rename heuristic**: if in the same cycle `p1` disappears and `p2` appears with identical
-   `(size, mtime)` and the same base file name, treat it as a rename. On the local side,
-   `st_ino` confirms it with certainty. On the remote side it's a gamble: only apply it if the
-   base name also matches, and **fall back to delete+create when there's ambiguity**
-   (more than one candidate) — never guess when there's more than one match.
-3. **Without any of the above**: accept delete+create and document it. With `TrashRemote`
-   (not a permanent delete), the cost of getting it wrong is recoverable, which is exactly why
-   **the engine must always use `trash`, never a permanent delete**.
+**F0 verified the CLI's `uid` is stable across both `filesystem rename` and `filesystem move`**,
+and that `filesystem move` exists as a direct operation (not just rename+copy+trash). So:
+
+1. **Primary mechanism (verified, use this)**: `SyncState.RemoteNodeId` = the CLI's `uid`.
+   Reconciliation on the remote side is indexed by `uid`, not path. When a `uid` known from the
+   baseline reappears at a different path with unchanged `(size, hash)`, emit `RenameRemote` /
+   `MoveRemote` (a single `filesystem move` or `filesystem rename` call) instead of a
+   delete+download pair.
+2. **Local-side equivalent**: `st_ino` (Unix inode) plays the same role for detecting a local
+   rename/move — a path that disappeared and one that appeared with the same inode and
+   unchanged content is a rename, not a delete+create.
+3. **Fallback, now only relevant if a future CLI version or edge case lacks a `uid`** (not
+   observed in F0 testing): treat a disappeared/appeared pair with identical `(size, hash-or-mtime)`
+   and matching base name as a probable rename, but **fall back to delete+create when there's
+   ambiguity** (more than one candidate) — never guess when there's more than one match.
+
+Cross-cutting safety rule, unchanged and still important regardless of which path above applies:
+**the engine must always use `trash`, never a permanent delete**, so a wrong rename/delete
+decision is recoverable.
 
 Cross-cutting safety rule: **never delete locally without a trash**. Move to
 `<LocalPath>/.mypersonaldrive-trash/<date>/` or use the system trash
@@ -577,11 +638,206 @@ The shortest path to something useful is **F0 + F0.5 + F1 ≈ 5 days**.
 
 ## Appendix A — Verified CLI behavior
 
-> **Pending: fill in during F0.** Without this, §5.4, §5.5, §6.2, §7, and §11 are written on
-> assumptions.
+> **F0 complete** (2026-07-31), against `cli-drive@0.4.2+e41620d` / `sdk@0.0.0+e41620d`
+> (`/home/ramiro/Apps/proton-drive`), a real authenticated account. Findings below are cited by
+> question number from §2. Several change the design in ways noted inline; **§3.2, §5.4, §6.2,
+> §7, and §11 should be read together with this appendix, not in isolation** — the old
+> assumption is kept struck through where it matters so the diff is visible.
 
+### #1 — Real JSON shape of `filesystem list --json`
+
+Root is a bare JSON array (not `{ items: [...] }`). Two invocation quirks that are easy to get
+wrong: **`--json`/`-j` must come after the verb and before positional args**
+(`filesystem list --json <path>` works; `--json filesystem list <path>` does not — "Command not
+found"), and this holds for every subcommand, not just `list`. Per-entry shape (file example;
+folders omit `activeRevision`, `mediaType` is literally `"Folder"`):
+
+```json
+{
+  "uid": "rHChrZ...~EJSA0C...",
+  "parentUid": "rHChrZ...~_GRN2n...",
+  "name": { "ok": true, "value": "10825139_1.pdf" },
+  "ownedBy": { "email": "ramiro.di.rico@proton.me" },
+  "type": "file",
+  "mediaType": "application/pdf",
+  "isShared": false,
+  "isSharedPublicly": false,
+  "creationTime": "2026-06-06T14:02:31.000Z",
+  "modificationTime": "2026-06-06T14:02:46.000Z",
+  "totalStorageSize": 6214012,
+  "activeRevision": {
+    "ok": true,
+    "value": {
+      "uid": "rHChrZ...~ZtRcE4...~zP7zq-...",
+      "state": "active",
+      "storageSize": 6214012,
+      "claimedSize": 6196055,
+      "claimedModificationTime": "2026-06-06T14:02:28.502Z",
+      "claimedDigests": { "sha1": "a2abbf57e75de3b7da1312f64080090b5a0514f0", "sha1Verified": false }
+    }
+  },
+  "treeEventScopeId": "rHChrZ..."
+}
 ```
-proton-drive --version           →
-proton-drive filesystem --help   →
-proton-drive filesystem list --json "/my-files"  →
-```
+
+Consequences for the code:
+- `name`/`keyAuthor`/`nameAuthor`/`contentAuthor` are `{ ok, value }` — already handled by the
+  existing nested-value reader in `ProtonDriveService.ReadString`.
+- `ownedBy` is `{ email }`, **not** `{ value }` — the current `ReadString(entry, "owner", "user",
+  "createdBy")` alias guessing never matches this. Needs an explicit reader.
+- `type` is directly `"file"`/`"folder"` (no `directory`/`dir` variants seen) — the substring
+  matching in `TryParseJsonEntry` still works but is over-broad; can be simplified to an exact
+  match.
+- **File size lives at `activeRevision.value.claimedSize`, not a top-level `size`/`bytes`.**
+  `totalStorageSize` is the *encrypted* size on Proton's server (always larger) — using it as
+  "file size" would make every local/remote size comparison in the reconciler wrong. Folders
+  have no `activeRevision` and no size at all.
+- None of `items`/`entries`/`children` wrapper keys were observed — root is always a bare array
+  in this CLI version. The wrapper-key branches in `TryParseJsonListing` are dead code for this
+  CLI version; kept for now since a future CLI version could still wrap (defensive, not harmful).
+
+### #2 — `ModifiedAt`: format and meaning ✅ resolved, and it's better than expected
+
+~~Guessed alias: `modifiedAt`/`updatedAt`/`lastModified`~~ — **none of these exist.** There are
+*three* different timestamps, and picking the wrong one breaks change detection:
+
+| Field | What it is | Verified |
+|---|---|---|
+| `creationTime` | Proton-side node creation event | — |
+| `modificationTime` (top-level) | Proton-side *revision* event time (e.g. upload-completed) | Was 18s **after** the file's real mtime in a test upload — not usable for content comparison |
+| `activeRevision.value.claimedModificationTime` | **The local file's actual mtime at upload time**, client-claimed | Uploaded a file with local mtime `2026-07-31T18:52:12.943Z`; the CLI reported back `claimedModificationTime: "2026-07-31T18:52:12.943Z"` — **exact match to the millisecond** |
+
+**Use `activeRevision.value.claimedModificationTime` as `DriveItem.ModifiedAt`** — it's ISO-8601
+UTC with millisecond precision and is the actual local mtime, not a server timestamp. Folders
+don't have this reliably (an empty `folder.claimedModificationTime` was seen once, absent other
+times) — fall back to top-level `modificationTime` for folders, where exactness matters less
+since folders aren't diffed by content.
+
+### #3 — Stable ID ✅ yes, and it survives rename *and* move
+
+Every node has a `uid` (e.g. `rHChrZ...~EJSA0C...`). Verified directly: uploaded a file, noted
+its `uid`, ran `filesystem rename`, re-listed — **same `uid`**. Then `filesystem move`d it into a
+freshly-created subfolder, re-listed — **still the same `uid`**, only `parentUid` changed.
+
+This resolves §11 in full: **`SyncState.RemoteNodeId` should be the primary correlation key on
+the remote side**, not the rename-heuristic fallback. Renames/moves become first-class,
+cheap operations instead of a guessed delete+create. Revalidate on every CLI upgrade — this is
+inferred from one CLI version's observed behavior, not a documented guarantee.
+
+### #4 — Is `list` recursive? ❌ no, confirmed
+
+`filesystem list [-t TYPE] path` takes one path, no `--recursive`/`--depth` flag exists in
+`--help`. BFS per-folder (§6.2) stands as designed. See #11a below for a cost implication that
+changes how aggressively that BFS needs to cache.
+
+### #5 — Folder download ✅ yes, recursive, confirmed
+
+`filesystem download <path> <localFolder>` on a **folder** path recreated the entire subtree
+locally (`f0-sync-test/subfolder/f0-test-renamed.txt` and all), not just the top-level entry.
+This means the initial full mirror for a `RemoteToLocal` pair can be one `download` call per
+top-level pair folder instead of walking and downloading file-by-file — worth using for the
+*first* sync of a pair, while still tracking individual `SyncAction`s per file for baseline
+bookkeeping and incremental syncs afterward.
+
+### #6 — Does download preserve mtime? ❌ no, confirmed — as the plan assumed
+
+Downloaded the test file (remote `claimedModificationTime` = `18:52:12.943Z`); the local file's
+mtime after download was the download wall-clock time (`18:54:15`), not the claimed time.
+**Confirms §5.5/§7 as designed**: the executor must call `File.SetLastWriteTimeUtc(path,
+claimedModificationTime)` explicitly after every download — never trust the OS mtime a download
+leaves behind.
+
+### #7 — Does upload preserve/claim mtime? ✅ yes — see #2
+
+Answered by #2: the upload path captures the local file's real mtime as
+`claimedModificationTime` with millisecond fidelity. No CLI flag needed; it's automatic.
+
+### #8 — `move` vs rename+copy+trash ✅ `filesystem move` exists
+
+Contradicts the plan's original worst-case assumption ("without `move`, a remote rename =
+copy+trash"). `filesystem move <path>... <targetParentPath>` exists and was used directly in
+the #3 test. Combined with the stable `uid`, §11's `RenameRemote`/`MoveRemote` actions are cheap
+single calls, not a heuristic-guarded copy+trash fallback.
+
+### #9 — Permanent delete vs trash ✅ both exist
+
+`filesystem trash path...`, `filesystem restore path...`, `filesystem delete path...` (permanent,
+untested — did not risk it), `filesystem empty-trash`. The engine should use `trash` exclusively,
+per §11's safety rule; `delete`/`empty-trash` are for a future "empty trash" UI action, not sync.
+
+### #10 — Distinct exit codes / stable messages ⚠️ partially verified
+
+Confirmed one message: a nonexistent path produces `Node not found: <name>`, exit code 1 —
+matches `CliErrorClassifier`'s existing `"not found"` substring rule, no change needed. **Did
+not** verify the "not authenticated" message wording (would have required logging out of a real
+session with no easy way to log back in non-interactively) or quota/network errors. Still exit
+code 1 for everything observed — no distinct codes per failure type. `CliErrorClassifier`
+remains substring-based; revisit if a future session can safely trigger an auth failure.
+
+### #11 — Concurrent processes ✅ fine, but see the cost note below
+
+Ran 4 concurrent `filesystem list` processes against the same account: all 4 succeeded, all
+returned the same 11 items, no errors, no observed lock contention. `TransferQueue`'s planned
+default concurrency of 2 (§7) is conservatively safe; could likely go higher for read-only scans.
+
+**#11a — unplanned but important finding: CLI cold-start cost.** A single `filesystem list`
+call took **~3.5 seconds wall-clock**, almost entirely Node.js/SDK startup (the 4-parallel test
+took ~4.2s total, barely more than one sequential call — the overhead is per-process, not
+per-request). This changes the calculus in §6.2: BFS-per-folder for the remote scanner is
+**far more expensive than "N processes"** suggested — it's **N × ~3.5s**. A drive with 50
+folders is ~3 minutes just to scan, every polling cycle. This raises the priority of:
+- the `RemoteFolderEtag`-based subtree-skip optimization in §6.2, from "nice to have" to
+  "needed before F3's 5-minute polling default is usable on any non-trivial drive", and
+- reconsidering whether the default poll interval (5 min) is even long enough headroom for a
+  large tree — may need to scale the interval to the pair's last observed scan duration.
+
+### #12 — Parseable upload/download progress — not tested
+
+Skipped: would have required a large file and careful stdout capture; the existing
+`CliCommandOutputEventArgs` line-streaming infrastructure is designed to support this once
+needed, so it's deferred without blocking F1/F2 (progress is a UI nicety, not correctness).
+
+### #13 — Limits (size, rate limit, quota) — not tested
+
+Skipped: no safe way to trigger a quota-full or rate-limit condition against a real personal
+account without risking actual account impact. Revisit before F4 (progress/limits polish) or if
+a real sync run surfaces one in the wild — `CliErrorClassifier.Classify` already has a `Quota`
+substring rule ready to receive real message text.
+
+### #14 — Hash/checksum exposed ✅ yes — exact match, changes §5.4 materially
+
+`activeRevision.value.claimedDigests.sha1` is the **client-computed SHA-1 of the original local
+file content at upload time**. Verified exactly: local file's `sha1sum` was
+`97cc8ad38e1de95648240669b5e4ce975eb700a9`; the CLI reported back the identical hash after
+upload. `sha1Verified: false` in both observed files — Proton doesn't seem to re-verify it
+server-side (expected, given end-to-end encryption — the server can't read plaintext content to
+hash it), so treat it as **client-claimed, not server-attested**, but still trustworthy for our
+purposes since *our own* client produced both sides of the comparison.
+
+**This upgrades §5.4 from "hash as an optional expensive tie-breaker" to "hash comparison is
+cheap and exact — use it as the primary criterion, not a fallback."** Rationale: computing a
+local SHA-1 is one file read (cheap relative to the ~3.5s CLI round-trip that dwarfs it either
+way), and it eliminates every mtime-tolerance edge case (touch without content change, clock
+skew, the "empty folder detection" class of bugs) for files that already have a
+`claimedDigests.sha1` on the remote side. Practical policy: **compare `(size, sha1)` when the
+remote side has a hash; fall back to `(size, ModifiedAt-with-tolerance)` only when it doesn't**
+(e.g., very old revisions uploaded before this field existed, or non-standard upload paths).
+
+---
+
+### Net effect on the design
+
+- §3.2 `NodeFingerprint` gains a real, verified meaning for `ContentHash` (SHA-1, not a vague
+  "SHA-256, computed lazily") and `NodeId` (verified stable `uid`).
+- §5.4 change detection: hash-first, not hash-as-tiebreaker (see #14).
+- §6.2 remote scanning: the ~3.5s/process cost (see #11a) makes subtree caching load-bearing,
+  not optional, before F3 ships a polling default.
+- §7 transfer execution: the `File.SetLastWriteTimeUtc` step after download is now a confirmed
+  requirement, not a hedge (see #6).
+- §11 rename problem: solved outright by `uid` + `filesystem move`, not mitigated by heuristics.
+  §11's heuristic (§11.2) becomes dead code for this CLI version — kept in the plan only as a
+  fallback for a hypothetical CLI/account state where `uid` is ever absent, which was not
+  observed.
+- §8 "required changes to existing code": `ProtonDriveService.TryParseJsonEntry` needs a rewrite
+  (not a tweak) to read the real shape above instead of the guessed aliases; `DriveItem` needs
+  `NodeId` and `ContentHash` fields in addition to the already-planned `ModifiedAt` retype.

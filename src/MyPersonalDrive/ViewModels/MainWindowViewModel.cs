@@ -802,7 +802,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectedKind = item.IsFolder ? "Folder" : "File";
         SelectedPath = item.Path;
         SelectedSize = item.Size is null ? "None" : $"{item.Size:n0} bytes";
-        SelectedModified = item.ModifiedAt ?? "None";
+        SelectedModified = item.ModifiedAt is { } modifiedAt ? modifiedAt.ToLocalTime().ToString("g") : "None";
         SelectedOwner = item.Owner ?? "None";
         SelectedShared = item.IsShared ? "Yes" : "No";
         StatusMessage = $"Selected {item.Name}.";

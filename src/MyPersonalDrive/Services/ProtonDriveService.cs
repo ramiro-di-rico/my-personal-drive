@@ -193,96 +193,123 @@ public sealed class ProtonDriveService
         return false;
     }
 
+    /// <summary>
+    /// Reads one entry using the real shape verified against cli-drive@0.4.2 in
+    /// docs/PLAN-LOCAL-SYNC.md Appendix A. Fields are read by their confirmed real names, not
+    /// guessed aliases (see B2.4 in docs/PLAN-TECH-DEBT.md) — an entry whose shape doesn't
+    /// match is skipped rather than silently fabricated, since a wrong guess here is exactly
+    /// the class of bug that made an empty folder look non-empty before B2.1.
+    /// </summary>
     private static bool TryParseJsonEntry(JsonElement entry, string parentPath, out DriveItem item)
     {
-        var name = ReadString(entry, "name", "title", "label") ?? string.Empty;
+        var nodeId = ReadPlainString(entry, "uid");
+        // The CLI's own docs say a name can fail to decrypt or collide; it falls back to the
+        // node UID as the addressable name in that case (`--help`: "node UIDs can be used
+        // instead"). Silently dropping such an entry would make it invisible to sync, which is
+        // the same "phantom delete" failure mode B2.1 fixed for the whole-listing case.
+        var name = ReadOkString(entry, "name") ?? nodeId ?? string.Empty;
         var path = CombinePath(parentPath, name);
-        var type = ReadString(entry, "type", "kind", "entryType") ?? string.Empty;
-        var isFolder = type.Contains("folder", StringComparison.OrdinalIgnoreCase)
-            || type.Contains("directory", StringComparison.OrdinalIgnoreCase)
-            || type.Contains("dir", StringComparison.OrdinalIgnoreCase);
-        var size = ReadLong(entry, "size", "bytes");
+        var type = ReadPlainString(entry, "type") ?? string.Empty;
+        var isFolder = string.Equals(type, "folder", StringComparison.OrdinalIgnoreCase);
+        var owner = ReadNestedPlainString(entry, "ownedBy", "email");
+        var isShared = ReadPlainBool(entry, "isShared");
+
+        long? size = null;
+        DateTimeOffset? modifiedAt = null;
+        string? contentHash = null;
+
+        if (TryGetOkObject(entry, "activeRevision", out var revision))
+        {
+            size = ReadPlainLong(revision, "claimedSize");
+            modifiedAt = ReadPlainDateTimeOffset(revision, "claimedModificationTime");
+            contentHash = ReadNestedPlainString(revision, "claimedDigests", "sha1");
+        }
+
+        // Folders have no activeRevision; their claimed mtime (when present at all) lives at
+        // `folder.claimedModificationTime`. Fall back further to the server-side
+        // `modificationTime`, which is good enough for folders since they aren't diffed by
+        // content the way files are.
+        modifiedAt ??= ReadPlainDateTimeOffset(entry, "folder", "claimedModificationTime")
+            ?? ReadPlainDateTimeOffset(entry, "modificationTime");
 
         item = new DriveItem(
             Path: path,
             Name: name,
             IsFolder: isFolder,
             Size: size,
-            ModifiedAt: ReadString(entry, "modifiedAt", "updatedAt", "lastModified"),
-            Owner: ReadString(entry, "owner", "user", "createdBy"),
-            IsShared: ReadBool(entry, "isShared", "shared", "linkShared"));
+            ModifiedAt: modifiedAt,
+            Owner: owner,
+            IsShared: isShared,
+            NodeId: nodeId,
+            ContentHash: contentHash);
 
         return !string.IsNullOrWhiteSpace(item.Name);
     }
 
-    private static string? ReadString(JsonElement element, params string[] propertyNames)
+    /// <summary>Unwraps the CLI's `{ ok, value }` unwrap pattern used for decryptable string fields.</summary>
+    private static string? ReadOkString(JsonElement element, string propertyName)
     {
-        foreach (var propertyName in propertyNames)
+        if (element.TryGetProperty(propertyName, out var property)
+            && property.ValueKind == JsonValueKind.Object
+            && property.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True
+            && property.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.String)
         {
-            if (!element.TryGetProperty(propertyName, out var property))
-            {
-                continue;
-            }
-
-            if (property.ValueKind == JsonValueKind.String)
-            {
-                return property.GetString();
-            }
-
-            if (property.ValueKind == JsonValueKind.Object && property.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.String)
-            {
-                return value.GetString();
-            }
+            return value.GetString();
         }
 
         return null;
     }
 
-    private static long? ReadLong(JsonElement element, params string[] propertyNames)
+    /// <summary>Unwraps the CLI's `{ ok, value }` pattern where `value` is itself an object (e.g. `activeRevision`).</summary>
+    private static bool TryGetOkObject(JsonElement element, string propertyName, out JsonElement value)
     {
-        foreach (var propertyName in propertyNames)
+        if (element.TryGetProperty(propertyName, out var property)
+            && property.ValueKind == JsonValueKind.Object
+            && property.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True
+            && property.TryGetProperty("value", out value) && value.ValueKind == JsonValueKind.Object)
         {
-            if (!element.TryGetProperty(propertyName, out var property))
-            {
-                continue;
-            }
-
-            if (property.TryGetInt64(out var value))
-            {
-                return value;
-            }
-
-            if (property.ValueKind == JsonValueKind.Object && property.TryGetProperty("value", out var nestedValue) && nestedValue.TryGetInt64(out value))
-            {
-                return value;
-            }
+            return true;
         }
 
-        return null;
-    }
-
-    private static bool ReadBool(JsonElement element, params string[] propertyNames)
-    {
-        foreach (var propertyName in propertyNames)
-        {
-            if (!element.TryGetProperty(propertyName, out var property))
-            {
-                continue;
-            }
-
-            if (property.ValueKind is JsonValueKind.True or JsonValueKind.False)
-            {
-                return property.GetBoolean();
-            }
-
-            if (property.ValueKind == JsonValueKind.Object && property.TryGetProperty("value", out var nestedValue) && nestedValue.ValueKind is JsonValueKind.True or JsonValueKind.False)
-            {
-                return nestedValue.GetBoolean();
-            }
-        }
-
+        value = default;
         return false;
     }
+
+    private static string? ReadPlainString(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+
+    /// <summary>Reads a plain (non-`{ok,value}`-wrapped) nested string, e.g. `ownedBy.email`.</summary>
+    private static string? ReadNestedPlainString(JsonElement element, string propertyName, string nestedPropertyName)
+        => element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.Object
+            ? ReadPlainString(property, nestedPropertyName)
+            : null;
+
+    private static long? ReadPlainLong(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var property) && property.TryGetInt64(out var value)
+            ? value
+            : null;
+
+    private static bool ReadPlainBool(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var property) && property.ValueKind is JsonValueKind.True or JsonValueKind.False
+            && property.GetBoolean();
+
+    private static DateTimeOffset? ReadPlainDateTimeOffset(JsonElement element, string propertyName)
+    {
+        if (element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            && DateTimeOffset.TryParse(property.GetString(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
+        {
+            return parsed;
+        }
+
+        return null;
+    }
+
+    private static DateTimeOffset? ReadPlainDateTimeOffset(JsonElement element, string propertyName, string nestedPropertyName)
+        => element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.Object
+            ? ReadPlainDateTimeOffset(property, nestedPropertyName)
+            : null;
 
     private static IReadOnlyList<DriveItem> ParseTextListing(string output, string parentPath)
     {

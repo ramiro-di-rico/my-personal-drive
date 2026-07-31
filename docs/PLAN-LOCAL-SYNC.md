@@ -24,17 +24,50 @@
       **Not yet done:** `MoveItemAsync` on `ProtonDriveService` (the CLI supports `filesystem
       move`, not wired up yet — needed once rename/move actions are implemented in the
       executor).
-- [x] **F1 (partial) — pure core.** `Services/Sync/PathMapper.cs` and
-      `Services/Sync/SyncReconciler.cs`, plus the full model set (`SyncPair`, `NodeFingerprint`,
-      `SyncPlan`, `SyncAction`, `SyncOperation`, `ConflictReason`, `SyncConflict`,
-      `SyncPlanStats`, `SyncBaselineEntry`, and the three enums). The `SyncQueue`/`SyncPairs`/
-      `SyncState`/`SyncLog` tables from §3.1 are created by migration 3, ahead of schedule,
-      so `SyncStateStore` has a schema to write into. 95 tests pass overall (56 of them
-      reconciler/PathMapper-specific — one per decision-table row, both one-way modes,
-      execution ordering, and stats).
-- [ ] **F1 (remaining)**: `SyncStateStore` (CRUD for the new tables), `LocalScanner`,
-      `RemoteScanner` (BFS, given F0 #4/#11a), a minimal `SyncExecutor` for `RemoteToLocal`
-      downloads only, and the UI (new tab/dialogs, dry-run preview). None of this is started.
+- [x] **F1 (backend) — done.** All of `Services/Sync/`:
+      - `PathMapper` — relative/remote-absolute/local-absolute conversions.
+      - `SyncReconciler` — pure engine, every decision-table row, both one-way modes.
+      - `SyncStateStore` — CRUD for `SyncPairs`/`SyncState`/`SyncQueue`/`SyncLog`, including
+        crash-safety's `ResetRunningToPendingAsync` (not yet called from anywhere — see below).
+      - `ExclusionMatcher` — default ignores (`.git/`, `node_modules/`, `*.tmp`, etc.) plus
+        per-pair extra globs.
+      - `LocalScanner` — stat-only recursive walk to `NodeFingerprint`s; skips symlinks and
+        files modified in the last 2s (still-being-written guard).
+      - `LocalFileHasher` — SHA-1 helper, deliberately *not* called by `LocalScanner` on every
+        scan (see its doc comment) — wired up only where `SyncExecutor` needs it.
+      - `RemoteScanner` — BFS via `ProtonDriveService.LoadFolderAsync` (confirmed non-recursive,
+        Appendix A #4), bounded concurrency (default 3), one wave per depth level.
+      - `SyncExecutor` — scans both sides, reconciles, enqueues durably, then executes.
+        **`RemoteToLocal` only**; throws `NotSupportedException` for `TwoWay`/`LocalToRemote`.
+        Downloads go through a per-operation temp dir then `File.Move` (§7 atomicity), explicitly
+        set the local mtime after (Appendix A #6: download doesn't preserve it), and deletions
+        move to `<LocalPath>/.mypersonaldrive-trash/<yyyy-MM-dd>/...` — never a permanent delete.
+
+      147 tests pass overall. Beyond the pure-core tests, this includes: `SyncStateStoreTests`
+      (pair/baseline/queue/log CRUD, cascade delete, crash recovery), `LocalScannerTests`,
+      `ExclusionMatcherTests`, `RemoteScannerTests` (including a concurrency-bound check),
+      `SyncExecutorTests` (download+mtime, recursive folder creation, trash-not-delete,
+      partial-failure handling, dry-run never touching disk/CLI).
+
+      **Verified against the real CLI and a live account**, not just mocks: created
+      `/my-files/f1-executor-test` with a file and a subfolder, ran `SyncExecutor` against a
+      real local temp directory — preview and run both matched expectations, downloaded files
+      had exactly the right content and the right restored mtime, the folder was created, and
+      cleanup (local temp dir, remote test folder) left no trace.
+
+      **Known gaps, deliberately deferred:**
+      - `ResetRunningToPendingAsync` (crash safety) is implemented and tested but nothing calls
+        it yet — belongs in the composition root once there's an entry point that starts sync.
+      - `RemoteScanner` doesn't yet cache unchanged subtrees (Appendix A #11a's ~3.5s/call
+        finding makes this matter more than the original plan assumed) — fine for a manual,
+        on-demand "Sync now" (F1's actual target), will matter once F3 adds polling.
+      - `MoveItemAsync` on `ProtonDriveService` still isn't wired up (only needed once
+        `TwoWay`/rename support lands in F2).
+- [ ] **F1 (UI) — not started.** New Sync tab/panel, "new pair" dialog (remote folder picker +
+      local folder picker via `StorageProvider`, following the existing `Request*Async`
+      pattern), dry-run preview display, "Sync now" button, pair list with status. This is the
+      only piece separating the backend from being genuinely usable end-to-end from the app
+      itself rather than from a throwaway harness.
 - [ ] **F2 onward**: not started.
 
 Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`

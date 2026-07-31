@@ -153,7 +153,7 @@ public static class SyncReconciler
         if (inL && inR && inB)
         {
             var lChanged = !isFolder && IsChanged(l, b!.LocalAtSync, tolerance);
-            var rChanged = !isFolder && IsChanged(r, b.RemoteAtSync, tolerance);
+            var rChanged = !isFolder && IsChanged(r, b!.RemoteAtSync, tolerance);
 
             if (!lChanged && !rChanged)
             {

@@ -17,6 +17,14 @@ public sealed class SyncExecutor
     /// </summary>
     private static readonly TimeSpan CompletedRetention = TimeSpan.FromDays(1);
 
+    /// <summary>
+    /// How long log entries are kept, and how many per pair. The count is the limit that actually
+    /// bounds the table — the age limit only stops a quiet pair's stale history lingering. 1000 rows
+    /// is far more than the UI shows at once and still a trivially small table.
+    /// </summary>
+    private static readonly TimeSpan LogRetention = TimeSpan.FromDays(30);
+    private const int MaxLogEntriesPerPair = 1000;
+
     private readonly ProtonDriveService _protonDriveService;
     private readonly SyncStateStore _stateStore;
     private readonly ILocalScanner _localScanner;
@@ -58,14 +66,15 @@ public sealed class SyncExecutor
     /// <summary>Scans, reconciles, enqueues the plan durably, then executes it.</summary>
     public async Task<SyncPlan> RunAsync(SyncPair pair, CancellationToken cancellationToken = default)
     {
+        // Housekeeping first, before anything that can fail. Both tables grow with uptime once sync
+        // is automatic, and a pair whose scan throws every cycle would otherwise never prune at all
+        // — precisely the pair generating the most log noise.
+        await PruneHousekeepingAsync(cancellationToken);
+
         var (local, remote, mapper) = await ScanBothSidesAsync(pair, cancellationToken);
         var now = _timeProvider.GetUtcNow();
         var plan = SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote,
             await LoadBaselineAsync(pair, cancellationToken), now);
-
-        // Clear yesterday's completed rows before adding today's. Cheap, and it keeps the queue's
-        // size proportional to outstanding work rather than to how long automatic sync has been on.
-        await _stateStore.PruneCompletedAsync(now - CompletedRetention, cancellationToken);
 
         await _stateStore.EnqueueActionsAsync(pair.Id, plan.Actions, now, cancellationToken);
 
@@ -157,6 +166,25 @@ public sealed class SyncExecutor
         }
 
         return (failureCount, false);
+    }
+
+    /// <summary>
+    /// Keeps the two tables that grow on their own in check. Deliberately best-effort: housekeeping
+    /// failing is not a reason to refuse to sync.
+    /// </summary>
+    private async Task PruneHousekeepingAsync(CancellationToken cancellationToken)
+    {
+        var now = _timeProvider.GetUtcNow();
+        try
+        {
+            await _stateStore.PruneCompletedAsync(now - CompletedRetention, cancellationToken);
+            await _stateStore.PruneLogsAsync(now - LogRetention, MaxLogEntriesPerPair, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Nothing to report to the user: the sync itself is unaffected, and reporting it would
+            // mean writing to the very table we just failed to tidy.
+        }
     }
 
     private Task LogAsync(RunContext context, SyncLogLevel level, string? relativePath, string message, CancellationToken cancellationToken)

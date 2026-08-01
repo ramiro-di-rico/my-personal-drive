@@ -494,6 +494,86 @@ public class SyncStateStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Log_PruneByAge_DropsOldEntriesAndKeepsRecentOnes()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        await sut.LogAsync(pair.Id, SyncLogLevel.Info, "old.txt", "ancient history", T0);
+        await sut.LogAsync(pair.Id, SyncLogLevel.Info, "new.txt", "recent", T0.AddDays(29));
+
+        var removed = await sut.PruneLogsAsync(T0.AddDays(28), maxPerPair: 1000);
+
+        Assert.Equal(1, removed);
+        Assert.Equal("recent", Assert.Single(await sut.GetRecentLogsAsync(pair.Id, 100)).Message);
+    }
+
+    [Fact]
+    public async Task Log_PruneByCount_KeepsTheNewestAndDropsTheRest()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        for (var i = 0; i < 20; i++)
+        {
+            await sut.LogAsync(pair.Id, SyncLogLevel.Info, $"f{i}.txt", $"entry {i}", T0.AddSeconds(i));
+        }
+
+        var removed = await sut.PruneLogsAsync(T0.AddDays(-1), maxPerPair: 5);
+
+        Assert.Equal(15, removed);
+        var kept = await sut.GetRecentLogsAsync(pair.Id, 100);
+        Assert.Equal(5, kept.Count);
+        Assert.Equal("entry 19", kept[0].Message);   // newest survives
+        Assert.Equal("entry 15", kept[^1].Message);  // and exactly the newest five
+    }
+
+    [Fact]
+    public async Task Log_PruneByCount_IsPerPair_SoABusyPairCannotEraseAnothersHistory()
+    {
+        var sut = CreateSut();
+        var chatty = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        var quiet = await sut.CreatePairAsync("/my-files/B", "/home/user/B", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+
+        for (var i = 0; i < 30; i++)
+        {
+            await sut.LogAsync(chatty.Id, SyncLogLevel.Info, $"f{i}.txt", $"chatty {i}", T0.AddSeconds(i));
+        }
+
+        await sut.LogAsync(quiet.Id, SyncLogLevel.Warning, null, "the one thing that happened here", T0);
+
+        await sut.PruneLogsAsync(T0.AddDays(-1), maxPerPair: 5);
+
+        Assert.Equal(5, (await sut.GetRecentLogsAsync(chatty.Id, 100)).Count);
+        Assert.Equal("the one thing that happened here", Assert.Single(await sut.GetRecentLogsAsync(quiet.Id, 100)).Message);
+    }
+
+    [Fact]
+    public async Task Log_PruneByCount_TreatsTheSchedulersOwnEntriesAsTheirOwnGroup()
+    {
+        // The scheduler logs with a null PairId. Those rows must not compete with a pair's history
+        // for the same allowance.
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        for (var i = 0; i < 10; i++)
+        {
+            await sut.LogAsync(pair.Id, SyncLogLevel.Info, null, $"pair {i}", T0.AddSeconds(i));
+            await sut.LogAsync(null, SyncLogLevel.Error, null, $"scheduler {i}", T0.AddSeconds(i));
+        }
+
+        await sut.PruneLogsAsync(T0.AddDays(-1), maxPerPair: 3);
+
+        Assert.Equal(3, (await sut.GetRecentLogsAsync(pair.Id, 100)).Count);
+        Assert.Equal(6, (await sut.GetRecentLogsAsync(null, 100)).Count); // 3 per group, both groups
+    }
+
+    [Fact]
+    public async Task Log_PruneOnAnEmptyTable_IsHarmless()
+    {
+        var sut = CreateSut();
+
+        Assert.Equal(0, await sut.PruneLogsAsync(T0, maxPerPair: 10));
+    }
+
+    [Fact]
     public async Task Log_ThenGetRecent_ReturnsNewestFirst()
     {
         var sut = CreateSut();

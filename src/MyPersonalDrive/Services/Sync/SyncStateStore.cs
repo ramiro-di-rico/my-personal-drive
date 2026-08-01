@@ -634,6 +634,43 @@ public sealed class SyncStateStore
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>
+    /// Bounds the log. Two limits, because either alone leaves a hole: an age limit doesn't stop a
+    /// chatty pair producing an enormous log inside the retention window, and a count limit alone
+    /// keeps stale noise around forever on a pair that has gone quiet.
+    ///
+    /// This matters more than it did when the log was only written by button presses. Automatic sync
+    /// writes an <c>Info</c> row per action per cycle, so the table now grows with uptime rather than
+    /// with use, and nothing else ever removed a row.
+    ///
+    /// The count limit is per pair, so one busy pair can't push another's history out — including
+    /// the scheduler's own rows, which carry a null <c>PairId</c> and form their own group.
+    /// </summary>
+    public async Task<int> PruneLogsAsync(DateTimeOffset olderThan, int maxPerPair, CancellationToken ct = default)
+    {
+        using var connection = OpenConnection();
+
+        var byAge = connection.CreateCommand();
+        byAge.CommandText = "DELETE FROM SyncLog WHERE Timestamp < @Before";
+        byAge.Parameters.AddWithValue("@Before", FormatTimestamp(olderThan));
+        var removed = await byAge.ExecuteNonQueryAsync(ct);
+
+        var byCount = connection.CreateCommand();
+        byCount.CommandText = """
+            DELETE FROM SyncLog WHERE Id IN (
+                SELECT Id FROM (
+                    SELECT Id, ROW_NUMBER() OVER (PARTITION BY PairId ORDER BY Id DESC) AS RowNumber
+                    FROM SyncLog
+                )
+                WHERE RowNumber > @MaxPerPair
+            )
+            """;
+        byCount.Parameters.AddWithValue("@MaxPerPair", maxPerPair);
+        removed += await byCount.ExecuteNonQueryAsync(ct);
+
+        return removed;
+    }
+
     public async Task<IReadOnlyList<SyncLogEntry>> GetRecentLogsAsync(int? pairId, int limit, CancellationToken ct = default)
     {
         using var connection = OpenConnection();

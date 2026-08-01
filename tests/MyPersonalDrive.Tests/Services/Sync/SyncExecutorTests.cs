@@ -541,6 +541,28 @@ public class SyncExecutorTests : IDisposable
         Assert.Contains("conflict", updated.LastError!);
     }
 
+    [Fact]
+    public async Task RunAsync_PrunesTheLog_EvenWhenTheScanItselfFails()
+    {
+        // Housekeeping runs before anything that can throw, on purpose: a pair whose scan fails
+        // every cycle is exactly the one generating the most log noise, and if pruning sat after the
+        // scan it would be the one pair that never got tidied.
+        var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-03-01T12:00:00Z"));
+        var executor = new FakeCliExecutor();
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service), clock);
+
+        await stateStore.LogAsync(pair.Id, SyncLogLevel.Info, null, "ancient history", clock.GetUtcNow());
+        clock.Advance(TimeSpan.FromDays(40));
+        executor.EnqueueOutput(_ => throw new CliException("list", 1, "", "net down", "net down", CliErrorKind.Network));
+
+        await Assert.ThrowsAsync<CliException>(() => sut.RunAsync(pair));
+
+        Assert.Empty(await stateStore.GetRecentLogsAsync(pair.Id, 100));
+    }
+
     // ------------------------------------------------------------------ F4: manual resolution (§5.6)
 
     /// <summary>Parks one Ask conflict on 'a.txt' and returns its queue row, ready to resolve.</summary>

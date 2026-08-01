@@ -304,8 +304,7 @@
          scheduler's copy is. Once overflowed, every later batch re-flags it. Harmless today because
          the flag is purely informational (the executor always does a full scan anyway); a trap if
          an incremental local scan is ever added.
-      - `SyncLog` still has no pruning. The plan assigns that to F4, but note F3 changed its
-         character: it now grows without any user action, an `Info` row per action per cycle.
+      - ~~`SyncLog` still has no pruning.~~ **Done** — see the F4 pruning entry above.
       - Two benign data races in `SyncScheduler`: `PairRuntime.IsDirty` is written from watcher
          threadpool threads and read from the loop, and `_pairs` is mutated by the loop while
          `PumpOnceAsync` is public. Correct today because only the loop calls it in the app; worth
@@ -361,10 +360,21 @@
       The scheduler picks a pause up because it re-reads pair state each refresh rather than trusting
       its startup snapshot — tested by pausing through the store while the scheduler is live, which
       is exactly how the UI does it, and by resuming again.
-- [ ] **F4 (remainder) / F5**: `SyncLog` pruning, fine-grained progress, the remaining §12
-      validations that need IO (local folder writable, warn on a large existing folder, free-space
-      estimate), and F5's rename detection (`MoveItemsAsync` remains uncalled, so a remote move is
-      still download+trash).
+- [x] **F4 (`SyncLog` pruning) — done.** Two limits, since either alone leaves a hole: 30 days of
+      age (which stops a pair that has gone quiet keeping stale history) and **1000 rows per pair**,
+      which is the limit that actually bounds the table — an age cap alone does nothing about a
+      chatty pair inside the window. The count is per pair so one busy pair can't push another's
+      history out, and the scheduler's own rows (null `PairId`) form their own group rather than
+      competing for a pair's allowance.
+
+      Housekeeping moved to the **start** of a cycle, before anything that can throw, and it now
+      covers the queue prune too. A pair whose scan fails every cycle is exactly the one generating
+      the most log noise, and with pruning sitting after the scan it would have been the one pair
+      that never got tidied. Best-effort by design: failing to tidy is not a reason to refuse to
+      sync, and reporting it would mean writing to the table we just failed to write to.
+- [ ] **F4 (remainder) / F5**: fine-grained progress, the remaining §12 validations that need IO
+      (local folder writable, warn on a large existing folder, free-space estimate), and F5's rename
+      detection (`MoveItemsAsync` remains uncalled, so a remote move is still download+trash).
 
 Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`
 (the "both sides deleted it" decision-table row needs a distinct effect — delete the stale

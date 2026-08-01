@@ -63,6 +63,22 @@ public sealed class SyncExecutor
             await LoadBaselineAsync(pair, cancellationToken), _timeProvider.GetUtcNow());
     }
 
+    /// <summary>
+    /// Reports how far a run has got — docs/PLAN-LOCAL-SYNC.md §12's "⟳ Syncing 12/48". Per *action*,
+    /// not per byte: Appendix A #12 never established whether the CLI emits parseable transfer
+    /// progress, and action counts need none of that while still answering the question a user
+    /// actually has, which is whether anything is happening.
+    /// </summary>
+    public sealed record SyncProgress(int Completed, int Total, SyncOperation? Operation, string? RelativePath)
+    {
+        public string Describe() => Operation is null
+            ? $"Scanning… ({Total} action(s) queued)"
+            : $"{Completed}/{Total}  {Operation}  {RelativePath}";
+    }
+
+    /// <summary>Raised on the executing thread; a UI subscriber must marshal to its own thread.</summary>
+    public event EventHandler<SyncProgress>? Progress;
+
     /// <summary>Scans, reconciles, enqueues the plan durably, then executes it.</summary>
     public async Task<SyncPlan> RunAsync(SyncPair pair, CancellationToken cancellationToken = default)
     {
@@ -133,10 +149,18 @@ public sealed class SyncExecutor
     private async Task<(int FailureCount, bool Aborted)> DrainQueueAsync(RunContext context, CancellationToken cancellationToken)
     {
         var failureCount = 0;
-        foreach (var queuedAction in await _stateStore.GetPendingActionsAsync(context.Pair.Id, _timeProvider.GetUtcNow(), cancellationToken))
+        var pending = await _stateStore.GetPendingActionsAsync(context.Pair.Id, _timeProvider.GetUtcNow(), cancellationToken);
+        var completed = 0;
+
+        foreach (var queuedAction in pending)
         {
             cancellationToken.ThrowIfCancellationRequested();
             await _stateStore.MarkRunningAsync(queuedAction.Id, cancellationToken);
+
+            // Reported before the work, not after: each action can take seconds, and a counter that
+            // only moves on completion leaves the slowest item invisible for exactly as long as it is
+            // the one the user is waiting on.
+            Progress?.Invoke(this, new SyncProgress(completed, pending.Count, queuedAction.Operation, queuedAction.RelativePath));
 
             try
             {
@@ -163,6 +187,15 @@ public sealed class SyncExecutor
                     return (failureCount, true);
                 }
             }
+
+            // Counted whether it succeeded or failed: this measures progress through the queue, not
+            // successes, and a failing action is just as done being attempted.
+            completed++;
+        }
+
+        if (pending.Count > 0)
+        {
+            Progress?.Invoke(this, new SyncProgress(completed, pending.Count, null, null));
         }
 
         return (failureCount, false);

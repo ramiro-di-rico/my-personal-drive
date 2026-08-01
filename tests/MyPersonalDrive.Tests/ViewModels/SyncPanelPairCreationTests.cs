@@ -109,6 +109,125 @@ public class SyncPanelPairCreationTests : IDisposable
         Assert.Equal(2, (await store.GetPairsAsync()).Count);
     }
 
+    // ---------------------------------------------------------------- §12 checks that touch the disk
+
+    [Fact]
+    public async Task AnUnwritableLocalFolder_IsRefusedUpFront()
+    {
+        // Worth catching here rather than per file: an unwritable folder fails every single download,
+        // which reads as "sync is broken" instead of "that folder is read-only".
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var (panel, store) = Build();
+        var readOnly = Path.Combine(_root, "read-only");
+        Directory.CreateDirectory(readOnly);
+        File.SetUnixFileMode(readOnly, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+
+        try
+        {
+            Answer(panel, "/my-files/Docs", Path.Combine(readOnly, "target"));
+            await panel.AddPairCommand.ExecuteAsync();
+
+            Assert.Empty(await store.GetPairsAsync());
+            Assert.Contains("Can't write to", panel.StatusMessage);
+        }
+        finally
+        {
+            File.SetUnixFileMode(readOnly, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public async Task AlreadyBusyFolder_AsksBeforeCreatingAnUploadingPair()
+    {
+        var (panel, store) = Build();
+        var busy = Path.Combine(_root, "busy");
+        Directory.CreateDirectory(busy);
+        for (var i = 0; i <= LocalFolderInspector.BusyFolderThreshold; i++)
+        {
+            await File.WriteAllTextAsync(Path.Combine(busy, $"f{i}.txt"), "x");
+        }
+
+        var asked = new List<string>();
+        panel.RequestConfirmationAsync = question =>
+        {
+            asked.Add(question);
+            return Task.FromResult(false); // the user declines
+        };
+
+        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(
+            new NewSyncPairRequest("/my-files/Docs", busy, SyncDirection.LocalToRemote, ConflictPolicy.Ask));
+        await panel.AddPairCommand.ExecuteAsync();
+
+        Assert.Single(asked);
+        Assert.Contains("upload all of them", asked[0]);
+        Assert.Empty(await store.GetPairsAsync());
+        Assert.Contains("Cancelled", panel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task AlreadyBusyFolder_ProceedsWhenConfirmed()
+    {
+        var (panel, store) = Build();
+        var busy = Path.Combine(_root, "busy");
+        Directory.CreateDirectory(busy);
+        for (var i = 0; i <= LocalFolderInspector.BusyFolderThreshold; i++)
+        {
+            await File.WriteAllTextAsync(Path.Combine(busy, $"f{i}.txt"), "x");
+        }
+
+        panel.RequestConfirmationAsync = _ => Task.FromResult(true);
+        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(
+            new NewSyncPairRequest("/my-files/Docs", busy, SyncDirection.TwoWay, ConflictPolicy.Ask));
+
+        await panel.AddPairCommand.ExecuteAsync();
+
+        Assert.Single(await store.GetPairsAsync());
+    }
+
+    [Fact]
+    public async Task ABusyFolder_IsNotQueriedForADownloadOnlyPair()
+    {
+        // A RemoteToLocal pair never uploads, so the existing contents aren't at risk of being sent
+        // anywhere — and the mandatory preview shows any local deletions before they happen.
+        var (panel, store) = Build();
+        var busy = Path.Combine(_root, "busy");
+        Directory.CreateDirectory(busy);
+        for (var i = 0; i <= LocalFolderInspector.BusyFolderThreshold; i++)
+        {
+            await File.WriteAllTextAsync(Path.Combine(busy, $"f{i}.txt"), "x");
+        }
+
+        var asked = false;
+        panel.RequestConfirmationAsync = _ =>
+        {
+            asked = true;
+            return Task.FromResult(true);
+        };
+
+        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(
+            new NewSyncPairRequest("/my-files/Docs", busy, SyncDirection.RemoteToLocal, ConflictPolicy.Ask));
+        await panel.AddPairCommand.ExecuteAsync();
+
+        Assert.False(asked);
+        Assert.Single(await store.GetPairsAsync());
+    }
+
+    [Fact]
+    public async Task AnEmptyFolder_IsNeverQueried()
+    {
+        var (panel, store) = Build();
+        panel.RequestConfirmationAsync = _ => throw new InvalidOperationException("should not have asked");
+
+        Answer(panel, "/my-files/Docs", Path.Combine(_root, "fresh"));
+        await panel.AddPairCommand.ExecuteAsync();
+
+        Assert.Single(await store.GetPairsAsync());
+    }
+
     [Fact]
     public async Task CancellingTheDialog_ChangesNothing()
     {

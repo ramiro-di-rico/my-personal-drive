@@ -482,6 +482,98 @@ public class SyncExecutorTests : IDisposable
         Assert.True(pendingOrFailed.Count <= 1, $"expected at most one live row, found {pendingOrFailed.Count}");
     }
 
+    // ------------------------------------------------------------------ F4: progress (§12)
+
+    [Fact]
+    public async Task RunAsync_ReportsProgressPerAction_BeforeEachOneStarts()
+    {
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath(RemoteRoot, $"[{FileEntry("a.txt", "aaa")}, {FileEntry("b.txt", "bbb")}]");
+        foreach (var name in new[] { "a.txt", "b.txt" })
+        {
+            var captured = name;
+            executor.EnqueueOutput(args =>
+            {
+                File.WriteAllText(Path.Combine(args[3], captured), captured);
+                return "";
+            });
+        }
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        var reports = new List<SyncExecutor.SyncProgress>();
+        sut.Progress += (_, p) => reports.Add(p);
+
+        await sut.RunAsync(pair);
+
+        // Two actions, so two "starting" reports plus a final one, and every report knows the total.
+        Assert.Equal(3, reports.Count);
+        Assert.All(reports, r => Assert.Equal(2, r.Total));
+
+        // Reported before the work, so the first report is at 0 — a counter that only moved on
+        // completion would leave the slowest item invisible for exactly as long as it mattered.
+        Assert.Equal(0, reports[0].Completed);
+        Assert.Equal(SyncOperation.DownloadFile, reports[0].Operation);
+        Assert.Equal("a.txt", reports[0].RelativePath);
+
+        Assert.Equal(1, reports[1].Completed);
+        Assert.Equal("b.txt", reports[1].RelativePath);
+
+        // The last one has no action attached: it says the queue is drained.
+        Assert.Equal(2, reports[^1].Completed);
+        Assert.Null(reports[^1].Operation);
+    }
+
+    [Fact]
+    public async Task RunAsync_WithNothingToDo_ReportsNoProgressAtAll()
+    {
+        // An idle cycle must not make the row flicker through a progress message.
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath(RemoteRoot, "[]");
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        var reports = new List<SyncExecutor.SyncProgress>();
+        sut.Progress += (_, p) => reports.Add(p);
+
+        await sut.RunAsync(pair);
+
+        Assert.Empty(reports);
+    }
+
+    [Fact]
+    public async Task RunAsync_ProgressCountsFailuresToo_SoItNeverStalls()
+    {
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath(RemoteRoot, $"[{FileEntry("a.txt", "aaa")}, {FileEntry("b.txt", "bbb")}]");
+        executor.EnqueueOutput(_ => throw new CliException("download", 1, "", "boom", "boom", CliErrorKind.Network));
+        executor.EnqueueOutput(args =>
+        {
+            File.WriteAllText(Path.Combine(args[3], "b.txt"), "bbb");
+            return "";
+        });
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        var reports = new List<SyncExecutor.SyncProgress>();
+        sut.Progress += (_, p) => reports.Add(p);
+
+        await sut.RunAsync(pair);
+
+        // The counter measures progress through the queue, not successes — an action that failed is
+        // just as done being attempted, and stalling the count would misreport a run that is moving.
+        Assert.Equal(2, reports[^1].Completed);
+    }
+
     // ------------------------------------------------------------------ F5: remote moves (§11)
 
     [Fact]

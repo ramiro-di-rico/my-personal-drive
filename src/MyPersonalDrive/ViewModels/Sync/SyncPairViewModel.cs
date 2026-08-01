@@ -1,3 +1,4 @@
+using Avalonia.Threading;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Sync;
 
@@ -127,8 +128,13 @@ public sealed class SyncPairViewModel : ObservableObject
 
     public string ConflictText => ConflictCount == 1 ? "⚠ 1 conflict" : $"⚠ {ConflictCount} conflicts";
 
-    /// <summary>Shown a dry-run plan; returns true if the user chose to run it immediately.</summary>
-    public Func<SyncPlan, Task<bool>>? RequestPreviewConfirmationAsync { get; set; }
+    /// <summary>
+    /// Shown a dry-run plan plus any warnings about carrying it out; returns true if the user chose
+    /// to run it immediately. Warnings travel with the plan rather than being shown separately
+    /// because they're part of the same decision — "not enough disk space" only means something
+    /// alongside the number of bytes it refers to.
+    /// </summary>
+    public Func<SyncPlan, IReadOnlyList<string>, Task<bool>>? RequestPreviewConfirmationAsync { get; set; }
 
     /// <summary>
     /// Shown the parked conflicts; returns the user's decision per queue row. An absent entry means
@@ -153,7 +159,14 @@ public sealed class SyncPairViewModel : ObservableObject
         {
             var plan = await _executor.PreviewAsync(_pair);
             UpdateStatusText();
-            if (await confirm(plan))
+
+            var warnings = new List<string>();
+            if (LocalFolderInspector.CheckFreeSpace(_pair.LocalPath, plan.Stats.BytesToDownload) is { } spaceWarning)
+            {
+                warnings.Add(spaceWarning);
+            }
+
+            if (await confirm(plan, warnings))
             {
                 await RunAsync();
             }
@@ -168,6 +181,14 @@ public sealed class SyncPairViewModel : ObservableObject
     {
         IsBusy = true;
         StatusText = "Syncing...";
+
+        // Subscribed per run rather than for the object's lifetime: the executor is shared by every
+        // pair and by the scheduler, so a permanent subscription would show one pair another's
+        // progress.
+        void OnProgress(object? _, SyncExecutor.SyncProgress progress)
+            => Dispatcher.UIThread.Post(() => StatusText = $"⟳ {progress.Describe()}");
+
+        _executor.Progress += OnProgress;
         try
         {
             await _executor.RunAsync(_pair);
@@ -175,6 +196,7 @@ public sealed class SyncPairViewModel : ObservableObject
         }
         finally
         {
+            _executor.Progress -= OnProgress;
             IsBusy = false;
             UpdateStatusText();
             await RefreshOutstandingAsync();

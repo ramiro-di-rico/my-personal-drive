@@ -129,9 +129,10 @@ public sealed class RealCliSyncPanelTests : IDisposable
 
         // ---------- Preview, declining to run: the plan is real, and nothing is touched
         SyncPlan? previewed = null;
-        row.RequestPreviewConfirmationAsync = plan =>
+        row.RequestPreviewConfirmationAsync = (plan, warnings) =>
         {
             previewed = plan;
+            Assert.Empty(warnings); // a few bytes into a temp folder: no space warning expected
             return Task.FromResult(false);
         };
         await row.PreviewCommand.ExecuteAsync();
@@ -144,7 +145,7 @@ public sealed class RealCliSyncPanelTests : IDisposable
         Assert.Equal("Never synced", row.StatusText);
 
         // ---------- Preview again, this time accepting: "Run now" performs the sync
-        row.RequestPreviewConfirmationAsync = _ => Task.FromResult(true);
+        row.RequestPreviewConfirmationAsync = (_, _) => Task.FromResult(true);
         await row.PreviewCommand.ExecuteAsync();
 
         Assert.Equal("hello from the panel test", await File.ReadAllTextAsync(Path.Combine(_localRoot, "seed.txt")));

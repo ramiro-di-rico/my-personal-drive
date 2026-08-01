@@ -77,10 +77,16 @@ public sealed class SyncPanelViewModel : ObservableObject
     public Func<Task<NewSyncPairRequest?>>? RequestNewPairAsync { get; set; }
 
     /// <summary>Shown a dry-run plan; returns true if the user chose to run it immediately. Forwarded to every row.</summary>
-    public Func<SyncPlan, Task<bool>>? RequestPreviewConfirmationAsync { get; set; }
+    public Func<SyncPlan, IReadOnlyList<string>, Task<bool>>? RequestPreviewConfirmationAsync { get; set; }
 
     /// <summary>Shown the parked conflicts; returns a decision per queue row. Forwarded to every row.</summary>
     public Func<IReadOnlyList<QueuedSyncAction>, Task<IReadOnlyDictionary<long, ConflictResolution>>>? RequestConflictResolutionsAsync { get; set; }
+
+    /// <summary>
+    /// A yes/no question. Returns false if no handler is attached — an unanswerable question must
+    /// not be treated as consent.
+    /// </summary>
+    public Func<string, Task<bool>>? RequestConfirmationAsync { get; set; }
 
     public async Task InitializeAsync() => await LoadPairsAsync();
 
@@ -190,10 +196,17 @@ public sealed class SyncPanelViewModel : ObservableObject
         {
             // Validated against what's actually in the database, not the rows currently loaded in
             // the panel — the scheduler and other windows can have added pairs since.
-            var validationError = SyncPairValidator.Validate(request.RemotePath, request.LocalPath, await _stateStore.GetPairsAsync());
+            var validationError = SyncPairValidator.Validate(request.RemotePath, request.LocalPath, await _stateStore.GetPairsAsync())
+                                  ?? LocalFolderInspector.CheckWritable(request.LocalPath);
             if (validationError is not null)
             {
                 StatusMessage = validationError;
+                return;
+            }
+
+            if (!await ConfirmBusyFolderAsync(request))
+            {
+                StatusMessage = "Cancelled — no pair was created.";
                 return;
             }
 
@@ -209,6 +222,37 @@ public sealed class SyncPanelViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    /// <summary>
+    /// §12's "warn if it already contains many files". Only asked for directions that would *send*
+    /// those files: a `RemoteToLocal` pair never uploads, so the existing contents are only at risk
+    /// of being moved to the local trash — which the mandatory preview shows before anything happens.
+    /// For the other two directions "Run now" can be pressed without ever opening the preview, so
+    /// this is the only place the user would find out.
+    /// </summary>
+    private async Task<bool> ConfirmBusyFolderAsync(NewSyncPairRequest request)
+    {
+        if (request.Direction == SyncDirection.RemoteToLocal)
+        {
+            return true;
+        }
+
+        var count = LocalFolderInspector.CountEntriesUpTo(request.LocalPath, LocalFolderInspector.BusyFolderThreshold + 1);
+        if (count is null or <= LocalFolderInspector.BusyFolderThreshold)
+        {
+            return true;
+        }
+
+        var confirm = RequestConfirmationAsync;
+        if (confirm is null)
+        {
+            return true; // no way to ask; creating the pair is still gated by the preview
+        }
+
+        return await confirm(
+            $"'{request.LocalPath}' already contains more than {LocalFolderInspector.BusyFolderThreshold} items. " +
+            "Syncing it in this direction will upload all of them to Proton Drive. Continue?");
     }
 
     private static string DirectionArrow(SyncDirection direction) => direction switch

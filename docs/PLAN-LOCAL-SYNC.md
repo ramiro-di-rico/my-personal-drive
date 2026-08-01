@@ -408,8 +408,32 @@
       absent for `RemoteToLocal` pairs, which keep no baseline by design and so have no identity to
       correlate against; making it work there would mean matching on (size, mtime) alone, which is
       the guess §11.3 says to refuse.
-- [ ] **F4 (remainder)**: fine-grained progress, and the §12 validations that need IO (local folder
-      writable, warn on a large existing folder, free-space estimate).
+- [x] **F4 (remainder) — done. F4 complete.** 336 unit tests, four real-account integration tests,
+      AOT clean.
+
+      - **§12's IO validations**, in a new `LocalFolderInspector` kept apart from the pure
+        `SyncPairValidator`. Writability is checked by *probing* rather than by inspecting
+        permissions, since ACLs, mount options and read-only filesystems all give the same practical
+        answer and only a write attempt covers all three; a missing folder is created rather than
+        rejected, because the executor would create it on the first run anyway. A folder that already
+        holds more than 100 items now asks for confirmation — but only for directions that would
+        *send* those files, since a `RemoteToLocal` pair never uploads and its preview shows any local
+        deletions first. The confirmation dialog defaults to Cancel: every question routed through it
+        warns about something big, so a stray Enter should pick the safe answer.
+      - **Free space is checked at preview time, not at pair creation**, which deviates from where
+        §12 lists it. The byte total only exists once the remote side has been scanned, and scanning
+        inside the add-pair dialog would cost a full tree walk at ~3.5s per folder before the user had
+        confirmed anything. The preview is where the numbers are known and where the decision is made.
+        Warnings travel with the plan into the same dialog, because "not enough disk space" only means
+        something next to the byte count it refers to. 10% headroom, since a download also needs room
+        for its temp copy before the move into place.
+      - **Per-action progress** (§12's "⟳ Syncing 12/48"). Per action rather than per byte because
+        Appendix A #12 never established whether the CLI emits parseable transfer progress — and the
+        action count answers the question a user actually has, which is whether anything is happening.
+        Reported *before* each action starts, since each can take seconds and a counter that only
+        moved on completion would leave the slowest item invisible for exactly as long as it was the
+        one being waited on. Failures count too: the counter measures progress through the queue, not
+        successes. An idle cycle reports nothing at all, so the row doesn't flicker.
 
 Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`
 (the "both sides deleted it" decision-table row needs a distinct effect — delete the stale
@@ -1068,6 +1092,46 @@ The shortest path to something useful is **F0 + F0.5 + F1 ≈ 5 days**.
 - **Trash, never delete.** The cost of a false positive from the engine has to be recoverable.
 - **Start with `RemoteToLocal`.** It's the mode that can't destroy data in the cloud, delivers
   immediate value (local backup), and exercises the whole infrastructure.
+
+---
+
+## 16. Backlog — deferred, with enough detail to pick up cold
+
+Everything below was left out on purpose, and the reason is recorded next to each item. Consolidated
+here because it had accumulated across seven different Status entries, which is documented but not
+actionable as a set. Roughly in the order worth doing.
+
+### Correctness / data safety
+
+| # | Item | Why it was deferred, and what to do |
+|---|---|---|
+| B1 | **`PathMapper` doesn't escape a literal `/` inside a node name.** | The CLI escapes it with a backslash when building a path argument (`filesystem --help`), and `ProtonDriveService.CombinePath` doesn't. A node whose real name contains a slash round-trips wrongly *today* — it isn't hypothetical, just unobserved in testing. Fix in `PathMapper`/`CombinePath` together, with a test using such a name against the real account. |
+| B2 | **Two data races in `SyncScheduler`.** | `PairRuntime.IsDirty` is written from watcher threadpool threads and read from the loop; `_pairs` is mutated by the loop while `PumpOnceAsync` is public. Correct today only because the app's loop is the sole caller. Lock `_pairs` and make `IsDirty` interlocked before anything else calls in. |
+| B3 | **`LocalFileWatcher.NeedsFullScan` is never reset.** | Set on buffer overflow; only the scheduler's copy is cleared, so once overflowed every later batch re-flags it. Harmless while the flag is informational (the executor always full-scans anyway) — a trap the moment an incremental local scan exists. |
+
+### Features
+
+| # | Item | Why it was deferred, and what to do |
+|---|---|---|
+| B4 | **Local→remote rename detection** (§11's other half). | Needs local identity. §11.2's `st_ino` isn't reachable from .NET without a platform P/Invoke, which is why this half stopped. The way in is §11.3's content-hash match: a path that vanished locally plus one that appeared whose SHA-1 equals the baseline's recorded `ContentHash`, with **exactly one** candidate — no native code, and the hasher's doc comment already anticipates hashing only when a cheap comparison is inconclusive. Executing it needs `MoveItemsAsync` (written, still uncalled) *plus* `filesystem rename`, because `move` keeps the node's name: same parent + new name is a rename, new parent + same name is a move, and both changing needs both calls. |
+| B5 | **Rename detection for `RemoteToLocal` pairs.** | They keep no baseline by design, so there's no identity to correlate and a remote move still costs a delete+download. Making it work would mean matching on `(size, mtime)` with nothing to confirm it — the guess §11.3 says to refuse. Would require giving one-way pairs a baseline purely for identity. |
+| B6 | **Fine-grained transfer progress.** | Appendix A #12 was never tested: whether `upload`/`download` emit parseable progress on stdout is still unknown. `CliCommandOutputEventArgs` already streams lines, so the plumbing exists. Per-*action* progress ("12 of 48") needs none of that and is the bigger win — see §12. |
+| B7 | **Interactive priority over the CLI gate.** | §9 wants the browser's requests served ahead of sync's. Not built because the semaphore is held per *invocation* (~3.5s), so the worst case is already a short wait. Revisit only if that proves annoying in practice. |
+
+### Verification gaps
+
+| # | Item | Why it was deferred, and what to do |
+|---|---|---|
+| B8 | **The UI click-through last mile.** | The Avalonia layer itself — XAML bindings, the dialogs' own controls, the `StorageProvider` folder picker — has never been operated. Synthetic input reaches nothing in this machine's Wayland session (neither pointer nor keyboard; verified, see F1's entry). The promising route is installing `xvfb` and running the app headless, where XTest works normally; that needs `sudo`. Everything behind the dialogs is covered by `RealCliSyncPanelTests`. |
+| B9 | **Appendix A #13: quota, rate limits, max file size.** | No safe way to trigger them against a real personal account. `CliErrorClassifier` already has a `Quota` rule waiting for real message text; revisit if a real run surfaces one. |
+| B10 | **Appendix A #10: quota and network error wording.** | Same reason. Auth and not-found are verified; these two are still guesses. |
+
+### Known dead code, kept on purpose
+
+- §11.3's rename heuristic is unreachable for this CLI version (every node has a `uid`), kept only as
+  a fallback for a hypothetical CLI that lacks one.
+- `TryParseJsonListing`'s wrapper-key branches (`items`/`entries`/`children`) never match this CLI
+  version's bare-array responses, kept because a future version could wrap.
 
 ---
 

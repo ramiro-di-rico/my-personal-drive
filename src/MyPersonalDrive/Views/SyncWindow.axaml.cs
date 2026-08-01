@@ -25,6 +25,7 @@ public partial class SyncWindow : Window
         viewModel.RequestNewPairAsync = PromptForNewPairAsync;
         viewModel.RequestPreviewConfirmationAsync = ShowPreviewAsync;
         viewModel.RequestConflictResolutionsAsync = ShowConflictsAsync;
+        viewModel.RequestConfirmationAsync = AskAsync;
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -176,7 +177,7 @@ public partial class SyncWindow : Window
         return result;
     }
 
-    private async Task<bool> ShowPreviewAsync(SyncPlan plan)
+    private async Task<bool> ShowPreviewAsync(SyncPlan plan, IReadOnlyList<string> warnings)
     {
         var stats = plan.Stats;
         var lines = new List<string>
@@ -194,6 +195,11 @@ public partial class SyncWindow : Window
         if (stats.Conflicts > 0)
         {
             lines.Add($"⚠ {stats.Conflicts} conflict(s) — both sides changed.");
+        }
+
+        foreach (var warning in warnings)
+        {
+            lines.Add($"⛔ {warning}");
         }
 
         var summary = string.Join("\n", lines);
@@ -350,6 +356,51 @@ public partial class SyncWindow : Window
 
         await dialog.ShowDialog(this);
         return apply ? chosen : new Dictionary<long, ConflictResolution>();
+    }
+
+    /// <summary>
+    /// A plain yes/no. "Cancel" is the default button, not "Continue": every question routed here is
+    /// a warning about doing something big, so the safe answer should be the one a stray Enter picks.
+    /// </summary>
+    private async Task<bool> AskAsync(string question)
+    {
+        var yes = new Button { Content = "Continue", Width = 100 };
+        var no = new Button { Content = "Cancel", IsCancel = true, IsDefault = true, Width = 100 };
+
+        var dialog = new Window
+        {
+            Title = "Are you sure?",
+            Width = 480,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Spacing = 16,
+                Margin = new Avalonia.Thickness(20),
+                Children =
+                {
+                    new TextBlock { Text = question, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 10,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Children = { yes, no }
+                    }
+                }
+            }
+        };
+
+        var confirmed = false;
+        yes.Click += (_, _) =>
+        {
+            confirmed = true;
+            dialog.Close();
+        };
+        no.Click += (_, _) => dialog.Close();
+
+        await dialog.ShowDialog(this);
+        return confirmed;
     }
 
     private static string DescribeReason(string? reason) => reason switch

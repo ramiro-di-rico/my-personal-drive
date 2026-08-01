@@ -268,6 +268,50 @@
       - The scheduler has no UI beyond the on/off toggle — no "next sync at", no per-pair pause
         button (the `IsPaused` column and `SetPairPausedAsync` exist and are respected, just not
         exposed). F4 owns that.
+- [x] **Adversarial review of F2/F3 (2026-08-02).** A hostile pass over the sync code found three
+      real defects, none of which the existing 236 tests caught. Two of them were latent before F3
+      and became live the moment sync started running unattended. All three are fixed; 246 unit
+      tests, four real-account integration tests, AOT publish clean.
+
+      1. **No global gate on CLI processes — the worst of the three.** Appendix A #11 measured that
+         concurrent `proton-drive` processes crash each other ~1 time in 3, and §9 required a global
+         semaphore that was never built. Three independent producers existed — the scheduler's
+         cycles, the panel's "Sync now"/"Preview", and the file browser — and the only
+         serialization (`SyncScheduler._oneCycleAtATime`) covered just the first, since the UI calls
+         `SyncExecutor` directly. Before F3 a collision needed deliberate timing; afterwards the
+         scheduler fires on its own every five minutes, so ordinary browsing raced a sync routinely.
+         Fixed in `ProtonDriveCliExecutor.ExecuteAsync`, the one place every invocation passes
+         through. Held per *invocation* (~3.5s), never per cycle, so an interactive click waits
+         behind at most one command — which is why §9's interactive-priority queue is still
+         deferred rather than needed. Proven with a `mkdir`-lock probe against the real executor
+         (6 concurrent calls; any overlap makes one fail).
+      2. **The queue grew without bound and the work was quadratic.** `EnqueueActionsAsync` inserted
+         blindly, and every run re-proposes actions that haven't succeeded yet — so run N left N
+         rows for the same path, each with a *fresh* retry budget, and the queue never drained.
+         Measured CLI attempts across five runs: 1, 3, 6, 10, 15 (triangular). At F3's cadence that
+         is ~288 runs a day for one unfixable file. Now at most one live row per
+         (pair, path, operation): a live row means "already scheduled" and is skipped, a `Failed`
+         row is revived with a clean attempt count (the only recovery path until F4 has a retry
+         button), and `Done` never blocks a genuine repeat. Plus `PruneCompletedAsync`, called each
+         run, so the table tracks outstanding work rather than uptime. Regression test asserts the
+         attempts-per-run sequence is flat.
+      3. **`Ask` conflicts were re-reported every run**, same blind insert. Since resolving them
+         needs F4's panel they can't be cleared, so the queue grew every five minutes forever. Now
+         one row per conflicting path.
+
+      **Left unfixed, deliberately** (all minor, all recorded here rather than in a comment):
+      - `LocalFileWatcher.NeedsFullScan` is set on buffer overflow and never reset — only the
+         scheduler's copy is. Once overflowed, every later batch re-flags it. Harmless today because
+         the flag is purely informational (the executor always does a full scan anyway); a trap if
+         an incremental local scan is ever added.
+      - `SyncLog` still has no pruning. The plan assigns that to F4, but note F3 changed its
+         character: it now grows without any user action, an `Info` row per action per cycle.
+      - Two benign data races in `SyncScheduler`: `PairRuntime.IsDirty` is written from watcher
+         threadpool threads and read from the loop, and `_pairs` is mutated by the loop while
+         `PumpOnceAsync` is public. Correct today because only the loop calls it in the app; worth
+         locking before anything else calls in.
+      - `RefreshPairsAsync` re-queries the pair list on every 2s tick while no pairs exist (the
+         `_pairs.Count > 0` guard never satisfies). Trivial cost, but pointless.
 - [ ] **F4 onward**: not started.
 
 Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`
@@ -685,6 +729,9 @@ user-triggered remote scans over periodic ones on large trees.
 `TransferQueue`:
 
 - Consumes `SyncQueue` ordered by `(Priority, Id)`.
+- **At most one live row per `(PairId, RelativePath, Operation)`.** Not an optimization: every run
+  re-proposes work that hasn't succeeded, so blind enqueueing made the workload quadratic and
+  non-convergent (see the adversarial-review entry in Status). Completed rows are pruned each run.
 - Bounded concurrency via `SemaphoreSlim`, default value **1** — **not** the 2 originally planned.
   Appendix A #11 (re-tested) found concurrent `proton-drive` processes crash on the CLI's own
   SQLite cache, so the queue must serialize CLI calls entirely.

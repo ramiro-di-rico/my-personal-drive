@@ -237,6 +237,28 @@ public sealed class SyncStateStore
 
     // ---------------------------------------------------------------- SyncQueue
 
+    /// <summary>
+    /// Enqueues a plan's actions, <b>at most one live row per (pair, path, operation)</b>.
+    ///
+    /// This used to insert blindly, which was quadratic and non-convergent once sync became
+    /// automatic. A file that keeps failing is re-proposed by every run, so run N left N rows for
+    /// the same path, each with its own fresh retry budget: measured CLI attempts went
+    /// 1, 3, 6, 10, 15 — triangular — and the queue never drained. At F3's 5-minute cadence that is
+    /// ~288 runs a day for one bad file.
+    ///
+    /// So each action either revives the existing terminal row or is skipped as already queued:
+    /// <list type="bullet">
+    /// <item>A row still <c>Pending</c>/<c>Running</c>/<c>Conflict</c> means the work is already
+    /// scheduled — skip, and let its own retry budget play out.</item>
+    /// <item>A <c>Failed</c> or <c>Skipped</c> row is revived with a clean attempt count. The plan
+    /// re-proposed the action, so the difference still exists and whatever broke may have been
+    /// fixed; this is also the only way a row that exhausted its retries recovers before F4's UI
+    /// exists. Worst case for a permanently broken file is one attempt per cycle.</item>
+    /// <item>A <c>Done</c> row never blocks: the action being proposed again means it is genuinely
+    /// needed again (the file changed once more). Those rows are history, cleared by
+    /// <see cref="PruneCompletedAsync"/>.</item>
+    /// </list>
+    /// </summary>
     public async Task EnqueueActionsAsync(int pairId, IReadOnlyList<SyncAction> actions, DateTimeOffset enqueuedAt, CancellationToken ct = default)
     {
         if (actions.Count == 0)
@@ -250,19 +272,33 @@ public sealed class SyncStateStore
         {
             foreach (var action in actions)
             {
-                var command = connection.CreateCommand();
-                command.Transaction = transaction;
-                command.CommandText = """
-                    INSERT INTO SyncQueue (PairId, RelativePath, Operation, Payload, Priority, State, EnqueuedAt)
-                    VALUES (@PairId, @RelativePath, @Operation, @Payload, @Priority, 'Pending', @EnqueuedAt);
+                var revive = connection.CreateCommand();
+                revive.Transaction = transaction;
+                revive.CommandText = """
+                    UPDATE SyncQueue
+                    SET State = 'Pending', AttemptCount = 0, NextAttemptAt = NULL, LastError = NULL,
+                        CompletedAt = NULL, EnqueuedAt = @EnqueuedAt, Payload = @Payload, Priority = @Priority
+                    WHERE PairId = @PairId AND RelativePath = @RelativePath AND Operation = @Operation
+                      AND State IN ('Failed', 'Skipped');
                     """;
-                command.Parameters.AddWithValue("@PairId", pairId);
-                command.Parameters.AddWithValue("@RelativePath", action.RelativePath);
-                command.Parameters.AddWithValue("@Operation", action.Operation.ToString());
-                command.Parameters.AddWithValue("@Payload", (object?)SerializePayload(action) ?? DBNull.Value);
-                command.Parameters.AddWithValue("@Priority", action.Priority);
-                command.Parameters.AddWithValue("@EnqueuedAt", FormatTimestamp(enqueuedAt));
-                await command.ExecuteNonQueryAsync(ct);
+                AddActionParameters(revive, pairId, action, enqueuedAt);
+                await revive.ExecuteNonQueryAsync(ct);
+
+                // Conditional insert: skipped when the revive above just made a row Pending, or
+                // when one was already live.
+                var insert = connection.CreateCommand();
+                insert.Transaction = transaction;
+                insert.CommandText = """
+                    INSERT INTO SyncQueue (PairId, RelativePath, Operation, Payload, Priority, State, EnqueuedAt)
+                    SELECT @PairId, @RelativePath, @Operation, @Payload, @Priority, 'Pending', @EnqueuedAt
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM SyncQueue
+                        WHERE PairId = @PairId AND RelativePath = @RelativePath AND Operation = @Operation
+                          AND State IN ('Pending', 'Running', 'Conflict')
+                    );
+                    """;
+                AddActionParameters(insert, pairId, action, enqueuedAt);
+                await insert.ExecuteNonQueryAsync(ct);
             }
 
             await transaction.CommitAsync(ct);
@@ -272,6 +308,31 @@ public sealed class SyncStateStore
             await transaction.RollbackAsync(ct);
             throw;
         }
+    }
+
+    private static void AddActionParameters(SqliteCommand command, int pairId, SyncAction action, DateTimeOffset enqueuedAt)
+    {
+        command.Parameters.AddWithValue("@PairId", pairId);
+        command.Parameters.AddWithValue("@RelativePath", action.RelativePath);
+        command.Parameters.AddWithValue("@Operation", action.Operation.ToString());
+        command.Parameters.AddWithValue("@Payload", (object?)SerializePayload(action) ?? DBNull.Value);
+        command.Parameters.AddWithValue("@Priority", action.Priority);
+        command.Parameters.AddWithValue("@EnqueuedAt", FormatTimestamp(enqueuedAt));
+    }
+
+    /// <summary>
+    /// Clears completed history. <c>Done</c> rows have no recovery value — the queue is durable so a
+    /// crash can resume unfinished work, and finished work has nothing to resume — while
+    /// <c>SyncLog</c> keeps the narrative. Without this they accumulate for every file of every
+    /// automatic cycle, forever.
+    /// </summary>
+    public async Task<int> PruneCompletedAsync(DateTimeOffset completedBefore, CancellationToken ct = default)
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM SyncQueue WHERE State = 'Done' AND (CompletedAt IS NULL OR CompletedAt < @Before)";
+        command.Parameters.AddWithValue("@Before", FormatTimestamp(completedBefore));
+        return await command.ExecuteNonQueryAsync(ct);
     }
 
     /// <summary>
@@ -333,9 +394,16 @@ public sealed class SyncStateStore
             {
                 var command = connection.CreateCommand();
                 command.Transaction = transaction;
+                // One row per conflicting path, not one per run. An unresolved `Ask` conflict is
+                // re-reported by every cycle — and since resolving them needs F4's panel, they
+                // cannot be cleared yet, so a blind insert grew the queue every 5 minutes forever.
                 command.CommandText = """
                     INSERT INTO SyncQueue (PairId, RelativePath, Operation, Priority, State, LastError, EnqueuedAt)
-                    VALUES (@PairId, @RelativePath, 'ResolveConflictKeepBoth', @Priority, 'Conflict', @Reason, @EnqueuedAt);
+                    SELECT @PairId, @RelativePath, 'ResolveConflictKeepBoth', @Priority, 'Conflict', @Reason, @EnqueuedAt
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM SyncQueue
+                        WHERE PairId = @PairId AND RelativePath = @RelativePath AND State = 'Conflict'
+                    );
                     """;
                 command.Parameters.AddWithValue("@PairId", pairId);
                 command.Parameters.AddWithValue("@RelativePath", conflict.RelativePath);

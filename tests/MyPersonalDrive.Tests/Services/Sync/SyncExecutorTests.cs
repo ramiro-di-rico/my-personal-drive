@@ -435,6 +435,48 @@ public class SyncExecutorTests : IDisposable
         Assert.NotNull(entry.RemoteAtSync);
     }
 
+    [Fact]
+    public async Task RunAsync_APersistentlyFailingFile_CostsAConstantAmountOfWorkPerRun()
+    {
+        // Regression for the quadratic-work bug. Every run re-proposes the failed download, and
+        // blind enqueueing left one extra row per run, each with a fresh retry budget: measured CLI
+        // attempts went 1, 3, 6, 10, 15. Automatic sync runs ~288 times a day, so this had to
+        // become flat before F4 added more surface on top of it.
+        var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-03-01T12:00:00Z"));
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath(RemoteRoot, $"[{FileEntry("a.txt", "hello")}]");
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service), clock);
+
+        var attemptsPerRun = new List<int>();
+        var attemptsBefore = 0;
+        for (var run = 0; run < 5; run++)
+        {
+            // Plenty of queued failures, so every row in the run fails for the same transient
+            // reason rather than running out of canned responses.
+            for (var i = 0; i < 10; i++)
+            {
+                executor.EnqueueOutput(_ => throw new CliException("download", 1, "", "net down", "net down", CliErrorKind.Network));
+            }
+
+            await sut.RunAsync(pair);
+            var attemptsNow = executor.Calls.Count(c => c.Arguments.Contains("download"));
+            attemptsPerRun.Add(attemptsNow - attemptsBefore);
+            attemptsBefore = attemptsNow;
+            clock.Advance(TimeSpan.FromMinutes(10)); // past the retry backoff
+        }
+
+        // Flat, not triangular: one attempt per run, from the single surviving row.
+        Assert.Equal([1, 1, 1, 1, 1], attemptsPerRun);
+
+        // And exactly one row exists for that action, however many runs went by.
+        var pendingOrFailed = await stateStore.GetPendingActionsAsync(pair.Id);
+        Assert.True(pendingOrFailed.Count <= 1, $"expected at most one live row, found {pendingOrFailed.Count}");
+    }
+
     // ------------------------------------------------------------------ F2: conflicts (§5.6)
 
     [Fact]

@@ -9,6 +9,25 @@ public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
 
     private readonly IProtonDriveCliLocator _locator;
 
+    /// <summary>
+    /// docs/PLAN-LOCAL-SYNC.md §9's global gate over `proton-drive` processes. <b>This is a
+    /// correctness requirement, not a throttle.</b> Appendix A #11 measured that concurrent CLI
+    /// processes crash each other on the CLI's own internal SQLite cache roughly one time in three,
+    /// so two overlapping invocations corrupt work rather than merely slowing it down.
+    ///
+    /// Three independent producers exist — the scheduler's automatic cycles, the sync panel's
+    /// "Sync now"/"Preview", and the file browser — and none of them can see the others. Gating here
+    /// is what makes that safe: every CLI invocation in the app funnels through this method, so one
+    /// semaphore covers all three, which no amount of coordination between them would.
+    ///
+    /// Held per *invocation* (~3.5s), never per sync cycle, so an interactive click waits behind at
+    /// most one command instead of a whole scan. That's why §9's "give priority to interactive
+    /// operations" isn't implemented yet: with this granularity the worst-case wait is already
+    /// short. `auth login` is the one long holder, and blocking sync behind it is correct — nothing
+    /// can succeed without a session anyway.
+    /// </summary>
+    private readonly SemaphoreSlim _oneProcessAtATime = new(1, 1);
+
     public ProtonDriveCliExecutor(IProtonDriveCliLocator locator)
     {
         _locator = locator;
@@ -19,6 +38,19 @@ public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
     public event EventHandler<CliCommandFinishedEventArgs>? CommandFinished;
 
     public async Task<string> ExecuteAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken = default, TimeSpan? timeout = null)
+    {
+        await _oneProcessAtATime.WaitAsync(cancellationToken);
+        try
+        {
+            return await ExecuteSerializedAsync(arguments, cancellationToken, timeout);
+        }
+        finally
+        {
+            _oneProcessAtATime.Release();
+        }
+    }
+
+    private async Task<string> ExecuteSerializedAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken, TimeSpan? timeout)
     {
         var fileName = _locator.Locate();
         var commandText = FormatCommandText(fileName, arguments);

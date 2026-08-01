@@ -253,6 +253,111 @@ public class SyncStateStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Queue_ReEnqueuingAPendingAction_DoesNotCreateASecondRow()
+    {
+        // Regression for a quadratic-work bug: every run re-proposes actions that haven't happened
+        // yet, so blind inserts left N rows for one path after N runs, each with a fresh retry
+        // budget. Measured CLI attempts went 1, 3, 6, 10, 15 and the queue never drained.
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        var action = new SyncAction(SyncOperation.DownloadFile, "a.txt", null, 1, 1000);
+
+        for (var run = 0; run < 5; run++)
+        {
+            await sut.EnqueueActionsAsync(pair.Id, [action], T0.AddMinutes(run * 5));
+        }
+
+        Assert.Single(await sut.GetPendingActionsAsync(pair.Id));
+    }
+
+    [Fact]
+    public async Task Queue_ReEnqueuingAFailedAction_RevivesTheRowWithAFreshAttemptCount()
+    {
+        // The only route back for a row that exhausted its retries, until F4 offers a retry button.
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        var action = new SyncAction(SyncOperation.DownloadFile, "a.txt", null, 1, 1000);
+        await sut.EnqueueActionsAsync(pair.Id, [action], T0);
+        var queued = Assert.Single(await sut.GetPendingActionsAsync(pair.Id));
+        await sut.MarkFailedAsync(queued.Id, "permanent", nextAttemptAt: null);
+        Assert.Empty(await sut.GetPendingActionsAsync(pair.Id));
+
+        await sut.EnqueueActionsAsync(pair.Id, [action], T0.AddMinutes(5));
+
+        var revived = Assert.Single(await sut.GetPendingActionsAsync(pair.Id));
+        Assert.Equal(queued.Id, revived.Id); // the same row, not a second one
+        Assert.Equal(0, revived.AttemptCount);
+        Assert.Null(revived.LastError);
+    }
+
+    [Fact]
+    public async Task Queue_ADoneActionNeverBlocksARepeat_BecauseTheFileMayHaveChangedAgain()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        var action = new SyncAction(SyncOperation.DownloadFile, "a.txt", null, 1, 1000);
+        await sut.EnqueueActionsAsync(pair.Id, [action], T0);
+        var first = Assert.Single(await sut.GetPendingActionsAsync(pair.Id));
+        await sut.MarkDoneAsync(first.Id, T0.AddSeconds(5));
+
+        await sut.EnqueueActionsAsync(pair.Id, [action], T0.AddMinutes(5));
+
+        var second = Assert.Single(await sut.GetPendingActionsAsync(pair.Id));
+        Assert.NotEqual(first.Id, second.Id);
+    }
+
+    [Fact]
+    public async Task Queue_DifferentOperationsOnTheSamePath_AreIndependentRows()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.TwoWay, ConflictPolicy.Ask);
+
+        await sut.EnqueueActionsAsync(pair.Id, [
+            new SyncAction(SyncOperation.DownloadFile, "a.txt", null, 1, 1000),
+            new SyncAction(SyncOperation.UpdateBaselineOnly, "a.txt", null, null, 3000),
+        ], T0);
+
+        Assert.Equal(2, (await sut.GetPendingActionsAsync(pair.Id)).Count);
+    }
+
+    [Fact]
+    public async Task Queue_PruneCompleted_ClearsFinishedRowsButKeepsOutstandingWork()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        await sut.EnqueueActionsAsync(pair.Id, [
+            new SyncAction(SyncOperation.DownloadFile, "done.txt", null, 1, 1000),
+            new SyncAction(SyncOperation.DownloadFile, "pending.txt", null, 1, 1000),
+        ], T0);
+        var rows = await sut.GetPendingActionsAsync(pair.Id);
+        await sut.MarkDoneAsync(rows.Single(r => r.RelativePath == "done.txt").Id, T0);
+
+        // Too recent to prune yet...
+        Assert.Equal(0, await sut.PruneCompletedAsync(T0.AddDays(-1)));
+
+        // ...then old enough.
+        Assert.Equal(1, await sut.PruneCompletedAsync(T0.AddDays(1)));
+        Assert.Equal("pending.txt", Assert.Single(await sut.GetPendingActionsAsync(pair.Id)).RelativePath);
+    }
+
+    [Fact]
+    public async Task Conflicts_AreReportedOncePerPath_NotOncePerRun()
+    {
+        // An `Ask` conflict is re-reported by every cycle and cannot be resolved until F4's panel
+        // exists, so a blind insert grew the queue every 5 minutes indefinitely.
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.TwoWay, ConflictPolicy.Ask);
+        var conflict = new SyncConflict("a.txt", ConflictReason.BothChanged);
+
+        for (var run = 0; run < 5; run++)
+        {
+            await sut.EnqueueConflictsAsync(pair.Id, [conflict], T0.AddMinutes(run * 5));
+        }
+
+        Assert.Single(await sut.GetConflictActionsAsync(pair.Id));
+    }
+
+    [Fact]
     public async Task Queue_RowAwaitingItsBackoff_IsNotHandedOutUntilTheTimePasses()
     {
         var sut = CreateSut();

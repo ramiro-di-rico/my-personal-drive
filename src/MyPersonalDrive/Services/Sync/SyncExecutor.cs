@@ -11,6 +11,12 @@ namespace MyPersonalDrive.Services.Sync;
 /// </summary>
 public sealed class SyncExecutor
 {
+    /// <summary>
+    /// How long a finished queue row is kept. Long enough to be useful when diagnosing "what did it
+    /// do overnight", short enough that the table doesn't grow with uptime.
+    /// </summary>
+    private static readonly TimeSpan CompletedRetention = TimeSpan.FromDays(1);
+
     private readonly ProtonDriveService _protonDriveService;
     private readonly SyncStateStore _stateStore;
     private readonly ILocalScanner _localScanner;
@@ -56,6 +62,10 @@ public sealed class SyncExecutor
         var now = _timeProvider.GetUtcNow();
         var plan = SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote,
             await LoadBaselineAsync(pair, cancellationToken), now);
+
+        // Clear yesterday's completed rows before adding today's. Cheap, and it keeps the queue's
+        // size proportional to outstanding work rather than to how long automatic sync has been on.
+        await _stateStore.PruneCompletedAsync(now - CompletedRetention, cancellationToken);
 
         await _stateStore.EnqueueActionsAsync(pair.Id, plan.Actions, now, cancellationToken);
 

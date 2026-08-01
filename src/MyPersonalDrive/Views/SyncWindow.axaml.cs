@@ -186,6 +186,11 @@ public partial class SyncWindow : Window
             $"🗑 {stats.ToDeleteLocal} local item(s) to local trash, {stats.ToTrashRemote} remote item(s) to Proton's trash.",
         };
 
+        if (stats.FilesToMoveLocally > 0)
+        {
+            lines.Add($"↔ {stats.FilesToMoveLocally} file(s) moved to follow Proton Drive — no re-download needed.");
+        }
+
         if (stats.Conflicts > 0)
         {
             lines.Add($"⚠ {stats.Conflicts} conflict(s) — both sides changed.");

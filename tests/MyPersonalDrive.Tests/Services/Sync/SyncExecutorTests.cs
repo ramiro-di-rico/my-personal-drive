@@ -20,10 +20,15 @@ public class SyncExecutorTests : IDisposable
         File.Delete(_dbPath);
     }
 
-    private static string FileEntry(string name, string content, string modifiedAt = "2026-01-01T00:00:00.000Z")
+    /// <summary>
+    /// <paramref name="uid"/> and <paramref name="hash"/> default to being derived from the name,
+    /// which is convenient until a test needs a node to keep its identity across a rename — that's
+    /// precisely what move detection correlates on, so those tests pass them explicitly.
+    /// </summary>
+    private static string FileEntry(string name, string content, string modifiedAt = "2026-01-01T00:00:00.000Z", string? uid = null, string? hash = null)
         => $$"""
             {
-              "uid": "uid-{{name}}", "parentUid": "parent",
+              "uid": "{{uid ?? $"uid-{name}"}}", "parentUid": "parent",
               "name": { "ok": true, "value": "{{name}}" },
               "ownedBy": { "email": "ramiro.di.rico@proton.me" },
               "type": "file", "isShared": false,
@@ -33,7 +38,7 @@ public class SyncExecutorTests : IDisposable
                 "value": {
                   "claimedSize": {{content.Length}},
                   "claimedModificationTime": "{{modifiedAt}}",
-                  "claimedDigests": { "sha1": "hash-{{name}}" }
+                  "claimedDigests": { "sha1": "{{hash ?? $"hash-{name}"}}" }
                 }
               }
             }
@@ -475,6 +480,116 @@ public class SyncExecutorTests : IDisposable
         // And exactly one row exists for that action, however many runs went by.
         var pendingOrFailed = await stateStore.GetPendingActionsAsync(pair.Id);
         Assert.True(pendingOrFailed.Count <= 1, $"expected at most one live row, found {pendingOrFailed.Count}");
+    }
+
+    // ------------------------------------------------------------------ F5: remote moves (§11)
+
+    [Fact]
+    public async Task RunAsync_TwoWay_ARemoteRename_MovesTheLocalFileWithoutDownloadingItAgain()
+    {
+        const string uid = "uid-stable";
+        const string hash = "hash-stable";
+
+        var executor = new FakeCliExecutor();
+        executor.EnqueueOutput($"[{FileEntry("x.pdf", "content", uid: uid, hash: hash)}]"); // run 1: scan
+        executor.EnqueueOutput(args =>                                                       // run 1: download
+        {
+            File.WriteAllText(Path.Combine(args[3], "x.pdf"), "content");
+            return "";
+        });
+        // Run 2: the same node — same uid, same hash — now reported under a different name.
+        executor.EnqueueOutput($"[{FileEntry("y.pdf", "content", uid: uid, hash: hash)}]");
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        await sut.RunAsync(pair);
+        Assert.True(File.Exists(Path.Combine(_localRoot, "x.pdf")));
+        var downloadsAfterFirstRun = executor.Calls.Count(c => c.Arguments.Contains("download"));
+
+        var plan = await sut.RunAsync(pair);
+
+        Assert.Equal(1, plan.Stats.FilesToMoveLocally);
+        Assert.False(File.Exists(Path.Combine(_localRoot, "x.pdf")));
+        Assert.Equal("content", await File.ReadAllTextAsync(Path.Combine(_localRoot, "y.pdf")));
+
+        // The point of the whole feature: no bytes moved over the network.
+        Assert.Equal(downloadsAfterFirstRun, executor.Calls.Count(c => c.Arguments.Contains("download")));
+
+        // Nor was it treated as a deletion — the file must not be sitting in the local trash.
+        Assert.Empty(Directory.GetFiles(_localRoot, "x.pdf", SearchOption.AllDirectories));
+
+        // The baseline follows the file: one row, at the new path.
+        var baseline = await stateStore.GetBaselineAsync(pair.Id);
+        Assert.Equal(["y.pdf"], baseline.Keys);
+        Assert.Equal(uid, baseline["y.pdf"].RemoteAtSync!.NodeId);
+    }
+
+    [Fact]
+    public async Task RunAsync_TwoWay_AfterAMove_TheNextRunHasNothingLeftToDo()
+    {
+        const string uid = "uid-stable";
+        const string hash = "hash-stable";
+
+        // Strictly ordered responses: RespondForPath would answer run 1's scan too, which is not
+        // what this scenario is about.
+        var executor = new FakeCliExecutor();
+        executor.EnqueueOutput($"[{FileEntry("x.pdf", "content", uid: uid, hash: hash)}]"); // run 1: scan
+        executor.EnqueueOutput(args =>                                                       // run 1: download
+        {
+            File.WriteAllText(Path.Combine(args[3], "x.pdf"), "content");
+            return "";
+        });
+        executor.EnqueueOutput($"[{FileEntry("y.pdf", "content", uid: uid, hash: hash)}]"); // run 2: scan, renamed
+        executor.EnqueueOutput($"[{FileEntry("y.pdf", "content", uid: uid, hash: hash)}]"); // run 3: scan, settled
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        await sut.RunAsync(pair);
+        await sut.RunAsync(pair); // performs the move
+
+        // Converged: if the baseline hadn't been rewritten correctly this would re-download or
+        // re-delete forever.
+        Assert.Empty((await sut.RunAsync(pair)).Actions);
+        Assert.Equal(SyncPairStatus.Ok, (await stateStore.GetPairAsync(pair.Id))!.LastStatus);
+    }
+
+    [Fact]
+    public async Task RunAsync_TwoWay_AMoveIntoANewFolder_CreatesTheFolderFirst()
+    {
+        const string uid = "uid-stable";
+        const string hash = "hash-stable";
+
+        var executor = new FakeCliExecutor();
+        executor.EnqueueOutput($"[{FileEntry("x.pdf", "content", uid: uid, hash: hash)}]"); // run 1: scan root
+        executor.EnqueueOutput(args =>                                                       // run 1: download
+        {
+            File.WriteAllText(Path.Combine(args[3], "x.pdf"), "content");
+            return "";
+        });
+        // Run 2: the node now lives inside a folder that doesn't exist locally yet. The scanner
+        // walks one depth level per wave with concurrency 1, so the order is root then archive.
+        executor.EnqueueOutput($"[{FolderEntry("archive")}]");
+        executor.EnqueueOutput($"[{FileEntry("x.pdf", "content", uid: uid, hash: hash)}]");
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        await sut.RunAsync(pair);
+        var plan = await sut.RunAsync(pair);
+
+        // The folder creation is planned ahead of the move, or the move would have nowhere to land.
+        var operations = plan.Actions.Select(a => a.Operation).ToList();
+        Assert.Contains(SyncOperation.CreateLocalFolder, operations);
+        Assert.True(operations.IndexOf(SyncOperation.CreateLocalFolder) < operations.IndexOf(SyncOperation.RenameLocal));
+        Assert.Equal("content", await File.ReadAllTextAsync(Path.Combine(_localRoot, "archive", "x.pdf")));
     }
 
     // ------------------------------------------------------------------ F2: conflicts (§5.6)

@@ -38,8 +38,24 @@ public sealed class RealCliTwoWaySyncTests : IDisposable
         var cliPath = Environment.GetEnvironmentVariable("MYPERSONALDRIVE_CLI")
                       ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Apps", "proton-drive");
         _service = new ProtonDriveService(new ProtonDriveCliExecutor(new FixedPathLocator(cliPath)));
-        _service.CommandStarted += (_, e) => _output.WriteLine($"$ {e.CommandText}");
+        _service.CommandStarted += (_, e) =>
+        {
+            _output.WriteLine($"$ {e.CommandText}");
+            if (e.CommandText.Contains(" download ", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref _downloadCount);
+            }
+        };
     }
+
+    private int _downloadCount;
+
+    /// <summary>
+    /// How many `filesystem download` invocations have been issued. The real executor doesn't record
+    /// calls the way the fake does, so this counts them off the command stream — which is what makes
+    /// "the rename transferred nothing" an assertion rather than an assumption.
+    /// </summary>
+    private int CountDownloads() => Volatile.Read(ref _downloadCount);
 
     public void Dispose()
     {
@@ -127,6 +143,26 @@ public sealed class RealCliTwoWaySyncTests : IDisposable
         Assert.Single(remoteAfterThird.Keys.Where(k => k.StartsWith("local-only", StringComparison.Ordinal)));
         Assert.Equal("edited on this machine, definitely longer than before".Length, remoteAfterThird["local-only.txt"].Size);
 
+        // ---------- a real remote rename must move the local file, not re-download it (§11)
+        // This is the claim worth checking against the live CLI rather than a mock: that the `uid`
+        // really does survive `filesystem rename`, which is what the whole optimization rests on.
+        await _service.RenameItemAsync($"{_remoteRoot}/local-only.txt", "renamed-remotely.txt");
+        var downloadsBeforeRename = CountDownloads();
+
+        var renameRun = await sut.RunAsync(pair);
+        _output.WriteLine($"rename run: {string.Join(", ", renameRun.Actions.Select(a => $"{a.Operation} {a.RelativePath}"))}");
+
+        Assert.Equal(1, renameRun.Stats.FilesToMoveLocally);
+        Assert.Equal(0, renameRun.Stats.FilesToDownload);
+        Assert.Equal(downloadsBeforeRename, CountDownloads()); // not a single byte re-transferred
+        Assert.True(File.Exists(Path.Combine(_localRoot, "renamed-remotely.txt")));
+        Assert.False(File.Exists(Path.Combine(_localRoot, "local-only.txt")));
+        Assert.Equal("edited on this machine, definitely longer than before",
+            await File.ReadAllTextAsync(Path.Combine(_localRoot, "renamed-remotely.txt")));
+
+        // And it converges: the run after the move has nothing left to do.
+        Assert.Empty((await sut.RunAsync(pair)).Actions);
+
         // ---------- run 4: a local delete trashes the remote copy, never permanently deletes it
         File.Delete(downloaded);
         var fourth = await sut.RunAsync(pair);
@@ -153,9 +189,11 @@ public sealed class RealCliTwoWaySyncTests : IDisposable
         Assert.Null(finalPair.LastError);
 
         var baseline = await stateStore.GetBaselineAsync(pair.Id);
-        Assert.Equal(["local-folder", "local-only.txt"], baseline.Keys.OrderBy(k => k, StringComparer.Ordinal));
-        Assert.NotNull(baseline["local-only.txt"].RemoteAtSync!.NodeId);   // the CLI's stable uid
-        Assert.NotNull(baseline["local-only.txt"].LocalAtSync!.ContentHash); // our own SHA-1
+        // 'local-only.txt' now lives under the name the remote rename gave it — and the baseline
+        // followed the file rather than stranding a row at the old path.
+        Assert.Equal(["local-folder", "renamed-remotely.txt"], baseline.Keys.OrderBy(k => k, StringComparer.Ordinal));
+        Assert.NotNull(baseline["renamed-remotely.txt"].RemoteAtSync!.NodeId);   // the CLI's stable uid
+        Assert.NotNull(baseline["renamed-remotely.txt"].LocalAtSync!.ContentHash); // our own SHA-1
     }
 
     private void WriteSettled(string relativePath, string content)

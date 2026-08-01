@@ -454,4 +454,176 @@ public class SyncReconcilerTests
 
         Assert.Equal(1, plan.Stats.Conflicts);
     }
+
+    // ---- F5: remote move detection (§11, keyed on the verified `uid` from Appendix A #3) ----
+
+    /// <summary>A remote fingerprint carrying a uid, which is what move detection correlates on.</summary>
+    private static NodeFingerprint RemoteFp(string path, string nodeId, long size = 100, string hash = "hash-a")
+        => new(path, false, size, T0, nodeId, hash);
+
+    /// <summary>
+    /// The canonical setup: 'old/x.pdf' was in sync, and the remote side has since moved that exact
+    /// node (same uid, same content) to 'new/x.pdf'.
+    /// </summary>
+    private static SyncPlan ReconcileAfterRemoteMove(
+        string oldPath = "old/x.pdf",
+        string newPath = "new/x.pdf",
+        NodeFingerprint? localOverride = null,
+        NodeFingerprint? remoteOverride = null,
+        string movedHash = "hash-a",
+        Dictionary<string, NodeFingerprint>? extraLocal = null)
+    {
+        var local = Map(localOverride ?? FileFp(oldPath));
+        if (extraLocal is not null)
+        {
+            foreach (var (k, v) in extraLocal)
+            {
+                local[k] = v;
+            }
+        }
+
+        var remote = Map(remoteOverride ?? RemoteFp(newPath, "uid-1", hash: movedHash));
+        var baseline = BaselineMap(BaselineOf(oldPath, false, FileFp(oldPath), RemoteFp(oldPath, "uid-1")));
+        return SyncReconciler.Reconcile(1, SyncDirection.TwoWay, ConflictPolicy.Ask, local, remote, baseline, Timestamp);
+    }
+
+    [Fact]
+    public void RemoteMove_BecomesALocalMove_NotADeletePlusDownload()
+    {
+        var plan = ReconcileAfterRemoteMove();
+
+        var action = Assert.Single(plan.Actions);
+        Assert.Equal(SyncOperation.RenameLocal, action.Operation);
+        Assert.Equal("old/x.pdf", action.RelativePath);
+        Assert.Equal("new/x.pdf", action.SecondaryPath);
+        Assert.Equal(1, plan.Stats.FilesToMoveLocally);
+        Assert.Equal(0, plan.Stats.FilesToDownload);
+        Assert.Equal(0, plan.Stats.ToDeleteLocal);
+        Assert.Equal(0, plan.Stats.BytesToDownload);
+    }
+
+    [Fact]
+    public void ARemoteRenameInPlace_IsAlsoJustALocalMove()
+    {
+        var plan = ReconcileAfterRemoteMove(oldPath: "notes.txt", newPath: "notes-final.txt");
+
+        var action = Assert.Single(plan.Actions);
+        Assert.Equal(SyncOperation.RenameLocal, action.Operation);
+        Assert.Equal("notes-final.txt", action.SecondaryPath);
+    }
+
+    [Fact]
+    public void AMovedFileWhoseContentAlsoChanged_FallsBackToTheOrdinaryTransfer()
+    {
+        // A move plus an edit isn't worth a special case: let the table download the new content.
+        var plan = ReconcileAfterRemoteMove(movedHash: "hash-edited");
+
+        Assert.DoesNotContain(plan.Actions, a => a.Operation == SyncOperation.RenameLocal);
+        Assert.Contains(plan.Actions, a => a.Operation == SyncOperation.DownloadFile && a.RelativePath == "new/x.pdf");
+        Assert.Contains(plan.Actions, a => a.Operation == SyncOperation.DeleteLocal && a.RelativePath == "old/x.pdf");
+    }
+
+    [Fact]
+    public void AMoveIsRefused_WhenTheLocalFileWasEditedMeanwhile()
+    {
+        // Moving it would silently discard the local edit, so the table's conflict/upload path wins.
+        var plan = ReconcileAfterRemoteMove(localOverride: FileFp("old/x.pdf", size: 999, hash: "hash-local-edit"));
+
+        Assert.DoesNotContain(plan.Actions, a => a.Operation == SyncOperation.RenameLocal);
+    }
+
+    [Fact]
+    public void AMoveIsRefused_WhenSomethingAlreadyOccupiesTheDestination()
+    {
+        // Moving onto it would destroy an unrelated local file.
+        var plan = ReconcileAfterRemoteMove(
+            extraLocal: new Dictionary<string, NodeFingerprint> { ["new/x.pdf"] = FileFp("new/x.pdf", hash: "hash-other") });
+
+        Assert.DoesNotContain(plan.Actions, a => a.Operation == SyncOperation.RenameLocal);
+    }
+
+    [Fact]
+    public void AMoveIsRefused_WhenTheLocalFileIsAlreadyGone()
+    {
+        var local = new Dictionary<string, NodeFingerprint>();
+        var remote = Map(RemoteFp("new/x.pdf", "uid-1"));
+        var baseline = BaselineMap(BaselineOf("old/x.pdf", false, FileFp("old/x.pdf"), RemoteFp("old/x.pdf", "uid-1")));
+
+        var plan = SyncReconciler.Reconcile(1, SyncDirection.TwoWay, ConflictPolicy.Ask, local, remote, baseline, Timestamp);
+
+        Assert.DoesNotContain(plan.Actions, a => a.Operation == SyncOperation.RenameLocal);
+        Assert.Contains(plan.Actions, a => a.Operation == SyncOperation.DownloadFile);
+    }
+
+    [Fact]
+    public void AmbiguousIdentity_RefusesToGuess()
+    {
+        // Two remote nodes reporting the same uid: there is no correct answer to "where did it go",
+        // so §11.3's rule applies — fall back rather than pick one.
+        var local = Map(FileFp("old/x.pdf"));
+        var remote = Map(RemoteFp("new/x.pdf", "uid-1"), RemoteFp("other/x.pdf", "uid-1"));
+        var baseline = BaselineMap(BaselineOf("old/x.pdf", false, FileFp("old/x.pdf"), RemoteFp("old/x.pdf", "uid-1")));
+
+        var plan = SyncReconciler.Reconcile(1, SyncDirection.TwoWay, ConflictPolicy.Ask, local, remote, baseline, Timestamp);
+
+        Assert.DoesNotContain(plan.Actions, a => a.Operation == SyncOperation.RenameLocal);
+    }
+
+    [Fact]
+    public void AFileStillAtItsOldPath_IsNotAMove()
+    {
+        var local = Map(FileFp("x.pdf"));
+        var remote = Map(RemoteFp("x.pdf", "uid-1"));
+        var baseline = BaselineMap(BaselineOf("x.pdf", false, FileFp("x.pdf"), RemoteFp("x.pdf", "uid-1")));
+
+        var plan = SyncReconciler.Reconcile(1, SyncDirection.TwoWay, ConflictPolicy.Ask, local, remote, baseline, Timestamp);
+
+        Assert.Empty(plan.Actions);
+    }
+
+    [Fact]
+    public void AGenuineRemoteDeletion_IsStillADeletion()
+    {
+        // No node anywhere carries the old uid, so it was deleted rather than moved.
+        var local = Map(FileFp("x.pdf"));
+        var remote = new Dictionary<string, NodeFingerprint>();
+        var baseline = BaselineMap(BaselineOf("x.pdf", false, FileFp("x.pdf"), RemoteFp("x.pdf", "uid-1")));
+
+        var plan = SyncReconciler.Reconcile(1, SyncDirection.TwoWay, ConflictPolicy.Ask, local, remote, baseline, Timestamp);
+
+        Assert.Equal(SyncOperation.DeleteLocal, Assert.Single(plan.Actions).Operation);
+    }
+
+    [Fact]
+    public void MoveDetectionNeedsABaseline_SoOneWayMirrorsStillTransfer()
+    {
+        // A RemoteToLocal pair keeps no baseline by design, so there is no identity to correlate
+        // against and it correctly falls back to delete+download.
+        var local = Map(FileFp("old/x.pdf"));
+        var remote = Map(RemoteFp("new/x.pdf", "uid-1"));
+
+        var plan = SyncReconciler.Reconcile(1, SyncDirection.RemoteToLocal, ConflictPolicy.Ask, local, remote, NoBaseline, Timestamp);
+
+        Assert.DoesNotContain(plan.Actions, a => a.Operation == SyncOperation.RenameLocal);
+        Assert.Contains(plan.Actions, a => a.Operation == SyncOperation.DownloadFile);
+        Assert.Contains(plan.Actions, a => a.Operation == SyncOperation.DeleteLocal);
+    }
+
+    [Fact]
+    public void AMovedFileIsMovedBeforeDeletionsRun()
+    {
+        // Ordering matters: a delete band running first could remove the very file being moved.
+        var local = Map(FileFp("old/x.pdf"), FileFp("doomed.txt", hash: "hash-doomed"));
+        var remote = Map(RemoteFp("new/x.pdf", "uid-1"));
+        var baseline = BaselineMap(
+            BaselineOf("old/x.pdf", false, FileFp("old/x.pdf"), RemoteFp("old/x.pdf", "uid-1")),
+            BaselineOf("doomed.txt", false, FileFp("doomed.txt", hash: "hash-doomed"), RemoteFp("doomed.txt", "uid-2", hash: "hash-doomed")));
+
+        var plan = SyncReconciler.Reconcile(1, SyncDirection.TwoWay, ConflictPolicy.Ask, local, remote, baseline, Timestamp);
+
+        var moveIndex = plan.Actions.ToList().FindIndex(a => a.Operation == SyncOperation.RenameLocal);
+        var deleteIndex = plan.Actions.ToList().FindIndex(a => a.Operation == SyncOperation.DeleteLocal);
+        Assert.True(moveIndex >= 0 && deleteIndex >= 0);
+        Assert.True(moveIndex < deleteIndex, "the move must be planned before any deletion");
+    }
 }

@@ -372,9 +372,44 @@
       the most log noise, and with pruning sitting after the scan it would have been the one pair
       that never got tidied. Best-effort by design: failing to tidy is not a reason to refuse to
       sync, and reporting it would mean writing to the table we just failed to write to.
-- [ ] **F4 (remainder) / F5**: fine-grained progress, the remaining §12 validations that need IO
-      (local folder writable, warn on a large existing folder, free-space estimate), and F5's rename
-      detection (`MoveItemsAsync` remains uncalled, so a remote move is still download+trash).
+- [x] **F5 (remote rename/move detection) — done.** A remote rename or move no longer costs a
+      re-download. 317 unit tests, four real-account integration tests, AOT clean.
+
+      Implemented as a **cross-path pre-pass** in the reconciler, deliberately separate from the
+      per-path decision table: a move is the one situation §5.2 cannot express, because it is a
+      statement about two paths at once. Paths the pre-pass claims are excluded from the main loop,
+      which would otherwise see the source as "deleted remotely" and the destination as "new
+      remotely" and answer with a delete-plus-download of content that never changed. Everything else
+      goes through the table untouched — all 300-odd existing tests passed unchanged after the
+      pre-pass landed, which was the point of that shape.
+
+      Keyed on the CLI's `uid` (Appendix A #3 verified it survives both `rename` and `move`), so this
+      is identity rather than a guess. **Every condition is a refusal to guess**, since falling back
+      merely costs a download while a wrong move costs data:
+      - a `uid` appearing more than once remotely is ambiguous → fall back;
+      - content that changed as well as moved → fall back (a move plus an edit isn't worth a case);
+      - the local file edited since the baseline → fall back, or moving it would discard the edit;
+      - anything already at the destination locally → fall back, or the move would overwrite it.
+
+      `SyncPlanStats` gained `FilesToMoveLocally`, counted separately because these cost no bytes:
+      folding them into the download count would misreport the work, and omitting them would make a
+      plan that only moves files look like it does nothing.
+
+      **Verified against the real account**, which is where it matters — the whole optimization rests
+      on the `uid` surviving a real `filesystem rename`. The integration test renames a file remotely,
+      counts `download` invocations off the live command stream, and asserts the count is unchanged
+      while the local file has moved and the baseline followed it to the new path.
+
+      **The local→remote half is deliberately not done.** Detecting a *local* rename needs local
+      identity, and §11.2's `st_ino` isn't reachable from .NET without a platform P/Invoke. The
+      workable alternative is §11.3's content-hash match — a path that vanished locally and one that
+      appeared with the baseline's recorded SHA-1, with exactly one candidate — which needs no native
+      code and would then use the already-written-but-still-uncalled `MoveItemsAsync`. Also still
+      absent for `RemoteToLocal` pairs, which keep no baseline by design and so have no identity to
+      correlate against; making it work there would mean matching on (size, mtime) alone, which is
+      the guess §11.3 says to refuse.
+- [ ] **F4 (remainder)**: fine-grained progress, and the §12 validations that need IO (local folder
+      writable, warn on a large existing folder, free-space estimate).
 
 Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`
 (the "both sides deleted it" decision-table row needs a distinct effect — delete the stale
@@ -915,6 +950,8 @@ expensive) or, worse, in TwoWay mode **re-upload the original from the local bas
 
 **F0 verified the CLI's `uid` is stable across both `filesystem rename` and `filesystem move`**,
 and that `filesystem move` exists as a direct operation (not just rename+copy+trash). So:
+
+**Status**: mechanism 1 below is implemented for `TwoWay` pairs (see F5 in Status); 2 and 3 are not.
 
 1. **Primary mechanism (verified, use this)**: `SyncState.RemoteNodeId` = the CLI's `uid`.
    Reconciliation on the remote side is indexed by `uid`, not path. When a `uid` known from the

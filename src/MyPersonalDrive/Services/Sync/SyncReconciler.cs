@@ -36,10 +36,28 @@ public static class SyncReconciler
         var actions = new List<SyncAction>();
         var conflicts = new List<SyncConflict>();
 
+        // Cross-path pre-pass, before the per-path table below: a move is the one situation the
+        // decision table cannot express, because it is a statement about two paths at once. Paths it
+        // claims are excluded from the main loop, which otherwise sees the source as "deleted
+        // remotely" and the destination as "new remotely" and answers with a needless
+        // delete-plus-download of content that never changed. §11, resolved by Appendix A #3.
+        // TwoWay only, and not by omission: detection correlates the CLI's `uid` against the one
+        // recorded in the baseline, and a one-way mirror deliberately keeps no baseline (its source
+        // side is authoritative, so it never needed one). A `RemoteToLocal` pair therefore still
+        // answers a remote move with delete+download — correct, just not free. Making it cheap there
+        // would mean matching on (size, mtime) with no identity to confirm it, which is the guess
+        // §11.3 says to refuse.
+        var handledByMove = new HashSet<string>(StringComparer.Ordinal);
+        if (direction == SyncDirection.TwoWay)
+        {
+            DetectRemoteMoves(local, remote, baseline, tolerance, actions, handledByMove);
+        }
+
         var allPaths = new SortedSet<string>(StringComparer.Ordinal);
         allPaths.UnionWith(local.Keys);
         allPaths.UnionWith(remote.Keys);
         allPaths.UnionWith(baseline.Keys);
+        allPaths.ExceptWith(handledByMove);
 
         foreach (var path in allPaths)
         {
@@ -74,6 +92,81 @@ public static class SyncReconciler
 
         var ordered = actions.OrderBy(a => a.Priority).ThenBy(a => a.RelativePath, StringComparer.Ordinal).ToList();
         return new SyncPlan(pairId, ordered, conflicts, ComputeStats(ordered, conflicts));
+    }
+
+    /// <summary>
+    /// Finds files the remote side moved or renamed, and answers with a local move instead of a
+    /// download. Keyed on the CLI's `uid`, which Appendix A #3 verified survives both
+    /// `filesystem rename` and `filesystem move` — so this is identity, not a guess.
+    ///
+    /// Every condition below is a refusal to guess when the situation is anything less than
+    /// unambiguous; §11.3's rule is to fall back to delete+create rather than risk a wrong move,
+    /// and falling back merely costs a download.
+    /// </summary>
+    private static void DetectRemoteMoves(
+        IReadOnlyDictionary<string, NodeFingerprint> local,
+        IReadOnlyDictionary<string, NodeFingerprint> remote,
+        IReadOnlyDictionary<string, SyncBaselineEntry> baseline,
+        TimeSpan tolerance,
+        List<SyncAction> actions,
+        HashSet<string> handled)
+    {
+        // uid -> where it is now, remotely. Only ids seen exactly once are usable: a duplicated id
+        // would make "where did it go" ambiguous, and no correct answer is worth guessing at.
+        var remoteByNodeId = new Dictionary<string, string>(StringComparer.Ordinal);
+        var ambiguousIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (path, fingerprint) in remote)
+        {
+            if (fingerprint.IsFolder || fingerprint.NodeId is not { } nodeId)
+            {
+                continue;
+            }
+
+            if (!remoteByNodeId.TryAdd(nodeId, path))
+            {
+                ambiguousIds.Add(nodeId);
+            }
+        }
+
+        foreach (var (oldPath, entry) in baseline)
+        {
+            if (entry.IsFolder || entry.RemoteAtSync?.NodeId is not { } nodeId)
+            {
+                continue; // folders aren't moved as units here — their children are each detected
+            }
+
+            if (ambiguousIds.Contains(nodeId) || remote.ContainsKey(oldPath))
+            {
+                continue; // still where it was, or we can't tell which node is which
+            }
+
+            if (!remoteByNodeId.TryGetValue(nodeId, out var newPath) || newPath == oldPath)
+            {
+                continue; // genuinely gone, not moved — the table's delete row handles it
+            }
+
+            // The move must be *only* a move. If the content changed too, let the ordinary
+            // download path deal with it; a move plus an edit is not worth a special case.
+            if (!AreEquivalent(remote[newPath], entry.RemoteAtSync, tolerance))
+            {
+                continue;
+            }
+
+            // The local side has to still hold the old path, untouched, and have nothing in the way
+            // at the new one. Otherwise moving the local file would destroy a local change or
+            // overwrite an unrelated file.
+            if (!local.TryGetValue(oldPath, out var localOld)
+                || !AreEquivalent(localOld, entry.LocalAtSync, tolerance)
+                || local.ContainsKey(newPath))
+            {
+                continue;
+            }
+
+            actions.Add(new SyncAction(SyncOperation.RenameLocal, oldPath, newPath, localOld.Size,
+                PriorityFor(SyncOperation.RenameLocal, oldPath)));
+            handled.Add(oldPath);
+            handled.Add(newPath);
+        }
     }
 
     /// <summary>
@@ -321,7 +414,7 @@ public static class SyncReconciler
 
     private static SyncPlanStats ComputeStats(IReadOnlyList<SyncAction> actions, IReadOnlyList<SyncConflict> conflicts)
     {
-        int filesToDownload = 0, filesToUpload = 0, foldersLocal = 0, foldersRemote = 0, deleteLocal = 0, trashRemote = 0;
+        int filesToDownload = 0, filesToUpload = 0, foldersLocal = 0, foldersRemote = 0, deleteLocal = 0, trashRemote = 0, movesLocal = 0;
         long bytesToDownload = 0, bytesToUpload = 0;
 
         foreach (var action in actions)
@@ -348,6 +441,9 @@ public static class SyncReconciler
                 case SyncOperation.TrashRemote:
                     trashRemote++;
                     break;
+                case SyncOperation.RenameLocal:
+                    movesLocal++;
+                    break;
                 case SyncOperation.ResolveConflictKeepBoth:
                     filesToDownload++;
                     filesToUpload++;
@@ -357,6 +453,6 @@ public static class SyncReconciler
             }
         }
 
-        return new SyncPlanStats(filesToDownload, filesToUpload, foldersLocal, foldersRemote, deleteLocal, trashRemote, conflicts.Count, bytesToDownload, bytesToUpload);
+        return new SyncPlanStats(filesToDownload, filesToUpload, foldersLocal, foldersRemote, deleteLocal, trashRemote, conflicts.Count, bytesToDownload, bytesToUpload, movesLocal);
     }
 }

@@ -339,6 +339,10 @@ public sealed class SyncExecutor
                 await ResolveConflictKeepBothAsync(context, action, cancellationToken);
                 break;
 
+            case SyncOperation.RenameLocal:
+                await RenameLocalAsync(context, action, cancellationToken);
+                return; // its own baseline bookkeeping — two paths change, not one
+
             case SyncOperation.UpdateBaselineOnly:
                 break; // the baseline write below is the entire point of this operation
 
@@ -465,6 +469,51 @@ public sealed class SyncExecutor
 
         await LogAsync(context, SyncLogLevel.Warning, action.RelativePath,
             $"Conflict kept both versions: the local copy is now '{action.SecondaryPath}'.", cancellationToken);
+    }
+
+    /// <summary>
+    /// Mirrors a remote move by moving the local file, instead of downloading content that never
+    /// changed (§11 / Appendix A #3). Unlike every other operation this rewrites *two* baseline
+    /// paths, so it does its own bookkeeping: the old row is forgotten and a new one recorded.
+    /// </summary>
+    private async Task RenameLocalAsync(RunContext context, QueuedSyncAction action, CancellationToken cancellationToken)
+    {
+        if (action.SecondaryPath is null)
+        {
+            throw new InvalidOperationException($"A local rename of '{action.RelativePath}' has no destination path.");
+        }
+
+        var source = context.Mapper.ToLocalAbsolute(action.RelativePath);
+        var destination = context.Mapper.ToLocalAbsolute(action.SecondaryPath);
+
+        if (!File.Exists(source))
+        {
+            // It vanished between the scan and now. Failing would be wrong: the next cycle rescans
+            // and will download it at the new path, which is the correct outcome anyway.
+            throw new FileNotFoundException($"'{action.RelativePath}' disappeared locally before it could be moved.", source);
+        }
+
+        if (File.Exists(destination))
+        {
+            throw new IOException($"Refusing to move '{action.RelativePath}' onto the existing file '{action.SecondaryPath}'.");
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+
+        // Both ends are our own doing, and registered before the move so the watcher can't beat us
+        // to it (§9).
+        _echoSuppressor.SuppressDeletion(context.Pair.Id, SyncSide.Local, action.RelativePath);
+        _echoSuppressor.SuppressWrite(context.Pair.Id, SyncSide.Local, action.SecondaryPath);
+        File.Move(source, destination);
+
+        if (context.Baseline is not null)
+        {
+            await context.Baseline.ClearAsync(action.RelativePath, cancellationToken);
+            await context.Baseline.RecordAsync(action.SecondaryPath, isFolder: false, _timeProvider.GetUtcNow(), cancellationToken);
+        }
+
+        await LogAsync(context, SyncLogLevel.Info, action.RelativePath,
+            $"Moved locally to '{action.SecondaryPath}' to match Proton Drive, without re-downloading it.", cancellationToken);
     }
 
     /// <summary>

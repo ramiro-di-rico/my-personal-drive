@@ -25,6 +25,14 @@ public sealed class SyncScheduler : IAsyncDisposable
     private readonly TimeSpan _tick;
 
     private readonly Dictionary<int, PairRuntime> _pairs = [];
+
+    /// <summary>
+    /// Guards <see cref="_pairs"/>. The loop is the only writer, but <see cref="PumpOnceAsync"/> and
+    /// <see cref="StopAsync"/> are public, so nothing stops a second caller enumerating the
+    /// dictionary while the loop is adding to it. Never held across an <c>await</c> — every use takes
+    /// a snapshot and then works outside the lock.
+    /// </summary>
+    private readonly object _pairsGate = new();
     private readonly SemaphoreSlim _oneCycleAtATime = new(1, 1);
     private CancellationTokenSource? _cts;
     private Task? _loop;
@@ -84,12 +92,18 @@ public sealed class SyncScheduler : IAsyncDisposable
         {
         }
 
-        foreach (var runtime in _pairs.Values)
+        List<PairRuntime> toDispose;
+        lock (_pairsGate)
+        {
+            toDispose = [.. _pairs.Values];
+            _pairs.Clear();
+        }
+
+        foreach (var runtime in toDispose)
         {
             runtime.Watcher?.Dispose();
         }
 
-        _pairs.Clear();
         _cts.Dispose();
         _cts = null;
         _loop = null;
@@ -110,13 +124,14 @@ public sealed class SyncScheduler : IAsyncDisposable
 
         await RefreshPairsAsync(cancellationToken);
 
-        foreach (var runtime in _pairs.Values)
+        var snapshot = SnapshotPairs();
+        foreach (var runtime in snapshot)
         {
             runtime.Watcher?.Pump();
         }
 
         var now = _timeProvider.GetUtcNow();
-        var due = _pairs.Values
+        var due = snapshot
             .Where(runtime => SyncSchedulePolicy.ShouldRunNow(runtime.ToScheduleState(), now))
             .OrderBy(runtime => runtime.Pair.Id)
             .ToList();
@@ -173,6 +188,14 @@ public sealed class SyncScheduler : IAsyncDisposable
             runtime.IsDirty = false;
             runtime.NeedsFullScan = false;
 
+            // The watcher's own latch has to be cleared too, not just the runtime's copy. It is set
+            // once on buffer overflow and never resets itself, so leaving it would make every later
+            // batch re-raise "needs a full scan" for the rest of the process's life.
+            if (runtime.Watcher is not null)
+            {
+                runtime.Watcher.NeedsFullScan = false;
+            }
+
             await _executor.RunAsync(runtime.Pair, cancellationToken);
             runtime.ConsecutiveErrors = 0;
         }
@@ -199,27 +222,49 @@ public sealed class SyncScheduler : IAsyncDisposable
         PairSynced?.Invoke(this, runtime.Pair.Id);
     }
 
+    private List<PairRuntime> SnapshotPairs()
+    {
+        lock (_pairsGate)
+        {
+            return [.. _pairs.Values];
+        }
+    }
+
     private async Task RefreshPairsAsync(CancellationToken cancellationToken)
     {
+        // Purely time-based. It used to also require `_pairs.Count > 0`, which meant that with no
+        // pairs configured the guard never held and the loop re-queried the database on every 2s
+        // tick — forever, for nothing.
         var now = _timeProvider.GetUtcNow();
-        if (now - _pairsLoadedAt < PairRefreshInterval && _pairs.Count > 0)
+        if (_pairsLoadedAt != DateTimeOffset.MinValue && now - _pairsLoadedAt < PairRefreshInterval)
         {
             return;
         }
 
         _pairsLoadedAt = now;
         var pairs = await _stateStore.GetPairsAsync(cancellationToken);
-        var seen = new HashSet<int>();
+        var enabled = pairs.Where(p => p.IsEnabled).ToList();
+        var seen = enabled.Select(p => p.Id).ToHashSet();
 
-        foreach (var pair in pairs.Where(p => p.IsEnabled))
+        foreach (var pair in enabled)
         {
-            seen.Add(pair.Id);
-            if (_pairs.TryGetValue(pair.Id, out var existing))
+            bool alreadyKnown;
+            lock (_pairsGate)
             {
-                existing.Pair = pair; // pick up IsPaused / exclusion changes
+                alreadyKnown = _pairs.TryGetValue(pair.Id, out var existing);
+                if (alreadyKnown)
+                {
+                    existing!.Pair = pair; // pick up IsPaused / exclusion changes
+                }
+            }
+
+            if (alreadyKnown)
+            {
                 continue;
             }
 
+            // Built outside the lock: starting a watcher touches the filesystem, and the degraded
+            // path logs, which awaits.
             var runtime = new PairRuntime(pair);
             var watcher = new LocalFileWatcher(pair, _echoSuppressor, timeProvider: _timeProvider);
             watcher.ChangesSettled += (_, paths) =>
@@ -234,21 +279,36 @@ public sealed class SyncScheduler : IAsyncDisposable
             };
 
             watcher.Start();
+            runtime.Watcher = watcher;
+
+            lock (_pairsGate)
+            {
+                _pairs[pair.Id] = runtime;
+            }
+
             if (watcher.IsDegraded)
             {
                 WatcherDegraded?.Invoke(this, watcher.DegradedReason!);
                 await SafeLogAsync(pair.Id, SyncLogLevel.Warning, watcher.DegradedReason!, cancellationToken);
             }
-
-            runtime.Watcher = watcher;
-            _pairs[pair.Id] = runtime;
         }
 
-        // Drop pairs the user removed or disabled while we were running.
-        foreach (var id in _pairs.Keys.Where(id => !seen.Contains(id)).ToList())
+        // Drop pairs the user removed or disabled while we were running. Removed from the dictionary
+        // under the lock, disposed outside it.
+        List<PairRuntime> dropped;
+        lock (_pairsGate)
         {
-            _pairs[id].Watcher?.Dispose();
-            _pairs.Remove(id);
+            var staleIds = _pairs.Keys.Where(id => !seen.Contains(id)).ToList();
+            dropped = staleIds.Select(id => _pairs[id]).ToList();
+            foreach (var id in staleIds)
+            {
+                _pairs.Remove(id);
+            }
+        }
+
+        foreach (var runtime in dropped)
+        {
+            runtime.Watcher?.Dispose();
         }
     }
 
@@ -272,13 +332,30 @@ public sealed class SyncScheduler : IAsyncDisposable
 
     private sealed class PairRuntime(SyncPair pair)
     {
+        // The two flags a watcher callback writes and the loop reads. `volatile` rather than plain
+        // fields because those are different threads: the loop could otherwise keep reading a cached
+        // `false` and never notice a change the watcher had already reported. Everything else here is
+        // touched only by the loop.
+        private volatile bool _isDirty;
+        private volatile bool _needsFullScan;
+
         public SyncPair Pair { get; set; } = pair;
         public LocalFileWatcher? Watcher { get; set; }
         public DateTimeOffset? LastRunAt { get; set; }
         public TimeSpan? LastCycleDuration { get; set; }
         public int ConsecutiveErrors { get; set; }
-        public bool IsDirty { get; set; }
-        public bool NeedsFullScan { get; set; }
+
+        public bool IsDirty
+        {
+            get => _isDirty;
+            set => _isDirty = value;
+        }
+
+        public bool NeedsFullScan
+        {
+            get => _needsFullScan;
+            set => _needsFullScan = value;
+        }
 
         public PairScheduleState ToScheduleState()
             => new(LastRunAt, LastCycleDuration, ConsecutiveErrors, IsDirty, Pair.IsPaused);

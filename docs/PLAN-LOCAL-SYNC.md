@@ -309,8 +309,8 @@
          threadpool threads and read from the loop, and `_pairs` is mutated by the loop while
          `PumpOnceAsync` is public. Correct today because only the loop calls it in the app; worth
          locking before anything else calls in.
-      - `RefreshPairsAsync` re-queries the pair list on every 2s tick while no pairs exist (the
-         `_pairs.Count > 0` guard never satisfies). Trivial cost, but pointless.
+      - ~~`RefreshPairsAsync` re-queries the pair list on every 2s tick while no pairs exist.~~
+         **Done** alongside B2/B3: the guard is now purely time-based.
 - [x] **F4 (conflicts panel) — done.** The sharpest gap F2/F3 left: the add-pair dialog offers
       `Ask` as the *default* policy, and an `Ask` conflict was a dead end — parked as a `Conflict`
       row with no way to act on it. 262 unit tests, four real-account integration tests, AOT clean.
@@ -455,6 +455,39 @@
 
       Previously this produced a download aimed at an unresolvable path: a permanently failing queue
       row and an inscrutable error, once per such file, forever.
+
+- [x] **B2 + B3 (scheduler thread safety) — done.**
+
+      **B2, the `_pairs` dictionary.** Now guarded by a lock, never held across an `await`: each use
+      takes a snapshot and works outside it, and watchers are started and disposed outside it too.
+      **The fix is validated, but by a one-off experiment rather than a standing test.** A test that
+      reproduced the race *was* written and did have teeth — with the locks removed it failed with
+      `InvalidOperationException: Collection was modified`, which is exactly the bug — but it was
+      deleted rather than kept. Reproducing the race needs several threads hammering the scheduler,
+      and that starved the threadpool badly enough that `FileSystemWatcher` callbacks stopped being
+      scheduled at all, breaking the watcher tests for reasons unrelated to the watcher. It also took
+      the suite from 4s to 35s. A test that destabilizes its neighbours to guard a rare race is a bad
+      trade; the experiment is recorded here instead.
+
+      **B2, the two cross-thread flags.** `PairRuntime.IsDirty` and `NeedsFullScan` are written by
+      watcher callbacks on threadpool threads and read by the loop, so both are now `volatile`.
+      Without it the loop could keep reading a cached `false` and never notice a reported change.
+      Also not unit-testable — memory visibility isn't observable from a test.
+
+      **B3, the overflow latch.** `LocalFileWatcher.NeedsFullScan` is set once on buffer overflow and
+      never resets itself; only the scheduler's copy was being cleared, so one overflow made every
+      later batch re-raise "needs a full scan" for the rest of the process's life. The scheduler now
+      clears the watcher's latch too, and the property is `volatile` for the same reason as above (the
+      OS raises `Error` on a threadpool thread).
+
+      Also fixed in passing: `RefreshPairsAsync`'s guard required `_pairs.Count > 0`, so with no pairs
+      configured it never held and the loop re-queried the database every 2s forever, for nothing. It
+      is now purely time-based.
+
+      One test change was needed and is worth noting: `LocalFileWatcherTests` waited only for the
+      *first* real event before releasing the debounce, but one action can produce several — a rename
+      produces two — so a short grace after the first arrival was added. That fragility was pre-existing
+      and only surfaced under the load the deleted test created.
 
 Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`
 (the "both sides deleted it" decision-table row needs a distinct effect — delete the stale
@@ -1127,8 +1160,8 @@ actionable as a set. Roughly in the order worth doing.
 | # | Item | Why it was deferred, and what to do |
 |---|---|---|
 | ~~B1~~ | ~~**A literal `/` inside a node name isn't escaped.**~~ **Done** — see the B1 entry in Status. Confirmed against the real account first: Proton accepts a folder named `in/voice`, the escaped path lists it (exit 0) and the unescaped one fails with `Node not found: in`. |
-| B2 | **Two data races in `SyncScheduler`.** | `PairRuntime.IsDirty` is written from watcher threadpool threads and read from the loop; `_pairs` is mutated by the loop while `PumpOnceAsync` is public. Correct today only because the app's loop is the sole caller. Lock `_pairs` and make `IsDirty` interlocked before anything else calls in. |
-| B3 | **`LocalFileWatcher.NeedsFullScan` is never reset.** | Set on buffer overflow; only the scheduler's copy is cleared, so once overflowed every later batch re-flags it. Harmless while the flag is informational (the executor always full-scans anyway) — a trap the moment an incremental local scan exists. |
+| ~~B2~~ | ~~**Two data races in `SyncScheduler`.**~~ **Done** — see the B2/B3 entry in Status. |
+| ~~B3~~ | ~~**`LocalFileWatcher.NeedsFullScan` is never reset.**~~ **Done** — see the B2/B3 entry in Status. |
 
 ### Features
 

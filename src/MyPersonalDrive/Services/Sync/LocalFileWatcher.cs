@@ -37,12 +37,24 @@ public sealed class LocalFileWatcher : IDisposable
         _debouncer = debouncer ?? new ChangeDebouncer(timeProvider);
     }
 
+    private volatile bool _needsFullScan;
+
     /// <summary>
     /// Set when the OS told us it dropped events, so the next cycle cannot trust incremental
-    /// information and must do a full scan instead (§6.3). Never cleared here — the scheduler
-    /// clears it once it has acted on it.
+    /// information and must do a full scan instead (§6.3). The scheduler clears it once it has acted
+    /// on it — a latch that never reset would mean one overflow marked every later batch forever.
     /// </summary>
-    public bool NeedsFullScan { get; set; }
+    /// <remarks>
+    /// <c>volatile</c> because the two ends are different threads: the OS raises
+    /// <see cref="FileSystemWatcher.Error"/> on a threadpool thread while the scheduler's loop reads
+    /// this. Without it the loop could keep reading a stale <c>false</c> and never learn events were
+    /// dropped.
+    /// </remarks>
+    public bool NeedsFullScan
+    {
+        get => _needsFullScan;
+        set => _needsFullScan = value;
+    }
 
     /// <summary>
     /// True when this pair could not be watched at all and must fall back to periodic scanning —

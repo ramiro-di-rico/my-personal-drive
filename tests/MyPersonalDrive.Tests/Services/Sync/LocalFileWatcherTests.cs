@@ -40,8 +40,13 @@ public class LocalFileWatcherTests : IDisposable
     /// fake clock. Real filesystem events are asynchronous, so the *arrival* has to be waited for;
     /// the quiet period itself is fake-clock driven, so no test ever sleeps 2 real seconds.
     /// </summary>
+    /// <remarks>
+    /// One action can produce several events — a rename produces two, the old path vanishing and the
+    /// new one appearing — so a short grace after the first arrival keeps the debounce from being
+    /// released while a sibling event is still in flight.
+    /// </remarks>
     private static async Task<IReadOnlyList<string>> CollectAsync(
-        LocalFileWatcher watcher, FakeTimeProvider clock, Action act, int settleMs = 1500)
+        LocalFileWatcher watcher, FakeTimeProvider clock, Action act, int settleMs = 2000, int graceMs = 200)
     {
         var collected = new List<string>();
         watcher.ChangesSettled += (_, paths) => collected.AddRange(paths);
@@ -53,6 +58,9 @@ public class LocalFileWatcherTests : IDisposable
         {
             await Task.Delay(25);
         }
+
+        // Let any sibling events for the same action arrive before the debounce is released.
+        await Task.Delay(graceMs);
 
         clock.Advance(ChangeDebouncer.DefaultQuietPeriod);
         watcher.Pump();

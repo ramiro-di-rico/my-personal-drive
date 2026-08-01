@@ -16,19 +16,25 @@ public sealed class SyncExecutor
     private readonly ILocalScanner _localScanner;
     private readonly IRemoteScanner _remoteScanner;
     private readonly TimeProvider _timeProvider;
+    private readonly SyncEchoSuppressor _echoSuppressor;
 
     public SyncExecutor(
         ProtonDriveService protonDriveService,
         SyncStateStore stateStore,
         ILocalScanner localScanner,
         IRemoteScanner remoteScanner,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        SyncEchoSuppressor? echoSuppressor = null)
     {
         _protonDriveService = protonDriveService;
         _stateStore = stateStore;
         _localScanner = localScanner;
         _remoteScanner = remoteScanner;
         _timeProvider = timeProvider ?? TimeProvider.System;
+
+        // Shared across runs by design: the whole point is to remember a deletion from the run
+        // that performed it into the run that scans afterwards.
+        _echoSuppressor = echoSuppressor ?? new SyncEchoSuppressor(_timeProvider);
     }
 
     /// <summary>
@@ -157,6 +163,11 @@ public sealed class SyncExecutor
         var local = await _localScanner.ScanAsync(pair.LocalPath, exclusions, cancellationToken);
         var remote = await _remoteScanner.ScanAsync(pair.RemotePath, mapper, exclusions, cancellationToken);
 
+        // Applied to both sides' scans, and to the preview as much as to the run — otherwise the
+        // dry-run would offer to download a file this engine just deleted (Appendix A #15).
+        local = _echoSuppressor.Filter(pair.Id, SyncSide.Local, local);
+        remote = _echoSuppressor.Filter(pair.Id, SyncSide.Remote, remote);
+
         return (local, remote, mapper);
     }
 
@@ -195,12 +206,14 @@ public sealed class SyncExecutor
             // also saves a ~3.5s CLI call per deletion.
             case SyncOperation.DeleteLocal:
                 MoveToLocalTrash(context.Pair, context.Mapper, action.RelativePath);
+                _echoSuppressor.SuppressDeletion(context.Pair.Id, SyncSide.Local, action.RelativePath);
                 await ClearBaselineAsync(context, action.RelativePath, cancellationToken);
                 return;
 
             case SyncOperation.TrashRemote:
                 await _protonDriveService.TrashItemAsync(context.Mapper.ToRemoteAbsolute(action.RelativePath), cancellationToken);
                 context.Baseline?.InvalidateRemoteFolder(ParentOf(action.RelativePath));
+                _echoSuppressor.SuppressDeletion(context.Pair.Id, SyncSide.Remote, action.RelativePath);
                 await ClearBaselineAsync(context, action.RelativePath, cancellationToken);
                 return;
 

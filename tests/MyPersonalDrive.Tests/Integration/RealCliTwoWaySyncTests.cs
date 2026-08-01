@@ -133,6 +133,17 @@ public sealed class RealCliTwoWaySyncTests : IDisposable
         _output.WriteLine($"run 4: {string.Join(", ", fourth.Actions.Select(a => $"{a.Operation} {a.RelativePath}"))}");
 
         Assert.Equal(1, fourth.Stats.ToTrashRemote);
+
+        // ---------- run 5, immediately: the resurrection check (Appendix A #15)
+        // Deliberately before the convergence poll below, so the staleness window is still open —
+        // this is the moment a stale listing would make §5.2 read the trashed file as "new
+        // remotely" and download it back. (If the listing happens to have converged already the
+        // assertion passes trivially; it can't fail spuriously.)
+        var fifth = await sut.RunAsync(pair);
+        _output.WriteLine($"run 5 (immediately after the trash): {fifth.Actions.Count} action(s)");
+        Assert.Empty(fifth.Actions);
+        Assert.False(File.Exists(downloaded), "the deleted file was resurrected by a stale listing");
+
         Assert.True(await EventuallyGoneFromRemoteAsync("remote-only.txt"),
             "the trashed file was still listed after waiting for the listing to converge");
 

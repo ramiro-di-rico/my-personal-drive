@@ -166,6 +166,9 @@
       - `ResolveConflictKeepBoth` renames the local copy aside **before** downloading, not after:
         if the download then fails, the local version still exists under the conflict name.
         Downloading first would overwrite it — the one ordering that can lose data.
+      - `SyncEchoSuppressor` — §9's echo suppression, built for the remote half first because
+        Appendix A #15's stale-listing-after-trash made deleted files resurrect. Generic over
+        `SyncSide` so F3's watcher reuses it rather than growing a second mechanism.
       - `SyncRetryPolicy` — §7's 5s/15s/45s/2min/5min schedule plus classification. Retryable:
         `Network`, `Timeout`, `Unknown`, local `IOException`. Not retryable: `NotAuthenticated`,
         `Quota`, `NotFound`, `PermissionDenied` (a retry cannot fix any of them; `NotFound` means
@@ -704,6 +707,14 @@ This is what needs to change in what already exists, beyond adding new files.
 - When sync writes locally, **suppress the watcher events it generates itself**: keep a set of
   "written by the engine" paths with a short TTL, and discard matching events. Without this,
   an infinite sync loop occurs. **This is the classic bug for this feature.**
+
+  **Partly built already**, as `SyncEchoSuppressor` — F2 needed the *remote* half of exactly this
+  mechanism, because a listing right after a `trash` comes back stale (Appendix A #15) and made
+  deleted files resurrect. It is keyed by `(pairId, SyncSide, relativePath)` with a 60s TTL,
+  suppresses whole subtrees for folder deletions, and releases an entry early once a scan agrees.
+  The executor already reports its local deletions into it. **What F3 must add**: report the
+  engine's local *writes* (downloads, conflict renames) into it too, and have `LocalFileWatcher`
+  consult it before waking the scheduler. Do not build a second mechanism for this.
 - Anything that updates the UI goes through `Dispatcher.UIThread`.
 
 ---
@@ -1115,21 +1126,29 @@ deletion. `DeleteLocal`/`TrashRemote` only ever arise when the node is gone on *
 ~3.5s call) and wrong (a stale answer recorded a baseline row claiming the remote copy was still
 alive, moments after we trashed it).
 
-**Product consequence, still open — a deleted file can transiently resurrect.** After
-`TrashRemote` clears the baseline row, a *next* run whose remote scan is still stale sees
+**Second product consequence — a deleted file could transiently resurrect. Fixed.** After
+`TrashRemote` cleared the baseline row, a *next* run whose remote scan was still stale saw
 `L=absent, R=present, B=absent`, which §5.2 reads as "new remotely" and answers with
-`DownloadFile`. The file comes back locally, and the run after that deletes it again. Nothing is
-lost (the local copy is re-downloaded and the remote copy is in Proton's trash) but it is churn and
-it looks alarming. Only reachable by syncing again within the staleness window — a fast double
-"Sync now" in F2, or a short poll interval in F3. Candidate mitigations, none implemented:
-1. **A short-lived "recently trashed by us" set per pair** (TTL ~60s) whose paths the reconciler
-   ignores on the remote side. This is the remote-side twin of §9's echo suppression for the local
-   watcher, which the plan already requires — worth building as one mechanism.
-2. Leave the baseline row in place on `TrashRemote` instead of clearing it, so a stale listing
-   reconciles back to `TrashRemote` (idempotent) and self-cleans once converged. Simpler, but
-   trashing an already-trashed path probably returns `Node not found`, which would mark the run
-   `PartialFailure`.
-3. Defer to F3, where the scheduler needs echo suppression anyway.
+`DownloadFile` — re-downloading the file the user had just deleted, then deleting it again on the
+following run. Nothing was lost, but it was churn and it looked alarming.
+
+Fixed by `SyncEchoSuppressor` (§9), built as the single mechanism for both halves of the echo
+problem rather than a remote-only patch: it remembers what this engine just deleted, per pair and
+per side, and filters those paths out of the next scan. Three details that matter:
+- **Folder deletions suppress the whole subtree.** A stale listing can report the trashed folder
+  *and* its children; suppressing only the exact path let the children through as "new remotely" —
+  the same bug one level down. Prefix matching respects path boundaries, so `Photos` does not
+  suppress `PhotosElsewhere.txt`.
+- **Suppression is released early**, as soon as a scan agrees the node is gone, rather than always
+  running the full 60s. That keeps the window in which a genuine re-creation of the same path would
+  be ignored as short as the facts allow.
+- **It applies to the preview too**, not just the run — otherwise the dry-run would offer to
+  download a file the engine had just deleted.
+
+*Evidence, stated precisely*: the suppression logic is pinned deterministically by unit tests that
+feed a deliberately stale listing; the real-account run confirms no resurrection across three runs,
+but cannot distinguish "suppression fired" from "the listing had already converged", since both
+produce an empty plan. The ~2-in-3 staleness rate above is the separately measured part.
 
 ---
 

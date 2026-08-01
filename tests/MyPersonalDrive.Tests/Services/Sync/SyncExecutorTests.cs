@@ -318,6 +318,69 @@ public class SyncExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_TwoWay_AStaleListingAfterTrash_DoesNotResurrectTheDeletedFile()
+    {
+        // The resurrection path from Appendix A #15: run 2 trashes the remote copy, then run 3's
+        // scan is still stale and reports it alive. With the baseline row already cleared, §5.2
+        // would read L=absent/R=present/B=absent as "new remotely" and re-download the file the
+        // user just deleted. SyncEchoSuppressor is what stops that.
+        var executor = new FakeCliExecutor();
+        executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}]"); // run 1: scan
+        executor.EnqueueOutput(args =>                               // run 1: download
+        {
+            File.WriteAllText(Path.Combine(args[3], "a.txt"), "hello");
+            return "";
+        });
+        executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}]"); // run 2: scan
+        executor.EnqueueOutput("");                                 // run 2: trash
+        executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}]"); // run 3: scan — STALE
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        await sut.RunAsync(pair);
+        File.Delete(Path.Combine(_localRoot, "a.txt"));
+        await sut.RunAsync(pair);
+
+        var third = await sut.RunAsync(pair);
+
+        Assert.Empty(third.Actions);
+        Assert.False(File.Exists(Path.Combine(_localRoot, "a.txt")), "the deleted file came back");
+        Assert.Equal(1, executor.Calls.Count(c => c.Arguments.Contains("download"))); // only run 1's
+    }
+
+    [Fact]
+    public async Task PreviewAsync_AfterATrash_DoesNotOfferToDownloadTheDeletedFileBack()
+    {
+        var executor = new FakeCliExecutor();
+        executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}]"); // run 1: scan
+        executor.EnqueueOutput(args =>
+        {
+            File.WriteAllText(Path.Combine(args[3], "a.txt"), "hello");
+            return "";
+        });
+        executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}]"); // run 2: scan
+        executor.EnqueueOutput("");                                 // run 2: trash
+        executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}]"); // preview: scan — STALE
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        await sut.RunAsync(pair);
+        File.Delete(Path.Combine(_localRoot, "a.txt"));
+        await sut.RunAsync(pair);
+
+        var plan = await sut.PreviewAsync(pair);
+
+        Assert.Empty(plan.Actions);
+        Assert.Equal(0, plan.Stats.FilesToDownload);
+    }
+
+    [Fact]
     public async Task RunAsync_TwoWay_BothSidesDeleted_ClearsTheBaselineRow()
     {
         var executor = new FakeCliExecutor();

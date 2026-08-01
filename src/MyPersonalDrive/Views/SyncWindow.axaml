@@ -17,6 +17,9 @@
     <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
       <Button Content="➕ Add pair" Command="{Binding AddPairCommand}" />
       <Button Content="🔄 Refresh" Command="{Binding RefreshCommand}" />
+      <Button Content="{Binding AutomaticSyncLabel}"
+              Command="{Binding ToggleAutomaticSyncCommand}"
+              ToolTip.Tip="Watch local folders and poll Proton Drive automatically" />
     </StackPanel>
 
     <ScrollViewer Grid.Row="2">

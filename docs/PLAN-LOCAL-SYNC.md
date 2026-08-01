@@ -218,7 +218,57 @@
       (the next run emits `ClearBaseline`) but cost a wasted queue item and run per deletion.
       `SyncBaselineWriter.RecordAsync` now deletes the row when both sides are gone. A unit test
       pins it so the fix doesn't depend on the gated integration run.
-- [ ] **F3 onward**: not started.
+- [x] **F3 — done (automatic sync).** 236 unit tests plus four gated real-account integration
+      tests; AOT publish clean.
+
+      - `ChangeDebouncer` — §6.3's mandatory debounce, kept pure and clock-injected so the "one
+        editor save must not become six syncs" and "a long copy yields nothing until it stops"
+        cases are tested without touching a disk or sleeping.
+      - `LocalFileWatcher` — thin adapter over `FileSystemWatcher`: 64 KB buffer, both ends of a
+        rename, exclusions applied before anything else, and the `Error` (overflow) event flagging
+        a full scan and *discarding* the partial batch rather than acting on half a picture. An
+        unwatchable folder (typically the inotify limit) degrades to polling with a message naming
+        the sysctl, instead of failing the pair.
+      - `SyncSchedulePolicy` — pure, and the piece Appendix A #11b forced a redesign of. The
+        interval is **10× the pair's own last cycle duration, floored at 5 min and capped at 1 h**,
+        so a small pair polls at the floor and a 50-folder tree backs itself off to ~30 min with no
+        configuration. A dirty pair skips the wait (the debounce already waited) but still respects
+        the error backoff, so a broken pair can't spin.
+      - `SyncScheduler` — owns the watchers, runs due cycles, and **runs them strictly one at a
+        time across all pairs**: per Appendix A #11 concurrent CLI processes corrupt each other, so
+        the plan's per-pair lock is subsumed by a single global one. Global pause when
+        unauthenticated, error backoff with the wait written into `SyncLog`, and pairs
+        added/removed/paused in the UI picked up without a restart. Its `PumpOnceAsync` is the unit
+        of work the timer loop wraps, which is what makes the scheduler deterministically testable.
+      - §9's echo suppression completed: `SyncEchoSuppressor` gained a second register for the
+        engine's own *writes*, kept separate from deletions because the two need opposite
+        treatment — a deletion we performed must be filtered *out* of a scan, whereas a file we
+        just downloaded really is on disk and must not be (filtering it would make the reconciler
+        re-download it or think the user deleted it). The executor registers downloads, local
+        folder creations and conflict renames **before** writing, since a suppression that arrives
+        after the watcher event is no suppression at all.
+      - Wiring: one shared suppressor for executor and watchers (two instances would defeat it),
+        the scheduler starting only *after* crash recovery has requeued stale rows, a
+        shutdown hook so a cycle isn't killed mid-transfer, and an "Automatic sync: on/off" toggle
+        in the sync window. `ObservableObject` gained `OnPropertyChanged` for computed properties.
+
+      **Verified end-to-end against the real account**: `RealCliAutoSyncTests` writes a local file
+      and then only *ticks the scheduler* — it never calls `RunAsync` — so passing means the whole
+      chain fired on its own: real inotify event → debounce → pair marked dirty → policy deeming it
+      due → executor → upload. It reached Proton Drive on the first attempt. The clock is faked so
+      the 2s debounce and 5-minute floor cost no real time, while the filesystem and CLI are real.
+
+      **Known gaps:**
+      - `NeedsFullScan` is plumbed from the overflow event but the executor always does a full scan
+        anyway, so it's currently only informational. It becomes load-bearing if an incremental
+        local scan is ever added.
+      - The watcher marks the pair dirty without saying *what* changed, so a one-file edit still
+        triggers a full remote scan (~3.5s per folder). Fine for the tree sizes this targets;
+        revisit with F4's progress work if it bites.
+      - The scheduler has no UI beyond the on/off toggle — no "next sync at", no per-pair pause
+        button (the `IsPaused` column and `SetPairPausedAsync` exist and are respected, just not
+        exposed). F4 owns that.
+- [ ] **F4 onward**: not started.
 
 Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`
 (the "both sides deleted it" decision-table row needs a distinct effect — delete the stale
@@ -809,6 +859,7 @@ New **"Sync"** tab next to the current browser (or a side panel).
 | **F1** | `PathMapper`, `LocalScanner`, `RemoteScanner`, `SyncStateStore`, `SyncReconciler` (`RemoteToLocal` only), download `SyncExecutor`, minimal UI with dry-run and manual button | **Manual download mirror**: already useful as a local backup | 3 d |
 | **F2** | Full baseline, the whole §5.2 table, uploads, deletes with trash, `KeepBoth` conflicts, durable `SyncQueue` with retries | **Manual bidirectional sync** | 4 d |
 | **F3** | `LocalFileWatcher` with debounce and echo suppression, `SyncScheduler` with polling and backoff, automatic startup | **Automatic sync** | 2.5 d |
+| | *Done. The fixed-interval polling in the original scope was replaced by an interval derived from each pair's measured cycle cost — Appendix A #11b ruled out incremental remote scans, which is what a fixed 5-minute default assumed.* | | |
 | **F4** | Multiple pairs, exclusions, conflicts panel, `Ask` policy, fine-grained progress, pause/resume, log pruning | Complete product | 3 d |
 | **F5** (optional) | Rename detection (§11), hash-based verification, selective sync | Optimizations | 2 d |
 

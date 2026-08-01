@@ -1,0 +1,286 @@
+using MyPersonalDrive.Models;
+
+namespace MyPersonalDrive.Services.Sync;
+
+/// <summary>
+/// Drives automatic synchronization — docs/PLAN-LOCAL-SYNC.md §6.4. Owns one
+/// <see cref="LocalFileWatcher"/> per pair, decides when each pair is due via
+/// <see cref="SyncSchedulePolicy"/>, and runs the cycles.
+///
+/// <b>Cycles run strictly one at a time, across all pairs.</b> Not for tidiness: Appendix A #11
+/// found that concurrent `proton-drive` processes crash each other on the CLI's internal SQLite
+/// cache, so two pairs syncing at once is a correctness problem. The per-pair lock the plan asks
+/// for is therefore subsumed by a single global one.
+/// </summary>
+public sealed class SyncScheduler : IAsyncDisposable
+{
+    private static readonly TimeSpan DefaultTick = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan PairRefreshInterval = TimeSpan.FromSeconds(10);
+
+    private readonly SyncStateStore _stateStore;
+    private readonly SyncExecutor _executor;
+    private readonly SyncEchoSuppressor _echoSuppressor;
+    private readonly Func<bool> _isAuthenticated;
+    private readonly TimeProvider _timeProvider;
+    private readonly TimeSpan _tick;
+
+    private readonly Dictionary<int, PairRuntime> _pairs = [];
+    private readonly SemaphoreSlim _oneCycleAtATime = new(1, 1);
+    private CancellationTokenSource? _cts;
+    private Task? _loop;
+    private DateTimeOffset _pairsLoadedAt = DateTimeOffset.MinValue;
+
+    public SyncScheduler(
+        SyncStateStore stateStore,
+        SyncExecutor executor,
+        SyncEchoSuppressor echoSuppressor,
+        Func<bool> isAuthenticated,
+        TimeProvider? timeProvider = null,
+        TimeSpan? tick = null)
+    {
+        _stateStore = stateStore;
+        _executor = executor;
+        _echoSuppressor = echoSuppressor;
+        _isAuthenticated = isAuthenticated;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _tick = tick ?? DefaultTick;
+    }
+
+    public bool IsRunning => _loop is { IsCompleted: false };
+
+    /// <summary>Raised after every automatic cycle, for the UI to refresh a row.</summary>
+    public event EventHandler<int>? PairSynced;
+
+    /// <summary>Raised when a pair could not be watched and fell back to polling (§6.3).</summary>
+    public event EventHandler<string>? WatcherDegraded;
+
+    public void Start()
+    {
+        if (IsRunning)
+        {
+            return;
+        }
+
+        _cts = new CancellationTokenSource();
+        _loop = RunLoopAsync(_cts.Token);
+    }
+
+    public async Task StopAsync()
+    {
+        if (_cts is null)
+        {
+            return;
+        }
+
+        await _cts.CancelAsync();
+        try
+        {
+            if (_loop is not null)
+            {
+                await _loop;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        foreach (var runtime in _pairs.Values)
+        {
+            runtime.Watcher?.Dispose();
+        }
+
+        _pairs.Clear();
+        _cts.Dispose();
+        _cts = null;
+        _loop = null;
+    }
+
+    /// <summary>
+    /// Runs one due cycle immediately if anything is due, and reports whether it did. Exposed for
+    /// tests and for a deterministic "tick now" — the loop itself is just this on a timer.
+    /// </summary>
+    public async Task<bool> PumpOnceAsync(CancellationToken cancellationToken)
+    {
+        if (!_isAuthenticated())
+        {
+            // §6.4's global pause. Nothing can succeed without a session, and every attempt would
+            // cost a ~3.5s process to fail.
+            return false;
+        }
+
+        await RefreshPairsAsync(cancellationToken);
+
+        foreach (var runtime in _pairs.Values)
+        {
+            runtime.Watcher?.Pump();
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        var due = _pairs.Values
+            .Where(runtime => SyncSchedulePolicy.ShouldRunNow(runtime.ToScheduleState(), now))
+            .OrderBy(runtime => runtime.Pair.Id)
+            .ToList();
+
+        var ranAnything = false;
+        foreach (var runtime in due)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await RunOneCycleAsync(runtime, cancellationToken);
+            ranAnything = true;
+        }
+
+        return ranAnything;
+    }
+
+    private async Task RunLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await PumpOnceAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                // The loop must outlive any single failure — a scheduler that dies silently is
+                // worse than one that logs and keeps going.
+                await SafeLogAsync(null, SyncLogLevel.Error, $"Scheduler tick failed: {ex.Message}", cancellationToken);
+            }
+
+            try
+            {
+                await Task.Delay(_tick, _timeProvider, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+    }
+
+    private async Task RunOneCycleAsync(PairRuntime runtime, CancellationToken cancellationToken)
+    {
+        await _oneCycleAtATime.WaitAsync(cancellationToken);
+        var startedAt = _timeProvider.GetUtcNow();
+        try
+        {
+            // Consumed before the run, not after: a change arriving *during* the cycle must leave
+            // the pair dirty so the next tick picks it up, instead of being cleared by this one.
+            runtime.IsDirty = false;
+            runtime.NeedsFullScan = false;
+
+            await _executor.RunAsync(runtime.Pair, cancellationToken);
+            runtime.ConsecutiveErrors = 0;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            runtime.ConsecutiveErrors++;
+            await SafeLogAsync(runtime.Pair.Id, SyncLogLevel.Error,
+                $"Automatic sync failed (attempt {runtime.ConsecutiveErrors}, next try in " +
+                $"{SyncSchedulePolicy.ErrorBackoff(runtime.ConsecutiveErrors).TotalMinutes:0} min): {ex.Message}",
+                cancellationToken);
+        }
+        finally
+        {
+            var finishedAt = _timeProvider.GetUtcNow();
+            runtime.LastRunAt = finishedAt;
+            runtime.LastCycleDuration = finishedAt - startedAt;
+            _oneCycleAtATime.Release();
+        }
+
+        PairSynced?.Invoke(this, runtime.Pair.Id);
+    }
+
+    private async Task RefreshPairsAsync(CancellationToken cancellationToken)
+    {
+        var now = _timeProvider.GetUtcNow();
+        if (now - _pairsLoadedAt < PairRefreshInterval && _pairs.Count > 0)
+        {
+            return;
+        }
+
+        _pairsLoadedAt = now;
+        var pairs = await _stateStore.GetPairsAsync(cancellationToken);
+        var seen = new HashSet<int>();
+
+        foreach (var pair in pairs.Where(p => p.IsEnabled))
+        {
+            seen.Add(pair.Id);
+            if (_pairs.TryGetValue(pair.Id, out var existing))
+            {
+                existing.Pair = pair; // pick up IsPaused / exclusion changes
+                continue;
+            }
+
+            var runtime = new PairRuntime(pair);
+            var watcher = new LocalFileWatcher(pair, _echoSuppressor, timeProvider: _timeProvider);
+            watcher.ChangesSettled += (_, paths) =>
+            {
+                runtime.IsDirty = true;
+                if (watcher.NeedsFullScan)
+                {
+                    runtime.NeedsFullScan = true;
+                }
+
+                _ = paths; // the paths themselves aren't needed: a cycle rescans the pair anyway
+            };
+
+            watcher.Start();
+            if (watcher.IsDegraded)
+            {
+                WatcherDegraded?.Invoke(this, watcher.DegradedReason!);
+                await SafeLogAsync(pair.Id, SyncLogLevel.Warning, watcher.DegradedReason!, cancellationToken);
+            }
+
+            runtime.Watcher = watcher;
+            _pairs[pair.Id] = runtime;
+        }
+
+        // Drop pairs the user removed or disabled while we were running.
+        foreach (var id in _pairs.Keys.Where(id => !seen.Contains(id)).ToList())
+        {
+            _pairs[id].Watcher?.Dispose();
+            _pairs.Remove(id);
+        }
+    }
+
+    private async Task SafeLogAsync(int? pairId, SyncLogLevel level, string message, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _stateStore.LogAsync(pairId, level, null, message, _timeProvider.GetUtcNow(), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Failing to log must never be what takes the scheduler down.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync();
+        _oneCycleAtATime.Dispose();
+    }
+
+    private sealed class PairRuntime(SyncPair pair)
+    {
+        public SyncPair Pair { get; set; } = pair;
+        public LocalFileWatcher? Watcher { get; set; }
+        public DateTimeOffset? LastRunAt { get; set; }
+        public TimeSpan? LastCycleDuration { get; set; }
+        public int ConsecutiveErrors { get; set; }
+        public bool IsDirty { get; set; }
+        public bool NeedsFullScan { get; set; }
+
+        public PairScheduleState ToScheduleState()
+            => new(LastRunAt, LastCycleDuration, ConsecutiveErrors, IsDirty, Pair.IsPaused);
+    }
+}

@@ -179,6 +179,7 @@ public sealed class SyncExecutor
         {
             case SyncOperation.CreateLocalFolder:
                 Directory.CreateDirectory(context.Mapper.ToLocalAbsolute(action.RelativePath));
+                _echoSuppressor.SuppressWrite(context.Pair.Id, SyncSide.Local, action.RelativePath);
                 break;
 
             case SyncOperation.CreateRemoteFolder:
@@ -330,6 +331,7 @@ public sealed class SyncExecutor
         if (File.Exists(originalLocalPath))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(conflictLocalPath)!);
+            _echoSuppressor.SuppressWrite(context.Pair.Id, SyncSide.Local, action.SecondaryPath);
             File.Move(originalLocalPath, conflictLocalPath, overwrite: false);
         }
 
@@ -358,6 +360,11 @@ public sealed class SyncExecutor
     {
         var localAbsolutePath = context.Mapper.ToLocalAbsolute(relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(localAbsolutePath)!);
+
+        // Registered *before* the write, not after: the watcher can deliver the event while the
+        // File.Move below is still in flight, and a suppression that arrives second is no
+        // suppression at all (§9's infinite-loop bug).
+        _echoSuppressor.SuppressWrite(context.Pair.Id, SyncSide.Local, relativePath);
 
         var tempDirectory = Path.Combine(context.Pair.LocalPath, SyncCrashRecovery.TempFolderName, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDirectory);

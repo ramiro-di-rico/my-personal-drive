@@ -84,6 +84,51 @@ public class SyncEchoSuppressorTests
     }
 
     [Fact]
+    public void ASuppressedWrite_IsAnEcho_ButIsNeverFilteredOutOfAScan()
+    {
+        // The distinction that makes the two registers necessary. A file we just downloaded really
+        // is on disk, so filtering it out of the local scan would make the reconciler think it was
+        // absent — and download it again, or conclude the user deleted it. Only the *event* is noise.
+        var sut = new SyncEchoSuppressor(new FakeTimeProvider(T0));
+        sut.SuppressWrite(1, SyncSide.Local, "downloaded.txt");
+
+        Assert.True(sut.IsEcho(1, SyncSide.Local, "downloaded.txt"));
+        Assert.Equal(["downloaded.txt"], sut.Filter(1, SyncSide.Local, Scan("downloaded.txt")).Keys);
+    }
+
+    [Fact]
+    public void ASuppressedDeletion_IsAlsoAnEcho_SinceDeletingFiresEventsToo()
+    {
+        var sut = new SyncEchoSuppressor(new FakeTimeProvider(T0));
+        sut.SuppressDeletion(1, SyncSide.Local, "gone.txt");
+
+        Assert.True(sut.IsEcho(1, SyncSide.Local, "gone.txt"));
+    }
+
+    [Fact]
+    public void WritingAFolder_MakesEventsForItsContentsEchoesToo()
+    {
+        // A CreateLocalFolder is followed by downloads into it; those events are ours as well.
+        var sut = new SyncEchoSuppressor(new FakeTimeProvider(T0));
+        sut.SuppressWrite(1, SyncSide.Local, "Photos");
+
+        Assert.True(sut.IsEcho(1, SyncSide.Local, "Photos/pic.jpg"));
+        Assert.False(sut.IsEcho(1, SyncSide.Local, "PhotosElsewhere.txt"));
+    }
+
+    [Fact]
+    public void AnEchoExpires_SoLaterUserEditsToTheSameFileAreSeen()
+    {
+        var clock = new FakeTimeProvider(T0);
+        var sut = new SyncEchoSuppressor(clock, window: TimeSpan.FromSeconds(60));
+        sut.SuppressWrite(1, SyncSide.Local, "downloaded.txt");
+
+        Assert.True(sut.IsEcho(1, SyncSide.Local, "downloaded.txt"));
+        clock.Advance(TimeSpan.FromSeconds(61));
+        Assert.False(sut.IsEcho(1, SyncSide.Local, "downloaded.txt"));
+    }
+
+    [Fact]
     public void WithNothingSuppressed_TheScanIsPassedThroughUntouched()
     {
         var sut = new SyncEchoSuppressor(new FakeTimeProvider(T0));

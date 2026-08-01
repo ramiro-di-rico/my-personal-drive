@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Avalonia.Threading;
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Sync;
@@ -15,19 +16,30 @@ public sealed class SyncPanelViewModel : ObservableObject
     private readonly SyncStateStore _stateStore;
     private readonly SyncExecutor _executor;
     private readonly SyncCrashRecovery _crashRecovery;
+    private readonly SyncScheduler? _scheduler;
     private string _statusMessage = "Add a folder to start syncing it from Proton Drive.";
     private bool _isBusy;
     private bool _hasRecovered;
 
-    public SyncPanelViewModel(SyncStateStore stateStore, SyncExecutor executor, SyncCrashRecovery crashRecovery)
+    public SyncPanelViewModel(SyncStateStore stateStore, SyncExecutor executor, SyncCrashRecovery crashRecovery, SyncScheduler? scheduler = null)
     {
         _stateStore = stateStore;
         _executor = executor;
         _crashRecovery = crashRecovery;
+        _scheduler = scheduler;
         Pairs = new ObservableCollection<SyncPairViewModel>();
 
         AddPairCommand = new AsyncCommand(AddPairAsync, () => !IsBusy, ReportError);
         RefreshCommand = new AsyncCommand(LoadPairsAsync, () => !IsBusy, ReportError);
+        ToggleAutomaticSyncCommand = new AsyncCommand(ToggleAutomaticSyncAsync, () => _scheduler is not null, ReportError);
+
+        if (_scheduler is not null)
+        {
+            // A cycle the scheduler ran on its own still has to be reflected in the row the user
+            // is looking at, or the panel would show stale "Up to date" times.
+            _scheduler.PairSynced += (_, _) => Dispatcher.UIThread.Post(() => _ = LoadPairsAsync());
+            _scheduler.WatcherDegraded += (_, reason) => Dispatcher.UIThread.Post(() => StatusMessage = reason);
+        }
     }
 
     public ObservableCollection<SyncPairViewModel> Pairs { get; }
@@ -35,6 +47,12 @@ public sealed class SyncPanelViewModel : ObservableObject
     public AsyncCommand AddPairCommand { get; }
 
     public AsyncCommand RefreshCommand { get; }
+
+    public AsyncCommand ToggleAutomaticSyncCommand { get; }
+
+    public bool IsAutomaticSyncRunning => _scheduler?.IsRunning ?? false;
+
+    public string AutomaticSyncLabel => IsAutomaticSyncRunning ? "⏸ Automatic sync: on" : "▶ Automatic sync: off";
 
     public string StatusMessage
     {
@@ -82,6 +100,38 @@ public sealed class SyncPanelViewModel : ObservableObject
         {
             StatusMessage = $"Recovered from a previous run: cleared {cleared} leftover download folder(s).";
         }
+
+        // Only after recovery: starting the loop first could hand a cycle a queue whose 'Running'
+        // rows haven't been requeued yet.
+        _scheduler?.Start();
+        RaiseAutomaticSyncState();
+    }
+
+    private async Task ToggleAutomaticSyncAsync()
+    {
+        if (_scheduler is null)
+        {
+            return;
+        }
+
+        if (_scheduler.IsRunning)
+        {
+            await _scheduler.StopAsync();
+            StatusMessage = "Automatic sync paused. Local changes won't be picked up until you resume it.";
+        }
+        else
+        {
+            _scheduler.Start();
+            StatusMessage = "Automatic sync resumed.";
+        }
+
+        RaiseAutomaticSyncState();
+    }
+
+    private void RaiseAutomaticSyncState()
+    {
+        OnPropertyChanged(nameof(IsAutomaticSyncRunning));
+        OnPropertyChanged(nameof(AutomaticSyncLabel));
     }
 
     private async Task LoadPairsAsync()

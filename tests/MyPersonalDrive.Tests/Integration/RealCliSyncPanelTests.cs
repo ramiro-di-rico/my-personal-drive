@@ -119,10 +119,13 @@ public sealed class RealCliSyncPanelTests : IDisposable
         Assert.Equal("Never synced", row.StatusText);
         _output.WriteLine($"pair row: {row.RemotePath} | {row.DirectionText} | {row.StatusText}");
 
-        // ---------- adding the same pair again surfaces the friendly UNIQUE message, not a crash
+        // ---------- adding the same pair again is refused, naming what it clashes with. The §12
+        // overlap check now catches this before the UNIQUE constraint does, so the message names the
+        // paths rather than talking about "that combination" (the SqliteException handler is still
+        // there as the backstop for a race between two windows).
         await panel.AddPairCommand.ExecuteAsync();
         Assert.Single(panel.Pairs);
-        Assert.Contains("already a sync pair", panel.StatusMessage);
+        Assert.Contains("already synced", panel.StatusMessage);
 
         // ---------- Preview, declining to run: the plan is real, and nothing is touched
         SyncPlan? previewed = null;

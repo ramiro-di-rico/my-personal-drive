@@ -339,10 +339,21 @@
       have survived forever, so the conflict count could only grow and would eventually be pure
       fiction. `ClearStaleConflictsAsync` now runs each cycle against the paths the *current*
       reconciliation still finds in conflict.
+- [x] **F4 (nested-pair detection) — done.** §12's overlap rule, as a hard error on *both* sides —
+      the reasoning for each is in §12, and the remote-side one is the more interesting: echo
+      suppression is keyed per pair, so two pairs over one remote subtree can undo each other's
+      deletions, reintroducing across pairs exactly the resurrection bug Appendix A #15's fix
+      removed. Extracted into a pure `SyncPairValidator` along with the checks that were previously
+      private to the view-model, so all of them are now covered exhaustively (22 tests) instead of
+      only incidentally through a gated integration run. Validated against the pairs in the
+      *database*, not the panel's loaded list, since the scheduler and other windows share it.
+      Overlap is compared on normalized paths, so alternate spellings of one folder match while a
+      prefix-sharing sibling correctly doesn't.
 - [ ] **F4 (remainder) / F5**: per-pair pause (the `IsPaused` column and `SetPairPausedAsync` exist
-      and are respected, just not exposed), `SyncLog` pruning, fine-grained progress, the §12
-      validations still missing (nested-pair detection above all), and F5's rename detection
-      (`MoveItemsAsync` remains uncalled, so a remote move is still download+trash).
+      and are respected, just not exposed), `SyncLog` pruning, fine-grained progress, the remaining
+      §12 validations that need IO (local folder writable, warn on a large existing folder, free-space
+      estimate), and F5's rename detection (`MoveItemsAsync` remains uncalled, so a remote move is
+      still download+trash).
 
 Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`
 (the "both sides deleted it" decision-table row needs a distinct effect — delete the stale
@@ -927,11 +938,30 @@ New **"Sync"** tab next to the current browser (or a side panel).
 
 ### Validations when creating a pair
 
-- The local folder exists and is writable.
-- It's not nested inside (nor contains) another existing pair.
-- It's not `$HOME`, `/`, or a system directory.
-- Warn if it already contains many files (it will trigger a mass upload).
-- Sufficient free space for a `RemoteToLocal` (estimated from the sizes in the remote listing).
+Implemented in `SyncPairValidator` (pure, so the rules are covered exhaustively without IO):
+
+- [x] It's not nested inside (nor contains) another existing pair — **on both sides**, see below.
+- [x] It's not `$HOME` or `/`, and the remote path is absolute.
+- [ ] The local folder exists and is writable (needs IO; not in the pure validator).
+- [ ] Warn if it already contains many files (it will trigger a mass upload).
+- [ ] Sufficient free space for a `RemoteToLocal` (estimated from the sizes in the remote listing).
+
+**Why overlap is a hard error rather than a warning**, on each side:
+
+- **Overlapping local folders are destructive.** With `~/A ↔ /my-files/X` and
+  `~/A/Sub ↔ /my-files/Y`, the first pair's scanner walks `~/A/Sub` as well; its own remote root has
+  no `Sub`, so it reads the folder as deleted remotely and moves it to the local trash — which the
+  second pair downloads again, forever.
+- **Overlapping remote folders break echo suppression**, which is keyed per pair
+  (`SyncEchoSuppressor`). Pair A cannot know pair B just trashed a node, so it sees it still listed
+  (Appendix A #15's stale listing), reads that as "new remotely", and downloads back what the other
+  pair deleted — the resurrection bug that fix removed, reappearing across pairs.
+
+Overlap is compared on normalized paths, so `/home/user/Docs`, `/home/user/Docs/`,
+`/home/user/./Docs` and `/home/user/Downloads/../Docs` all match, while `/home/user/Docs2` correctly
+does not. Comparison is ordinal (case-sensitive) since Linux is; on a case-insensitive filesystem two
+differently-cased spellings of one folder would slip through, which matters only if this ever ships
+for Windows or macOS.
 
 ---
 

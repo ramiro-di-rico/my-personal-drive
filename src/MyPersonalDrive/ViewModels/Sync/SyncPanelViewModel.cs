@@ -185,16 +185,18 @@ public sealed class SyncPanelViewModel : ObservableObject
             return;
         }
 
-        var validationError = Validate(request.RemotePath, request.LocalPath);
-        if (validationError is not null)
-        {
-            StatusMessage = validationError;
-            return;
-        }
-
         IsBusy = true;
         try
         {
+            // Validated against what's actually in the database, not the rows currently loaded in
+            // the panel — the scheduler and other windows can have added pairs since.
+            var validationError = SyncPairValidator.Validate(request.RemotePath, request.LocalPath, await _stateStore.GetPairsAsync());
+            if (validationError is not null)
+            {
+                StatusMessage = validationError;
+                return;
+            }
+
             var pair = await _stateStore.CreatePairAsync(request.RemotePath, request.LocalPath, request.Direction, request.ConflictPolicy);
             AddPairViewModel(pair);
             StatusMessage = $"Added: {pair.RemotePath} {DirectionArrow(pair.Direction)} {pair.LocalPath}";
@@ -215,32 +217,6 @@ public sealed class SyncPanelViewModel : ObservableObject
         SyncDirection.LocalToRemote => "←",
         _ => "↔",
     };
-
-    /// <summary>
-    /// Cheap, high-value checks only (see docs/PLAN-LOCAL-SYNC.md §12's full list for what's
-    /// deliberately not implemented yet: nested-pair detection, free-space estimation).
-    /// </summary>
-    private static string? Validate(string remotePath, string localPath)
-    {
-        if (string.IsNullOrWhiteSpace(remotePath) || !remotePath.StartsWith('/'))
-        {
-            return "The remote path must be an absolute path starting with '/'.";
-        }
-
-        if (string.IsNullOrWhiteSpace(localPath))
-        {
-            return "Choose a local folder.";
-        }
-
-        var trimmed = localPath.TrimEnd('/', '\\');
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (trimmed == "/" || trimmed == home)
-        {
-            return "Refusing to sync your entire home directory or the filesystem root — pick a specific subfolder.";
-        }
-
-        return null;
-    }
 
     private void ReportError(Exception ex) => StatusMessage = $"Unexpected error: {ex.Message}";
 }

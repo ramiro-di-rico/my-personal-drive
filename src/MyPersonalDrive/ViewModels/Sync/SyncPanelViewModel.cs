@@ -7,8 +7,8 @@ namespace MyPersonalDrive.ViewModels.Sync;
 
 /// <summary>
 /// Backs the Sync window: the list of configured pairs plus "add a pair" flow. See
-/// docs/PLAN-LOCAL-SYNC.md §12. Only <see cref="SyncDirection.RemoteToLocal"/> pairs can be
-/// created so far — that's the only direction <see cref="SyncExecutor"/> implements.
+/// docs/PLAN-LOCAL-SYNC.md §12. All three directions and all four conflict policies are
+/// selectable as of F2.
 /// </summary>
 public sealed class SyncPanelViewModel : ObservableObject
 {
@@ -55,8 +55,8 @@ public sealed class SyncPanelViewModel : ObservableObject
         }
     }
 
-    /// <summary>Prompts for a new pair's remote/local paths; null means the user canceled.</summary>
-    public Func<Task<(string RemotePath, string LocalPath)?>>? RequestNewPairAsync { get; set; }
+    /// <summary>Prompts for a new pair's settings; null means the user canceled.</summary>
+    public Func<Task<NewSyncPairRequest?>>? RequestNewPairAsync { get; set; }
 
     /// <summary>Shown a dry-run plan; returns true if the user chose to run it immediately. Forwarded to every row.</summary>
     public Func<SyncPlan, Task<bool>>? RequestPreviewConfirmationAsync { get; set; }
@@ -123,14 +123,13 @@ public sealed class SyncPanelViewModel : ObservableObject
             return;
         }
 
-        var input = await requester();
-        if (input is null)
+        var request = await requester();
+        if (request is null)
         {
             return;
         }
 
-        var (remotePath, localPath) = input.Value;
-        var validationError = Validate(remotePath, localPath);
+        var validationError = Validate(request.RemotePath, request.LocalPath);
         if (validationError is not null)
         {
             StatusMessage = validationError;
@@ -140,9 +139,9 @@ public sealed class SyncPanelViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            var pair = await _stateStore.CreatePairAsync(remotePath, localPath, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+            var pair = await _stateStore.CreatePairAsync(request.RemotePath, request.LocalPath, request.Direction, request.ConflictPolicy);
             AddPairViewModel(pair);
-            StatusMessage = $"Added: {pair.RemotePath} → {pair.LocalPath}";
+            StatusMessage = $"Added: {pair.RemotePath} {DirectionArrow(pair.Direction)} {pair.LocalPath}";
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 19) // SQLITE_CONSTRAINT (the pair's UNIQUE(RemotePath, LocalPath))
         {
@@ -153,6 +152,13 @@ public sealed class SyncPanelViewModel : ObservableObject
             IsBusy = false;
         }
     }
+
+    private static string DirectionArrow(SyncDirection direction) => direction switch
+    {
+        SyncDirection.RemoteToLocal => "→",
+        SyncDirection.LocalToRemote => "←",
+        _ => "↔",
+    };
 
     /// <summary>
     /// Cheap, high-value checks only (see docs/PLAN-LOCAL-SYNC.md §12's full list for what's

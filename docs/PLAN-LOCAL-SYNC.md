@@ -24,7 +24,9 @@
       **Not yet done:** `MoveItemAsync` on `ProtonDriveService` (the CLI supports `filesystem
       move`, not wired up yet — needed once rename/move actions are implemented in the
       executor).
-- [x] **F1 (backend) — done.** All of `Services/Sync/`:
+- [x] **F1 (backend) — done.** All of `Services/Sync/` (note: this entry's own scoping was
+      pessimistic — `SyncReconciler` landed with the *entire* §5.2 table, TwoWay included, which
+      is why F2 needed no engine work):
       - `PathMapper` — relative/remote-absolute/local-absolute conversions.
       - `SyncReconciler` — pure engine, every decision-table row, both one-way modes.
       - `SyncStateStore` — CRUD for `SyncPairs`/`SyncState`/`SyncQueue`/`SyncLog`, including
@@ -107,7 +109,57 @@
       equivalent) *did* work in this session — Tab successfully moved focus between controls —
       so a future session can likely finish this via Tab+Enter navigation instead of a mouse,
       or by asking the user to click through it directly.
-- [ ] **F2 onward**: not started.
+- [x] **F2 — done (manual bidirectional sync).** 183 tests pass; the AOT publish is clean.
+
+      Worth recording up front: **the reconciler already implemented the whole of §5.2, TwoWay
+      and all four conflict policies included, back in F1** — its status entry undersold it. So
+      F2 turned out to be almost entirely executor and UI work, not engine work.
+
+      - `SyncExecutor` no longer throws for `TwoWay`/`LocalToRemote`. New operations:
+        `UploadFile` (with the CLI's `replace` strategy — the plan already decided this version
+        wins, so letting the CLI make its own "keep both" copy would contradict it),
+        `CreateRemoteFolder` (treats `AlreadyExists` as success, so a retried run is idempotent),
+        `TrashRemote`, `ResolveConflictKeepBoth`, `UpdateBaselineOnly` and `ClearBaseline`.
+      - `SyncBaselineWriter` — §7's "only after confirmed success, and by re-reading the real
+        fingerprint of both sides". Re-reading is not pedantry: an upload mints a new remote
+        revision whose `uid`/hash we cannot predict. It caches remote listings per parent folder
+        and invalidates only folders the run wrote to, so a run uploading 40 files into one folder
+        pays one extra ~3.5s listing, not 40.
+      - `ResolveConflictKeepBoth` renames the local copy aside **before** downloading, not after:
+        if the download then fails, the local version still exists under the conflict name.
+        Downloading first would overwrite it — the one ordering that can lose data.
+      - `SyncRetryPolicy` — §7's 5s/15s/45s/2min/5min schedule plus classification. Retryable:
+        `Network`, `Timeout`, `Unknown`, local `IOException`. Not retryable: `NotAuthenticated`,
+        `Quota`, `NotFound`, `PermissionDenied` (a retry cannot fix any of them; `NotFound` means
+        the node moved, which the next scan resolves correctly). `NotAuthenticated`/`Quota`
+        additionally **abort the run** rather than failing 400 rows identically at ~3.5s each.
+      - Fixed while implementing: `SyncStateStore.FormatTimestamp` now normalizes to UTC.
+        `GetPendingActionsAsync`'s new `NextAttemptAt <= @Now` filter is a *string* comparison, and
+        round-tripping the caller's offset made `10:00-03:00` sort before `09:00Z` despite being
+        four hours later — which would have handed retry rows out early. Test pins it.
+      - `Ask` policy conflicts are parked as durable `SyncQueue` rows in `Conflict` state
+        (`EnqueueConflictsAsync`/`GetConflictActionsAsync`) instead of being dropped.
+      - UI: the add-pair dialog now offers direction and conflict policy (`RemoteToLocal` stays
+        the default — §15's reasoning is unchanged), hiding the policy selector in one-way modes
+        where no such decision exists. The preview dialog reports uploads and remote-trash counts,
+        and no longer claims "already up to date" for a plan whose only content is conflicts.
+
+      **Known gaps, deliberately left to later phases:**
+      - **`Ask` conflicts can be parked but not yet resolved** — the conflicts panel is F4. Until
+        then `Ask` means "keep noticing the conflict every run"; `KeepBoth` is the policy that
+        actually resolves things unattended, and it's the one to recommend.
+      - **Retries land on the next run, not within the current one.** The row goes back to
+        `Pending` with a `NextAttemptAt`; nothing waits out a backoff mid-run. That's coherent for
+        F2's manual "Sync now" and becomes automatic once F3's scheduler exists.
+      - Rename/move detection is still F5, so `MoveItemsAsync` remains uncalled: a remote move is
+        currently a download+trash pair. Correct, just more expensive than it needs to be.
+      - The recursive folder `download` from Appendix A #5 is still unused; the first sync of a
+        pair downloads file-by-file.
+      - Not yet verified end-to-end against the real account (F1's click-through is still
+        outstanding too). Every F2 test is against `FakeCliExecutor`, so the *command strings* are
+        pinned but the CLI's real responses to `upload -c replace` and `create-folder` in a live
+        TwoWay run are not.
+- [ ] **F3 onward**: not started.
 
 Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`
 (the "both sides deleted it" decision-table row needs a distinct effect — delete the stale

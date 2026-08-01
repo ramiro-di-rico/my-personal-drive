@@ -274,14 +274,94 @@ public sealed class SyncStateStore
         }
     }
 
-    public async Task<IReadOnlyList<QueuedSyncAction>> GetPendingActionsAsync(int pairId, CancellationToken ct = default)
+    /// <summary>
+    /// Pending rows in execution order. Pass <paramref name="now"/> to honour the backoff set by
+    /// <see cref="MarkFailedAsync"/> — a row waiting out its <c>NextAttemptAt</c> is still
+    /// 'Pending' but must not be picked up yet. Omitting it returns every pending row regardless
+    /// of backoff, which is what a "run everything now" caller wants.
+    /// </summary>
+    public async Task<IReadOnlyList<QueuedSyncAction>> GetPendingActionsAsync(int pairId, DateTimeOffset? now = null, CancellationToken ct = default)
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+        command.CommandText = now is null
+            ? """
+              SELECT Id, PairId, RelativePath, Operation, Payload, Priority, AttemptCount, State, LastError, EnqueuedAt
+              FROM SyncQueue WHERE PairId = @PairId AND State = 'Pending'
+              ORDER BY Priority, Id
+              """
+            : """
+              SELECT Id, PairId, RelativePath, Operation, Payload, Priority, AttemptCount, State, LastError, EnqueuedAt
+              FROM SyncQueue
+              WHERE PairId = @PairId AND State = 'Pending' AND (NextAttemptAt IS NULL OR NextAttemptAt <= @Now)
+              ORDER BY Priority, Id
+              """;
+        command.Parameters.AddWithValue("@PairId", pairId);
+        if (now is not null)
+        {
+            command.Parameters.AddWithValue("@Now", FormatTimestamp(now.Value));
+        }
+
+        var actions = new List<QueuedSyncAction>();
+        using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            actions.Add(ReadQueuedAction(reader));
+        }
+
+        return actions;
+    }
+
+    /// <summary>
+    /// Parks unresolved conflicts as 'Conflict' rows — docs/PLAN-LOCAL-SYNC.md §5.6's `Ask`
+    /// policy, where the reconciler deliberately emits no action and the user decides later.
+    /// They are never picked up by <see cref="GetPendingActionsAsync"/>; the conflicts panel
+    /// (F4) reads them back via <see cref="GetConflictActionsAsync"/>.
+    /// </summary>
+    public async Task EnqueueConflictsAsync(int pairId, IReadOnlyList<SyncConflict> conflicts, DateTimeOffset enqueuedAt, CancellationToken ct = default)
+    {
+        if (conflicts.Count == 0)
+        {
+            return;
+        }
+
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            foreach (var conflict in conflicts)
+            {
+                var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = """
+                    INSERT INTO SyncQueue (PairId, RelativePath, Operation, Priority, State, LastError, EnqueuedAt)
+                    VALUES (@PairId, @RelativePath, 'ResolveConflictKeepBoth', @Priority, 'Conflict', @Reason, @EnqueuedAt);
+                    """;
+                command.Parameters.AddWithValue("@PairId", pairId);
+                command.Parameters.AddWithValue("@RelativePath", conflict.RelativePath);
+                command.Parameters.AddWithValue("@Priority", 1000);
+                command.Parameters.AddWithValue("@Reason", conflict.Reason.ToString());
+                command.Parameters.AddWithValue("@EnqueuedAt", FormatTimestamp(enqueuedAt));
+                await command.ExecuteNonQueryAsync(ct);
+            }
+
+            await transaction.CommitAsync(ct);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(ct);
+            throw;
+        }
+    }
+
+    public async Task<IReadOnlyList<QueuedSyncAction>> GetConflictActionsAsync(int pairId, CancellationToken ct = default)
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id, PairId, RelativePath, Operation, Payload, Priority, AttemptCount, State, LastError, EnqueuedAt
-            FROM SyncQueue WHERE PairId = @PairId AND State = 'Pending'
-            ORDER BY Priority, Id
+            FROM SyncQueue WHERE PairId = @PairId AND State = 'Conflict'
+            ORDER BY RelativePath
             """;
         command.Parameters.AddWithValue("@PairId", pairId);
 
@@ -429,11 +509,19 @@ public sealed class SyncStateStore
 
     // ---------------------------------------------------------------- Timestamp helpers
 
+    /// <summary>
+    /// Always normalized to UTC before formatting, per docs/PLAN-LOCAL-SYNC.md §5.5's "always
+    /// compare in UTC". Not just tidiness: `NextAttemptAt &lt;= @Now` in
+    /// <see cref="GetPendingActionsAsync"/> is a *string* comparison, and round-tripping the
+    /// caller's original offset would make `...T10:00:00-03:00` sort before
+    /// `...T09:00:00+00:00` despite being the later instant. Normalizing makes the textual and
+    /// chronological orders agree. Parsing is unaffected — the instant is preserved either way.
+    /// </summary>
     private static string FormatTimestamp(DateTimeOffset timestamp)
-        => timestamp.ToString("O", CultureInfo.InvariantCulture);
+        => timestamp.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
 
     private static string? FormatTimestamp(DateTimeOffset? timestamp)
-        => timestamp?.ToString("O", CultureInfo.InvariantCulture);
+        => timestamp is null ? null : FormatTimestamp(timestamp.Value);
 
     private static DateTimeOffset? ParseTimestamp(string? value)
         => value is not null && DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)

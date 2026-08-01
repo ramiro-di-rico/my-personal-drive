@@ -41,11 +41,53 @@ public partial class SyncWindow : Window
         }
     }
 
-    private async Task<(string RemotePath, string LocalPath)?> PromptForNewPairAsync()
+    private async Task<NewSyncPairRequest?> PromptForNewPairAsync()
     {
         var remoteBox = new TextBox { PlaceholderText = "/my-files/Documents", Width = 380 };
         var localBox = new TextBox { Width = 280, IsReadOnly = true, PlaceholderText = "Choose a local folder..." };
         var browseButton = new Button { Content = "📂 Browse" };
+
+        // RemoteToLocal stays first, and therefore the default: it's the only direction that
+        // cannot destroy anything in the cloud (docs/PLAN-LOCAL-SYNC.md §15).
+        var directionBox = new ComboBox
+        {
+            Width = 380,
+            ItemsSource = new[]
+            {
+                "Download only  (remote → local)",
+                "Upload only  (local → remote)",
+                "Two-way  (remote ↔ local)",
+            },
+            SelectedIndex = 0,
+        };
+
+        var policyBox = new ComboBox
+        {
+            Width = 380,
+            ItemsSource = new[]
+            {
+                "Ask me  (park the conflict, decide later)",
+                "Keep both  (never loses either version)",
+                "Prefer local",
+                "Prefer remote",
+            },
+            SelectedIndex = 0,
+        };
+
+        var policyLabel = new TextBlock { Text = "When both sides changed:", FontWeight = Avalonia.Media.FontWeight.Bold };
+
+        // The conflict policy is only ever consulted in two-way mode — a one-way mirror's source
+        // side wins by definition, so showing the choice there would imply a decision that
+        // doesn't exist.
+        void SyncPolicyVisibility()
+        {
+            var isTwoWay = directionBox.SelectedIndex == 2;
+            policyBox.IsVisible = isTwoWay;
+            policyLabel.IsVisible = isTwoWay;
+        }
+
+        directionBox.SelectionChanged += (_, _) => SyncPolicyVisibility();
+        SyncPolicyVisibility();
 
         browseButton.Click += async (_, _) =>
         {
@@ -61,11 +103,14 @@ public partial class SyncWindow : Window
             }
         };
 
+        var addButton = new Button { Content = "Add", IsDefault = true, Width = 80 };
+        var cancelButton = new Button { Content = "Cancel", IsCancel = true, Width = 80 };
+
         var dialog = new Window
         {
             Title = "Add sync pair",
             Width = 480,
-            Height = 280,
+            Height = 420,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Content = new StackPanel
             {
@@ -82,32 +127,43 @@ public partial class SyncWindow : Window
                         Spacing = 8,
                         Children = { localBox, browseButton }
                     },
+                    new TextBlock { Text = "Direction:", FontWeight = Avalonia.Media.FontWeight.Bold },
+                    directionBox,
+                    policyLabel,
+                    policyBox,
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
                         Spacing = 10,
                         HorizontalAlignment = HorizontalAlignment.Right,
-                        Children =
-                        {
-                            new Button { Content = "Add", IsDefault = true, Width = 80 },
-                            new Button { Content = "Cancel", IsCancel = true, Width = 80 }
-                        }
+                        Children = { addButton, cancelButton }
                     }
                 }
             }
         };
 
-        (string RemotePath, string LocalPath)? result = null;
-        var panel = (StackPanel)dialog.Content;
-        var buttonsPanel = (StackPanel)panel.Children[4];
-        var addButton = (Button)buttonsPanel.Children[0];
-        var cancelButton = (Button)buttonsPanel.Children[1];
+        NewSyncPairRequest? result = null;
 
         addButton.Click += (_, _) =>
         {
             if (!string.IsNullOrWhiteSpace(remoteBox.Text) && !string.IsNullOrWhiteSpace(localBox.Text))
             {
-                result = (remoteBox.Text.Trim(), localBox.Text.Trim());
+                var direction = directionBox.SelectedIndex switch
+                {
+                    1 => SyncDirection.LocalToRemote,
+                    2 => SyncDirection.TwoWay,
+                    _ => SyncDirection.RemoteToLocal,
+                };
+
+                var policy = policyBox.SelectedIndex switch
+                {
+                    1 => ConflictPolicy.KeepBoth,
+                    2 => ConflictPolicy.PreferLocal,
+                    3 => ConflictPolicy.PreferRemote,
+                    _ => ConflictPolicy.Ask,
+                };
+
+                result = new NewSyncPairRequest(remoteBox.Text.Trim(), localBox.Text.Trim(), direction, policy);
             }
 
             dialog.Close();
@@ -121,9 +177,20 @@ public partial class SyncWindow : Window
 
     private async Task<bool> ShowPreviewAsync(SyncPlan plan)
     {
-        var summary = $"{plan.Stats.FilesToDownload} file(s) to download ({FormatBytes(plan.Stats.BytesToDownload)}), " +
-                      $"{plan.Stats.FoldersToCreateLocally} folder(s) to create, " +
-                      $"{plan.Stats.ToDeleteLocal} local item(s) to move to trash.";
+        var stats = plan.Stats;
+        var lines = new List<string>
+        {
+            $"↓ {stats.FilesToDownload} file(s) to download ({FormatBytes(stats.BytesToDownload)}), {stats.FoldersToCreateLocally} folder(s) to create locally.",
+            $"↑ {stats.FilesToUpload} file(s) to upload ({FormatBytes(stats.BytesToUpload)}), {stats.FoldersToCreateRemotely} folder(s) to create remotely.",
+            $"🗑 {stats.ToDeleteLocal} local item(s) to local trash, {stats.ToTrashRemote} remote item(s) to Proton's trash.",
+        };
+
+        if (stats.Conflicts > 0)
+        {
+            lines.Add($"⚠ {stats.Conflicts} conflict(s) — both sides changed.");
+        }
+
+        var summary = string.Join("\n", lines);
 
         var actionLines = plan.Actions.Take(50).Select(a => $"{a.Operation}  {a.RelativePath}").ToList();
         if (plan.Actions.Count > 50)
@@ -131,7 +198,13 @@ public partial class SyncWindow : Window
             actionLines.Add($"... and {plan.Actions.Count - 50} more");
         }
 
-        var actionsText = actionLines.Count == 0 ? "(nothing to do — already up to date)" : string.Join("\n", actionLines);
+        // A plan with no actions but with conflicts isn't "up to date" — under the Ask policy that
+        // is precisely the state that needs the user, so don't tell them everything is fine.
+        var actionsText = actionLines.Count > 0
+            ? string.Join("\n", actionLines)
+            : stats.Conflicts > 0
+                ? "(no automatic actions — every difference is a conflict awaiting your decision)"
+                : "(nothing to do — already up to date)";
 
         var dialog = new Window
         {

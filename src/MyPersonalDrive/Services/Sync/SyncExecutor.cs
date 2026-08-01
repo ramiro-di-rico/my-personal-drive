@@ -3,12 +3,11 @@ using MyPersonalDrive.Models;
 namespace MyPersonalDrive.Services.Sync;
 
 /// <summary>
-/// Scans both sides of a pair, reconciles, and executes the resulting plan against the local
-/// filesystem and the CLI. Scoped to <see cref="SyncDirection.RemoteToLocal"/> only for now —
-/// per docs/PLAN-LOCAL-SYNC.md §13 (F1), that's the direction that can't destroy cloud data,
-/// so it's the one this milestone ships first. <see cref="RunAsync"/> throws
-/// <see cref="NotSupportedException"/> for any other direction rather than silently doing the
-/// wrong thing.
+/// Scans both sides of a pair, reconciles, enqueues the plan durably, and executes it against
+/// the local filesystem and the CLI, updating the three-way baseline as it goes. All three
+/// directions are supported (docs/PLAN-LOCAL-SYNC.md F2); only <see cref="SyncDirection.TwoWay"/>
+/// consults and maintains a baseline, since a one-way mirror doesn't need one — its source side
+/// is authoritative by definition.
 /// </summary>
 public sealed class SyncExecutor
 {
@@ -16,13 +15,20 @@ public sealed class SyncExecutor
     private readonly SyncStateStore _stateStore;
     private readonly ILocalScanner _localScanner;
     private readonly IRemoteScanner _remoteScanner;
+    private readonly TimeProvider _timeProvider;
 
-    public SyncExecutor(ProtonDriveService protonDriveService, SyncStateStore stateStore, ILocalScanner localScanner, IRemoteScanner remoteScanner)
+    public SyncExecutor(
+        ProtonDriveService protonDriveService,
+        SyncStateStore stateStore,
+        ILocalScanner localScanner,
+        IRemoteScanner remoteScanner,
+        TimeProvider? timeProvider = null)
     {
         _protonDriveService = protonDriveService;
         _stateStore = stateStore;
         _localScanner = localScanner;
         _remoteScanner = remoteScanner;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -33,53 +39,114 @@ public sealed class SyncExecutor
     public async Task<SyncPlan> PreviewAsync(SyncPair pair, CancellationToken cancellationToken = default)
     {
         var (local, remote, _) = await ScanBothSidesAsync(pair, cancellationToken);
-        var baseline = pair.Direction == SyncDirection.TwoWay
-            ? await _stateStore.GetBaselineAsync(pair.Id, cancellationToken)
-            : new Dictionary<string, SyncBaselineEntry>();
-
-        return SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote, baseline, DateTimeOffset.UtcNow);
+        return SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote,
+            await LoadBaselineAsync(pair, cancellationToken), _timeProvider.GetUtcNow());
     }
 
     /// <summary>Scans, reconciles, enqueues the plan durably, then executes it.</summary>
     public async Task<SyncPlan> RunAsync(SyncPair pair, CancellationToken cancellationToken = default)
     {
-        if (pair.Direction != SyncDirection.RemoteToLocal)
+        var (local, remote, mapper) = await ScanBothSidesAsync(pair, cancellationToken);
+        var now = _timeProvider.GetUtcNow();
+        var plan = SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote,
+            await LoadBaselineAsync(pair, cancellationToken), now);
+
+        await _stateStore.EnqueueActionsAsync(pair.Id, plan.Actions, now, cancellationToken);
+
+        // Conflicts the reconciler left unresolved (the `Ask` policy) become durable 'Conflict'
+        // rows rather than being dropped on the floor — §5.6.
+        var unresolved = pair.ConflictPolicy == ConflictPolicy.Ask ? plan.Conflicts : [];
+        await _stateStore.EnqueueConflictsAsync(pair.Id, unresolved, now, cancellationToken);
+
+        var context = new RunContext(pair, mapper, local, remote,
+            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_protonDriveService, _stateStore, mapper, pair.Id) : null);
+        context.Baseline?.SeedFromScan(remote);
+
+        var (failureCount, aborted) = await DrainQueueAsync(context, cancellationToken);
+
+        var status = (failureCount, unresolved.Count) switch
         {
-            throw new NotSupportedException(
-                $"SyncExecutor only implements {nameof(SyncDirection.RemoteToLocal)} so far — " +
-                $"{pair.Direction} needs the baseline-aware TwoWay path from docs/PLAN-LOCAL-SYNC.md F2.");
+            (0, 0) => SyncPairStatus.Ok,
+            _ => SyncPairStatus.PartialFailure,
+        };
+        var error = BuildStatusMessage(failureCount, unresolved.Count, aborted);
+        await _stateStore.UpdatePairStatusAsync(pair.Id, _timeProvider.GetUtcNow(), status, error, cancellationToken);
+
+        return plan;
+    }
+
+    private static string? BuildStatusMessage(int failureCount, int conflictCount, bool aborted)
+    {
+        var parts = new List<string>();
+        if (failureCount > 0)
+        {
+            parts.Add($"{failureCount} action(s) failed");
         }
 
-        var (local, remote, mapper) = await ScanBothSidesAsync(pair, cancellationToken);
-        var plan = SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote, new Dictionary<string, SyncBaselineEntry>(), DateTimeOffset.UtcNow);
+        if (conflictCount > 0)
+        {
+            parts.Add($"{conflictCount} conflict(s) awaiting your decision");
+        }
 
-        await _stateStore.EnqueueActionsAsync(pair.Id, plan.Actions, DateTimeOffset.UtcNow, cancellationToken);
+        if (aborted)
+        {
+            parts.Add("run stopped early (sign in again, or free up space, then retry)");
+        }
 
+        return parts.Count == 0 ? null : string.Join("; ", parts);
+    }
+
+    /// <summary>
+    /// Works the durable queue in priority order. A row that fails transiently is scheduled for
+    /// a later attempt (<see cref="SyncRetryPolicy"/>) instead of being retried in a tight loop —
+    /// the retry lands on the next run, which is what makes the backoff meaningful for a queue
+    /// that outlives the process.
+    /// </summary>
+    private async Task<(int FailureCount, bool Aborted)> DrainQueueAsync(RunContext context, CancellationToken cancellationToken)
+    {
         var failureCount = 0;
-        foreach (var queuedAction in await _stateStore.GetPendingActionsAsync(pair.Id, cancellationToken))
+        foreach (var queuedAction in await _stateStore.GetPendingActionsAsync(context.Pair.Id, _timeProvider.GetUtcNow(), cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
             await _stateStore.MarkRunningAsync(queuedAction.Id, cancellationToken);
 
             try
             {
-                await ExecuteOneAsync(pair, mapper, queuedAction, remote, cancellationToken);
-                await _stateStore.MarkDoneAsync(queuedAction.Id, DateTimeOffset.UtcNow, cancellationToken);
-                await _stateStore.LogAsync(pair.Id, SyncLogLevel.Info, queuedAction.RelativePath, $"{queuedAction.Operation} completed.", DateTimeOffset.UtcNow, cancellationToken);
+                await ExecuteOneAsync(context, queuedAction, cancellationToken);
+                var completedAt = _timeProvider.GetUtcNow();
+                await _stateStore.MarkDoneAsync(queuedAction.Id, completedAt, cancellationToken);
+                await LogAsync(context, SyncLogLevel.Info, queuedAction.RelativePath, $"{queuedAction.Operation} completed.", cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 failureCount++;
-                await _stateStore.MarkFailedAsync(queuedAction.Id, ex.Message, nextAttemptAt: null, cancellationToken);
-                await _stateStore.LogAsync(pair.Id, SyncLogLevel.Error, queuedAction.RelativePath, $"{queuedAction.Operation} failed: {ex.Message}", DateTimeOffset.UtcNow, cancellationToken);
+                var failedAt = _timeProvider.GetUtcNow();
+                var nextAttemptAt = SyncRetryPolicy.NextAttemptAt(ex, queuedAction.AttemptCount, failedAt);
+                await _stateStore.MarkFailedAsync(queuedAction.Id, ex.Message, nextAttemptAt, cancellationToken);
+
+                var retryNote = nextAttemptAt is null ? "will not retry" : $"retry after {nextAttemptAt:HH:mm:ss}";
+                await LogAsync(context, SyncLogLevel.Error, queuedAction.RelativePath,
+                    $"{queuedAction.Operation} failed ({retryNote}): {ex.Message}", cancellationToken);
+
+                if (SyncRetryPolicy.ShouldAbortRun(ex))
+                {
+                    await LogAsync(context, SyncLogLevel.Warning, null,
+                        "Stopping this run: every remaining action would fail the same way.", cancellationToken);
+                    return (failureCount, true);
+                }
             }
         }
 
-        var status = failureCount == 0 ? SyncPairStatus.Ok : SyncPairStatus.PartialFailure;
-        await _stateStore.UpdatePairStatusAsync(pair.Id, DateTimeOffset.UtcNow, status, failureCount == 0 ? null : $"{failureCount} action(s) failed", cancellationToken);
-
-        return plan;
+        return (failureCount, false);
     }
+
+    private Task LogAsync(RunContext context, SyncLogLevel level, string? relativePath, string message, CancellationToken cancellationToken)
+        => _stateStore.LogAsync(context.Pair.Id, level, relativePath, message, _timeProvider.GetUtcNow(), cancellationToken);
+
+    private async Task<IReadOnlyDictionary<string, SyncBaselineEntry>> LoadBaselineAsync(SyncPair pair, CancellationToken cancellationToken)
+        => pair.Direction == SyncDirection.TwoWay
+            ? await _stateStore.GetBaselineAsync(pair.Id, cancellationToken)
+            : new Dictionary<string, SyncBaselineEntry>();
 
     private async Task<(IReadOnlyDictionary<string, NodeFingerprint> Local, IReadOnlyDictionary<string, NodeFingerprint> Remote, PathMapper Mapper)> ScanBothSidesAsync(SyncPair pair, CancellationToken cancellationToken)
     {
@@ -93,29 +160,167 @@ public sealed class SyncExecutor
         return (local, remote, mapper);
     }
 
-    private async Task ExecuteOneAsync(SyncPair pair, PathMapper mapper, QueuedSyncAction action, IReadOnlyDictionary<string, NodeFingerprint> remote, CancellationToken cancellationToken)
+    private async Task ExecuteOneAsync(RunContext context, QueuedSyncAction action, CancellationToken cancellationToken)
     {
+        var isFolder = ResolveIsFolder(context, action);
+
         switch (action.Operation)
         {
             case SyncOperation.CreateLocalFolder:
-                Directory.CreateDirectory(mapper.ToLocalAbsolute(action.RelativePath));
+                Directory.CreateDirectory(context.Mapper.ToLocalAbsolute(action.RelativePath));
+                break;
+
+            case SyncOperation.CreateRemoteFolder:
+                await CreateRemoteFolderAsync(context, action.RelativePath, cancellationToken);
                 break;
 
             case SyncOperation.DownloadFile:
-                await DownloadFileAsync(pair, mapper, action, remote, cancellationToken);
+                await DownloadFileAsync(context, action.RelativePath, cancellationToken);
+                break;
+
+            case SyncOperation.UploadFile:
+                await UploadFileAsync(context, action.RelativePath, cancellationToken);
                 break;
 
             case SyncOperation.DeleteLocal:
-                MoveToLocalTrash(pair, mapper, action.RelativePath);
+                MoveToLocalTrash(context.Pair, context.Mapper, action.RelativePath);
                 break;
 
+            case SyncOperation.TrashRemote:
+                await _protonDriveService.TrashItemAsync(context.Mapper.ToRemoteAbsolute(action.RelativePath), cancellationToken);
+                context.Baseline?.InvalidateRemoteFolder(ParentOf(action.RelativePath));
+                break;
+
+            case SyncOperation.ResolveConflictKeepBoth:
+                await ResolveConflictKeepBothAsync(context, action, cancellationToken);
+                break;
+
+            case SyncOperation.UpdateBaselineOnly:
+                break; // the baseline write below is the entire point of this operation
+
+            case SyncOperation.ClearBaseline:
+                if (context.Baseline is not null)
+                {
+                    await context.Baseline.ClearAsync(action.RelativePath, cancellationToken);
+                }
+
+                return; // no fingerprint to record — the row is gone on both sides
+
             default:
-                // TwoWay-only operations (UploadFile, rename/move, conflict resolution,
-                // baseline bookkeeping) aren't reachable here — RemoteToLocal's reconciliation
-                // never produces them (see SyncReconciler.ReconcileOneWay) — but guard anyway
-                // rather than silently doing nothing if that ever changes.
-                throw new NotSupportedException($"{action.Operation} is not implemented for RemoteToLocal sync.");
+                // RenameLocal/RenameRemote are §11/F5 territory: the reconciler never emits them
+                // yet (it has no rename detection), so reaching here means a plan was produced by
+                // something newer than this executor. Fail loudly rather than silently skipping.
+                throw new NotSupportedException($"{action.Operation} is not implemented yet (docs/PLAN-LOCAL-SYNC.md §11 / F5).");
         }
+
+        if (context.Baseline is not null)
+        {
+            await context.Baseline.RecordAsync(action.RelativePath, isFolder, _timeProvider.GetUtcNow(), cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// The baseline row's <c>IsFolder</c> has to be right even for operations that don't imply it
+    /// — <see cref="SyncOperation.UpdateBaselineOnly"/> fires for folders that already match on
+    /// both sides, and recording those as files would store a bogus (empty) fingerprint. The
+    /// scans are the authority; the local disk is the last resort for a path neither scan saw.
+    /// </summary>
+    private static bool ResolveIsFolder(RunContext context, QueuedSyncAction action)
+    {
+        if (action.Operation is SyncOperation.CreateLocalFolder or SyncOperation.CreateRemoteFolder)
+        {
+            return true;
+        }
+
+        if (action.Operation is SyncOperation.DownloadFile or SyncOperation.UploadFile or SyncOperation.ResolveConflictKeepBoth)
+        {
+            return false;
+        }
+
+        if (context.Remote.TryGetValue(action.RelativePath, out var remote))
+        {
+            return remote.IsFolder;
+        }
+
+        return context.Local.TryGetValue(action.RelativePath, out var local)
+            ? local.IsFolder
+            : Directory.Exists(context.Mapper.ToLocalAbsolute(action.RelativePath));
+    }
+
+    private async Task CreateRemoteFolderAsync(RunContext context, string relativePath, CancellationToken cancellationToken)
+    {
+        var parent = ParentOf(relativePath);
+        var name = NameOf(relativePath);
+
+        try
+        {
+            await _protonDriveService.CreateFolderAsync(context.Mapper.ToRemoteAbsolute(parent), name, cancellationToken);
+        }
+        catch (CliException ex) when (ex.Kind == CliErrorKind.AlreadyExists)
+        {
+            // Idempotent by design: a retried run, or a folder created by another client between
+            // the scan and now, is a success for our purposes, not a failure.
+        }
+
+        context.Baseline?.InvalidateRemoteFolder(parent);
+    }
+
+    /// <summary>
+    /// Uploads with the `replace` conflict strategy: the plan already decided this local version
+    /// wins (either the remote side is absent, or the decision table found only the local side
+    /// changed), so letting the CLI create a second "keep both" copy would contradict the plan.
+    /// True content conflicts never reach here — they go through
+    /// <see cref="ResolveConflictKeepBothAsync"/> or the policy branches in the reconciler.
+    /// </summary>
+    private async Task UploadFileAsync(RunContext context, string relativePath, CancellationToken cancellationToken)
+    {
+        var parent = ParentOf(relativePath);
+        var localAbsolutePath = context.Mapper.ToLocalAbsolute(relativePath);
+        if (!File.Exists(localAbsolutePath))
+        {
+            throw new FileNotFoundException($"'{relativePath}' disappeared locally before it could be uploaded.", localAbsolutePath);
+        }
+
+        await _protonDriveService.UploadFilesAsync([localAbsolutePath], context.Mapper.ToRemoteAbsolute(parent),
+            UploadConflictStrategy.Replace, cancellationToken);
+        context.Baseline?.InvalidateRemoteFolder(parent);
+    }
+
+    /// <summary>
+    /// §5.6's KeepBoth: the local version is renamed aside, the remote version takes the original
+    /// name, and the renamed copy is uploaded — so both survive and neither side loses content.
+    /// Ordered local-rename-first deliberately: if the download fails afterward, the local
+    /// version still exists under the conflict name, whereas downloading first would overwrite it.
+    /// </summary>
+    private async Task ResolveConflictKeepBothAsync(RunContext context, QueuedSyncAction action, CancellationToken cancellationToken)
+    {
+        if (action.SecondaryPath is null)
+        {
+            throw new InvalidOperationException($"A KeepBoth resolution for '{action.RelativePath}' has no conflict-copy path.");
+        }
+
+        var originalLocalPath = context.Mapper.ToLocalAbsolute(action.RelativePath);
+        var conflictLocalPath = context.Mapper.ToLocalAbsolute(action.SecondaryPath);
+
+        if (File.Exists(originalLocalPath))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(conflictLocalPath)!);
+            File.Move(originalLocalPath, conflictLocalPath, overwrite: false);
+        }
+
+        await DownloadFileAsync(context, action.RelativePath, cancellationToken);
+
+        if (File.Exists(conflictLocalPath))
+        {
+            await UploadFileAsync(context, action.SecondaryPath, cancellationToken);
+            if (context.Baseline is not null)
+            {
+                await context.Baseline.RecordAsync(action.SecondaryPath, isFolder: false, _timeProvider.GetUtcNow(), cancellationToken);
+            }
+        }
+
+        await LogAsync(context, SyncLogLevel.Warning, action.RelativePath,
+            $"Conflict kept both versions: the local copy is now '{action.SecondaryPath}'.", cancellationToken);
     }
 
     /// <summary>
@@ -124,16 +329,16 @@ public sealed class SyncExecutor
     /// the real name. Explicitly sets the local mtime afterward: Appendix A #6 confirmed
     /// `filesystem download` does not preserve it.
     /// </summary>
-    private async Task DownloadFileAsync(SyncPair pair, PathMapper mapper, QueuedSyncAction action, IReadOnlyDictionary<string, NodeFingerprint> remote, CancellationToken cancellationToken)
+    private async Task DownloadFileAsync(RunContext context, string relativePath, CancellationToken cancellationToken)
     {
-        var localAbsolutePath = mapper.ToLocalAbsolute(action.RelativePath);
+        var localAbsolutePath = context.Mapper.ToLocalAbsolute(relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(localAbsolutePath)!);
 
-        var tempDirectory = Path.Combine(pair.LocalPath, ".mypersonaldrive-tmp", Guid.NewGuid().ToString("N"));
+        var tempDirectory = Path.Combine(context.Pair.LocalPath, SyncCrashRecovery.TempFolderName, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDirectory);
         try
         {
-            await _protonDriveService.DownloadFileAsync(mapper.ToRemoteAbsolute(action.RelativePath), tempDirectory, cancellationToken);
+            await _protonDriveService.DownloadFileAsync(context.Mapper.ToRemoteAbsolute(relativePath), tempDirectory, cancellationToken);
 
             var fileName = Path.GetFileName(localAbsolutePath);
             var downloadedPath = Path.Combine(tempDirectory, fileName);
@@ -144,7 +349,7 @@ public sealed class SyncExecutor
 
             File.Move(downloadedPath, localAbsolutePath, overwrite: true);
 
-            if (remote.TryGetValue(action.RelativePath, out var fingerprint) && fingerprint.ModifiedAt is { } modifiedAt)
+            if (context.Remote.TryGetValue(relativePath, out var fingerprint) && fingerprint.ModifiedAt is { } modifiedAt)
             {
                 File.SetLastWriteTimeUtc(localAbsolutePath, modifiedAt.UtcDateTime);
             }
@@ -155,8 +360,8 @@ public sealed class SyncExecutor
             {
                 Directory.Delete(tempDirectory, recursive: true);
 
-                // Also remove the shared .mypersonaldrive-tmp parent once it's empty, so a
-                // sync run doesn't leave a visible (if dotfile-hidden) empty folder behind.
+                // Also remove the shared temp parent once it's empty, so a sync run doesn't leave
+                // a visible (if dotfile-hidden) empty folder behind.
                 var tempRoot = Path.GetDirectoryName(tempDirectory)!;
                 if (Directory.Exists(tempRoot) && !Directory.EnumerateFileSystemEntries(tempRoot).Any())
                 {
@@ -203,4 +408,24 @@ public sealed class SyncExecutor
             File.Move(sourcePath, trashPath);
         }
     }
+
+    private static string ParentOf(string relativePath)
+    {
+        var lastSlash = relativePath.LastIndexOf('/');
+        return lastSlash < 0 ? string.Empty : relativePath[..lastSlash];
+    }
+
+    private static string NameOf(string relativePath)
+    {
+        var lastSlash = relativePath.LastIndexOf('/');
+        return lastSlash < 0 ? relativePath : relativePath[(lastSlash + 1)..];
+    }
+
+    /// <summary>Everything one run needs to carry between actions.</summary>
+    private sealed record RunContext(
+        SyncPair Pair,
+        PathMapper Mapper,
+        IReadOnlyDictionary<string, NodeFingerprint> Local,
+        IReadOnlyDictionary<string, NodeFingerprint> Remote,
+        SyncBaselineWriter? Baseline);
 }

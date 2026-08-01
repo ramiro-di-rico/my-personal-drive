@@ -253,6 +253,57 @@ public class SyncStateStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Queue_RowAwaitingItsBackoff_IsNotHandedOutUntilTheTimePasses()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        await sut.EnqueueActionsAsync(pair.Id, [new SyncAction(SyncOperation.DownloadFile, "a.txt", null, 1, 1000)], T0);
+        var queued = Assert.Single(await sut.GetPendingActionsAsync(pair.Id));
+
+        await sut.MarkFailedAsync(queued.Id, "connection reset", nextAttemptAt: T0.AddSeconds(5));
+
+        Assert.Empty(await sut.GetPendingActionsAsync(pair.Id, T0.AddSeconds(4)));
+        Assert.Single(await sut.GetPendingActionsAsync(pair.Id, T0.AddSeconds(5)));
+
+        // Omitting `now` deliberately ignores the backoff — the "run everything now" caller.
+        Assert.Single(await sut.GetPendingActionsAsync(pair.Id));
+    }
+
+    [Fact]
+    public async Task Queue_BackoffComparison_HoldsAcrossTimeZoneOffsets()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        await sut.EnqueueActionsAsync(pair.Id, [new SyncAction(SyncOperation.DownloadFile, "a.txt", null, 1, 1000)], T0);
+        var queued = Assert.Single(await sut.GetPendingActionsAsync(pair.Id));
+
+        // Written as 10:00-03:00 (= 13:00Z). Naive string ordering would place it before 09:00Z
+        // even though it is four hours later, which would hand the row out far too early.
+        await sut.MarkFailedAsync(queued.Id, "connection reset", nextAttemptAt: new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.FromHours(-3)));
+
+        Assert.Empty(await sut.GetPendingActionsAsync(pair.Id, DateTimeOffset.Parse("2026-01-01T09:00:00Z")));
+        Assert.Single(await sut.GetPendingActionsAsync(pair.Id, DateTimeOffset.Parse("2026-01-01T13:00:00Z")));
+    }
+
+    [Fact]
+    public async Task Conflicts_AreParkedSeparatelyFromPendingWork()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.TwoWay, ConflictPolicy.Ask);
+
+        await sut.EnqueueConflictsAsync(pair.Id, [new SyncConflict("a.txt", ConflictReason.BothChanged)], T0);
+
+        // A parked conflict is never executed as pending work...
+        Assert.Empty(await sut.GetPendingActionsAsync(pair.Id));
+
+        // ...but is readable for the UI to resolve, with the reason preserved.
+        var parked = Assert.Single(await sut.GetConflictActionsAsync(pair.Id));
+        Assert.Equal("a.txt", parked.RelativePath);
+        Assert.Equal(SyncQueueState.Conflict, parked.State);
+        Assert.Equal(nameof(ConflictReason.BothChanged), parked.LastError);
+    }
+
+    [Fact]
     public async Task Log_ThenGetRecent_ReturnsNewestFirst()
     {
         var sut = CreateSut();

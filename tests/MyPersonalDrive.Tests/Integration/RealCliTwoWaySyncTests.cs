@@ -16,6 +16,13 @@ namespace MyPersonalDrive.Tests.Integration;
 /// Everything happens inside one throwaway remote folder, and <see cref="Dispose"/> trashes it
 /// (never `delete` — docs/PLAN-LOCAL-SYNC.md §11's safety rule applies to our own test debris too).
 /// </summary>
+/// <remarks>
+/// Both real-CLI test classes share one xUnit collection so they never run concurrently. xUnit
+/// parallelizes across classes by default, and concurrent `proton-drive` processes intermittently
+/// crash on the CLI's own SQLite cache (docs/PLAN-LOCAL-SYNC.md Appendix A #11) — which made these
+/// tests fail differently on every run until they were serialized.
+/// </remarks>
+[Collection("RealCli")]
 public sealed class RealCliTwoWaySyncTests : IDisposable
 {
     private readonly ITestOutputHelper _output;

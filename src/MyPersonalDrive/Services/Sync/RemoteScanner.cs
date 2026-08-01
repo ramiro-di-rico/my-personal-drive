@@ -13,17 +13,22 @@ public interface IRemoteScanner
 /// listing (docs/PLAN-LOCAL-SYNC.md Appendix A #4). Processes one "wave" (depth level) of
 /// folders at a time, bounded by <paramref name="maxConcurrency"/>, which also happens to
 /// match the plan's folder-creation-shallowest-first ordering for free. Each CLI call costs
-/// ~3.5s of process-startup overhead regardless of folder size (Appendix A #11a) — keep this
-/// scanner's concurrency and the caller's polling interval in mind together; this is the
-/// component that most needs the "cache unchanged subtrees" optimization the appendix flags,
-/// not yet implemented here.
+/// ~3.5s of process-startup overhead regardless of folder size (Appendix A #11a), and subtree
+/// caching is impossible with this CLI (#11b), so a scan is unavoidably O(folders) × 3.5s.
+///
+/// <b>Concurrency defaults to 1 on purpose.</b> It used to default to 3, on the strength of
+/// Appendix A #11's single trial of four parallel `list` calls. Re-testing found that trial was
+/// simply lucky: concurrent `proton-drive` processes intermittently crash on the CLI's *own*
+/// internal SQLite cache with `SQLITE_BUSY` (~1 in 3 calls in a three-way race), taking the whole
+/// scan down with them. Raise this only against a CLI version verified to serialize its cache
+/// access.
 /// </summary>
 public sealed class RemoteScanner : IRemoteScanner
 {
     private readonly ProtonDriveService _service;
     private readonly int _maxConcurrency;
 
-    public RemoteScanner(ProtonDriveService service, int maxConcurrency = 3)
+    public RemoteScanner(ProtonDriveService service, int maxConcurrency = 1)
     {
         _service = service;
         _maxConcurrency = maxConcurrency;

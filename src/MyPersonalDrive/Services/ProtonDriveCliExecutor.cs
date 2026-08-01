@@ -107,7 +107,10 @@ public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
         {
             var stdoutText = stdout.ToString();
             var stderrText = stderr.ToString();
-            var errorText = stderrText.Length == 0 ? stdoutText : stderrText;
+            // An internal CLI crash puts a bare `====` banner on stderr and the real diagnosis on
+            // stdout, so "stderr if non-empty" produced exceptions whose entire message was
+            // `===============`. Fall through to stdout whenever stderr carries no actual words.
+            var errorText = HasContent(stderrText) ? stderrText : stdoutText;
             var kind = CliErrorClassifier.Classify(process.ExitCode, stdoutText, stderrText);
             CommandFinished?.Invoke(this, new CliCommandFinishedEventArgs(commandText, process.ExitCode));
             throw new CliException(
@@ -142,6 +145,13 @@ public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
         var quoted = arguments.Select(a => a.Contains(' ') ? $"\"{a}\"" : a);
         return $"{fileName} {string.Join(' ', quoted)}".Trim();
     }
+
+    /// <summary>
+    /// Whether a captured stream holds anything a human could act on. The CLI's crash banner is
+    /// pure `=` and whitespace, which is non-empty but says nothing.
+    /// </summary>
+    private static bool HasContent(string text)
+        => text.AsSpan().TrimStart().TrimStart('=').TrimStart().Length > 0;
 
     private static async Task ReadStreamAsync(StreamReader reader, Action<string> onLine, CancellationToken cancellationToken)
     {

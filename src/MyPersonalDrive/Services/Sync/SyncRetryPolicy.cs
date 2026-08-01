@@ -49,7 +49,9 @@ public static class SyncRetryPolicy
     {
         CliException cli => cli.Kind switch
         {
-            CliErrorKind.Network or CliErrorKind.Timeout or CliErrorKind.Unknown => true,
+            // Busy is the textbook retry case: the CLI lost a race on its own SQLite cache and
+            // the same command will simply work next time (Appendix A #11).
+            CliErrorKind.Network or CliErrorKind.Timeout or CliErrorKind.Busy or CliErrorKind.Unknown => true,
 
             // Auth and quota are real conditions that a retry cannot fix — they need the user.
             // §7 wants the whole pair paused for these; that's the scheduler's job in F3, so for

@@ -45,6 +45,24 @@ public class CliErrorClassifierTests
     }
 
     [Fact]
+    public void DetectsTheCliLosingARaceOnItsOwnSqliteCache()
+    {
+        // Verified against the real CLI (docs/PLAN-LOCAL-SYNC.md Appendix A #11): concurrent
+        // `proton-drive` processes crash this way, and it's purely transient.
+        Assert.Equal(CliErrorKind.Busy, CliErrorClassifier.Classify(1, "code: \"SQLITE_BUSY\"", ""));
+        Assert.Equal(CliErrorKind.Busy, CliErrorClassifier.Classify(1, "", "database is locked"));
+    }
+
+    [Fact]
+    public void ClassifiesUsingStdoutWhenStderrIsJustTheCrashBanner()
+    {
+        // The real failure mode: the banner lands on stderr and the diagnosis on stdout. Reading
+        // only stderr classified this as Unknown and produced a "===============" error message.
+        const string banner = "===============================================\n";
+        Assert.Equal(CliErrorKind.Busy, CliErrorClassifier.Classify(1, "{ code: 'SQLITE_BUSY', errno: 5 }", banner));
+    }
+
+    [Fact]
     public void ClassificationIsCaseInsensitive()
     {
         Assert.Equal(CliErrorKind.NotAuthenticated, CliErrorClassifier.Classify(1, "", "LOGIN FIRST"));

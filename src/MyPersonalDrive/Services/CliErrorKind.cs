@@ -15,6 +15,15 @@ public enum CliErrorKind
     Quota,
     Network,
     Timeout,
+
+    /// <summary>
+    /// The CLI lost a race against another `proton-drive` process on its own internal SQLite
+    /// cache (`SQLITE_BUSY`). Verified reproducible — see docs/PLAN-LOCAL-SYNC.md Appendix A #11.
+    /// Nothing is wrong with the request; it just has to be tried again, ideally without a
+    /// concurrent sibling.
+    /// </summary>
+    Busy,
+
     PermissionDenied,
     InvalidArgument
 }

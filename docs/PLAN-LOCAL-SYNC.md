@@ -100,11 +100,47 @@
       empty-state window renders correctly, and a pair seeded directly into `cache.db` renders
       its remote/local paths, direction, and formatted "Up to date (<time>)" status correctly,
       with no Avalonia binding errors in the log.
-      **Not yet verified**: an actual end-to-end click-through (Add pair → Preview → Run now)
-      from within the running app. Keyboard-driven input (`XTestFakeKeyEvent`, unlike the mouse
-      equivalent) *did* work in this session — Tab successfully moved focus between controls —
-      so a future session can likely finish this via Tab+Enter navigation instead of a mouse,
-      or by asking the user to click through it directly.
+      **UI click-through — attempted 2026-08-01, partially closed.**
+
+      *Correcting this entry's earlier claim*: keyboard injection does **not** work either. The
+      earlier note said `XTestFakeKeyEvent` moved focus successfully; re-testing shows it does not
+      reach the app at all. Verified carefully rather than assumed: the app runs as an XWayland
+      client (`xwininfo` shows an X window) and holds X input focus (`XGetInputFocus`), yet Tab and
+      typed characters produced **zero** pixel change, while an `XResizeWindow` on the same window
+      was captured immediately — so the capture pipeline is live and it's the input that's dropped.
+      Nothing leaked into other windows (the app's own settings file was untouched).
+
+      Tooling notes for the next attempt, all built and left in place under the session scratchpad:
+      screenshots need `XGetImage` **on the window** (`ffmpeg -f x11grab` on the X root returns
+      solid black under this compositor, and `org.gnome.Shell.Screenshot` answers
+      `AccessDenied`). No input tool is installed (`xdotool`/`ydotool`/`wtype`), and no nested X
+      server either (`Xvfb`/`Xephyr`) — **installing `xvfb` and running the app on a headless
+      display is the most promising route to a fully automated click-through**, since XTest works
+      normally there. That needs `sudo`, so it wasn't done unprompted.
+
+      *What did get verified*, via `tests/MyPersonalDrive.Tests/Integration/RealCliSyncPanelTests.cs`
+      (gated the same way as the F2 integration test): the panel's view-models driven exactly as
+      the window drives them — same services, same real CLI, same `Request*Async` callbacks —
+      through the whole flow. Empty state → both §12 validation rejections (non-absolute remote
+      path, refusing `$HOME`) → dialog cancellation as a no-op → pair created with the right
+      `DirectionText`/`StatusText` → duplicate pair surfacing the friendly UNIQUE message instead
+      of a crash → Preview declined leaving the local folder genuinely untouched → Preview
+      accepted actually downloading the file and creating the subfolder → status flipping to
+      "Up to date" → surviving a panel reload → Remove clearing both the list and the database.
+      `AsyncCommand` gained an awaitable `ExecuteAsync` for this (`ICommand.Execute` is
+      `async void`, so nothing could tell when a command finished); `Execute` is now a wrapper
+      around it and keeps the same crash-proofing.
+
+      **So the remaining gap is narrow but real**: the Avalonia layer itself — XAML bindings, the
+      dialogs' own controls, and the `StorageProvider` folder picker — is still only
+      screenshot-verified for the panel window, never actually operated.
+
+      **Known-failing**: on the last serialized run of the two integration tests, one of them
+      still failed (2 passed, 1 failed) *after* the concurrency fix. The diagnostic run was cut
+      short, so **which test and why is unknown** — do not assume the `SQLITE_BUSY` serialization
+      fully fixed it. Re-run
+      `MYPERSONALDRIVE_INTEGRATION=1 dotnet test --filter FullyQualifiedName~RealCli` and read the
+      failure before trusting these two tests as a gate.
 - [x] **F2 — done (manual bidirectional sync).** 184 unit tests pass plus one gated integration
       test against the real account; the AOT publish is clean.
 
@@ -591,8 +627,9 @@ user-triggered remote scans over periodic ones on large trees.
 `TransferQueue`:
 
 - Consumes `SyncQueue` ordered by `(Priority, Id)`.
-- Bounded concurrency via `SemaphoreSlim`, default value **2**, configurable (depends on F0 #11
-  — if the CLI has a session lock, it's 1).
+- Bounded concurrency via `SemaphoreSlim`, default value **1** — **not** the 2 originally planned.
+  Appendix A #11 (re-tested) found concurrent `proton-drive` processes crash on the CLI's own
+  SQLite cache, so the queue must serialize CLI calls entirely.
 - Exponential backoff + jitter retries: 5 s, 15 s, 45 s, 2 min, 5 min; max 5 attempts, then
   `State = 'Failed'` and visible in the UI.
 - **Error classification** (requires F0 #10) to decide whether to retry:
@@ -651,9 +688,12 @@ This is what needs to change in what already exists, beyond adding new files.
 ## 9. Concurrency and consistency
 
 - One lock per pair (`SemaphoreSlim` in `SyncScheduler`) — never two cycles of the same pair.
-- The file browser and sync engine **share the CLI**: add a global semaphore over
-  `proton-drive` processes so a large sync doesn't make browsing unresponsive.
-  **Give priority to interactive operations** (the browser's queue is served first).
+- The file browser and sync engine **share the CLI**: a global semaphore over `proton-drive`
+  processes is **mandatory, with exactly one slot** — not a tuning knob for responsiveness.
+  Appendix A #11 (re-tested) found concurrent CLI processes crash each other on the CLI's internal
+  SQLite cache, so two simultaneous invocations are a correctness problem, not just a slow one.
+  **Give priority to interactive operations** (the browser's request jumps the sync queue), which
+  matters more now that the slot count is 1.
 - When sync modifies the remote side, invalidate the `DriveItems` for the affected folder so
   the browser doesn't show stale data.
 - When sync writes locally, **suppress the watcher events it generates itself**: keep a set of
@@ -933,11 +973,43 @@ Confirmed two messages:
 Still **not** verified: quota and network errors. Still exit code 1 for everything observed —
 no distinct codes per failure type, so `CliErrorClassifier` stays substring-based.
 
-### #11 — Concurrent processes ✅ fine, but see the cost note below
+### #11 — Concurrent processes ❌ NOT safe — this reverses the original finding
 
-Ran 4 concurrent `filesystem list` processes against the same account: all 4 succeeded, all
-returned the same 11 items, no errors, no observed lock contention. `TransferQueue`'s planned
-default concurrency of 2 (§7) is conservatively safe; could likely go higher for read-only scans.
+~~Ran 4 concurrent `filesystem list` processes: all 4 succeeded, no lock contention.
+`TransferQueue`'s default concurrency of 2 is conservatively safe; could likely go higher.~~
+**That conclusion came from a single trial, and re-testing (2026-08-01) shows the trial was
+simply lucky.**
+
+Concurrent `proton-drive` processes **intermittently crash on the CLI's own internal SQLite
+cache**. Observed failure rate: ~1 in 3 calls in a three-way race, and it reproduced with plain
+read-only `list` calls on *different* folders — the CLI writes its cache on every listing
+(`setEntity`/`setShareKey`), so even "read-only" invocations contend. The crash is an unhandled
+rejection, exit code 1:
+
+```
+code: "SQLITE_BUSY"
+  at setEntity (src/cache/sqliteCache.ts:25:21)
+  at setShareKey (../client/js/src/internal/shares/cryptoCache.ts:25:31)
+  at subscribeToTreeEvents (../client/js/src/internal/events/index.ts:169:34)
+Error details: { code: 'SQLITE_BUSY', errno: 5, byteOffset: -1 }
+```
+
+**How it was found:** the two real-CLI integration tests began failing differently on every run.
+xUnit parallelizes across test classes, so the two were driving the CLI concurrently. They now
+share one xUnit collection, and the *product* code changed as follows:
+
+- **`RemoteScanner`'s default concurrency dropped from 3 to 1.** This was a live bug on the F1/F2
+  path: a BFS wave of 3 parallel `list` calls could take the whole scan down.
+- **New `CliErrorKind.Busy`**, classified from `SQLITE_BUSY`/`database is locked` and treated as
+  retryable by `SyncRetryPolicy` — it is the textbook retry case.
+- **`CliErrorClassifier` and `ProtonDriveCliExecutor` now read both streams.** This crash writes a
+  bare `===============` banner to **stderr** and the actual diagnosis to **stdout**, so the old
+  "prefer stderr, fall back to stdout only if empty" rule classified it as `Unknown` and produced
+  a `CliException` whose entire message was `===============`.
+
+Consequences elsewhere in this plan: **§7's `TransferQueue` default concurrency must be 1, not 2**,
+and **§9's shared-CLI semaphore is a serializer, not a priority queue over N slots** — there is
+only ever one slot. Revisit only against a CLI version verified to serialize its own cache access.
 
 **#11a — unplanned but important finding: CLI cold-start cost.** A single `filesystem list`
 call took **~3.5 seconds wall-clock**, almost entirely Node.js/SDK startup (the 4-parallel test

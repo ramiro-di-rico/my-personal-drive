@@ -133,7 +133,8 @@ public sealed class RealCliTwoWaySyncTests : IDisposable
         _output.WriteLine($"run 4: {string.Join(", ", fourth.Actions.Select(a => $"{a.Operation} {a.RelativePath}"))}");
 
         Assert.Equal(1, fourth.Stats.ToTrashRemote);
-        Assert.DoesNotContain("remote-only.txt", (await ListRemoteAsync()).Keys);
+        Assert.True(await EventuallyGoneFromRemoteAsync("remote-only.txt"),
+            "the trashed file was still listed after waiting for the listing to converge");
 
         // ---------- and the pair ends healthy, with a baseline covering what survived
         var finalPair = await stateStore.GetPairAsync(pair.Id);
@@ -152,6 +153,26 @@ public sealed class RealCliTwoWaySyncTests : IDisposable
         File.WriteAllText(absolutePath, content);
         // Backdated so LocalScanner's "still being written" guard doesn't skip it this cycle.
         File.SetLastWriteTimeUtc(absolutePath, DateTime.UtcNow.AddMinutes(-5));
+    }
+
+    /// <summary>
+    /// A listing issued right after a `trash` still returns the trashed node a good fraction of
+    /// the time — measured convergence was ~7s, which is on the same order as the ~3.5s a single
+    /// CLI process takes to start, so asserting it immediately was a coin flip (it failed ~2 runs
+    /// in 3). Polls instead of assuming. See docs/PLAN-LOCAL-SYNC.md Appendix A #15.
+    /// </summary>
+    private async Task<bool> EventuallyGoneFromRemoteAsync(string name, int attempts = 4)
+    {
+        for (var attempt = 1; attempt <= attempts; attempt++)
+        {
+            if (!(await ListRemoteAsync()).ContainsKey(name))
+            {
+                _output.WriteLine($"'{name}' gone from the listing on attempt {attempt}");
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task<Dictionary<string, DriveItem>> ListRemoteAsync()

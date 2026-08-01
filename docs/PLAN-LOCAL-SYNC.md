@@ -135,12 +135,17 @@
       dialogs' own controls, and the `StorageProvider` folder picker — is still only
       screenshot-verified for the panel window, never actually operated.
 
-      **Known-failing**: on the last serialized run of the two integration tests, one of them
-      still failed (2 passed, 1 failed) *after* the concurrency fix. The diagnostic run was cut
-      short, so **which test and why is unknown** — do not assume the `SQLITE_BUSY` serialization
-      fully fixed it. Re-run
-      `MYPERSONALDRIVE_INTEGRATION=1 dotnet test --filter FullyQualifiedName~RealCli` and read the
-      failure before trusting these two tests as a gate.
+      ~~**Known-failing**: one of the two integration tests still fails after the concurrency fix;
+      which and why is unknown.~~ **Diagnosed and fixed (2026-08-02).** It was
+      `RealCliTwoWaySyncTests`, failing ~2 runs in 3, and it was *not* residual `SQLITE_BUSY`: a
+      listing issued right after a `trash` still returns the trashed node about two thirds of the
+      time (new Appendix A #15). That was hiding one real engine bug — the executor re-read the
+      remote side after a deletion and recorded a baseline row claiming the trashed copy was alive
+      — plus one over-strict test assertion, which now polls for convergence instead of assuming
+      it. **Three consecutive green runs** after the fix, with the poll data confirming the cause
+      (2 of the 3 needed a second listing attempt). Appendix A #15 also records a *still-open*
+      consequence: a deleted file can transiently resurrect if you sync again inside the staleness
+      window.
 - [x] **F2 — done (manual bidirectional sync).** 184 unit tests pass plus one gated integration
       test against the real account; the AOT publish is clean.
 
@@ -1090,6 +1095,41 @@ skew, the "empty folder detection" class of bugs) for files that already have a
 `claimedDigests.sha1` on the remote side. Practical policy: **compare `(size, sha1)` when the
 remote side has a hash; fall back to `(size, ModifiedAt-with-tolerance)` only when it doesn't**
 (e.g., very old revisions uploaded before this field existed, or non-standard upload paths).
+
+### #15 — A listing right after a mutation can be stale ⚠️ new finding (2026-08-02)
+
+**A `filesystem list` issued immediately after a `filesystem trash` still returns the trashed
+node, roughly two times out of three.** Measured convergence was ~7s, which is the same order as
+the ~3.5s a single CLI process takes to start — so "trash, then list in the next process" is
+essentially a coin flip. Not investigated: whether the staleness is Proton's backend being
+eventually consistent, or the CLI's own SQLite cache serving stale children (the cache exists —
+see #11 — and nothing suggests `trash` invalidates it).
+
+How it surfaced: the F2 integration test failed ~2 runs in 3, always on the same assertion, and
+the failure moved *earlier* in the test once the product bug below was fixed — which is what
+identified the remaining failure as the test's own verification racing, not the engine's.
+
+**Product consequence, already fixed:** `SyncExecutor` no longer re-reads the remote side after a
+deletion. `DeleteLocal`/`TrashRemote` only ever arise when the node is gone on *both* sides
+(§5.2), so the baseline outcome is known by construction — asking was both unnecessary (it costs a
+~3.5s call) and wrong (a stale answer recorded a baseline row claiming the remote copy was still
+alive, moments after we trashed it).
+
+**Product consequence, still open — a deleted file can transiently resurrect.** After
+`TrashRemote` clears the baseline row, a *next* run whose remote scan is still stale sees
+`L=absent, R=present, B=absent`, which §5.2 reads as "new remotely" and answers with
+`DownloadFile`. The file comes back locally, and the run after that deletes it again. Nothing is
+lost (the local copy is re-downloaded and the remote copy is in Proton's trash) but it is churn and
+it looks alarming. Only reachable by syncing again within the staleness window — a fast double
+"Sync now" in F2, or a short poll interval in F3. Candidate mitigations, none implemented:
+1. **A short-lived "recently trashed by us" set per pair** (TTL ~60s) whose paths the reconciler
+   ignores on the remote side. This is the remote-side twin of §9's echo suppression for the local
+   watcher, which the plan already requires — worth building as one mechanism.
+2. Leave the baseline row in place on `TrashRemote` instead of clearing it, so a stale listing
+   reconciles back to `TrashRemote` (idempotent) and self-cleans once converged. Simpler, but
+   trashing an already-trashed path probably returns `Node not found`, which would mark the run
+   `PartialFailure`.
+3. Defer to F3, where the scheduler needs echo suppression anyway.
 
 ---
 

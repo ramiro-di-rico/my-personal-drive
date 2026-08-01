@@ -260,7 +260,6 @@ public class SyncExecutorTests : IDisposable
         });
         executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}]"); // run 2: scan — still there remotely
         executor.EnqueueOutput("");                                 // run 2: trash
-        executor.EnqueueOutput("[]");                               // run 2: baseline re-read — now gone
         executor.EnqueueOutput("[]");                               // run 3: scan
 
         var stateStore = new SyncStateStore(_dbPath);
@@ -278,6 +277,44 @@ public class SyncExecutorTests : IDisposable
 
         // ...and therefore a third run has nothing left to do at all.
         Assert.Empty((await sut.RunAsync(pair)).Actions);
+    }
+
+    [Fact]
+    public async Task RunAsync_TwoWay_TrashRemote_ClearsTheBaseline_EvenIfTheRemoteStillListsTheTrashedFile()
+    {
+        // Reproduces the real flake (~1 real-account run in 3): Proton's listing is not
+        // read-your-writes consistent after a `trash`, so a re-read issued right afterwards can
+        // still report the node alive. The executor must not ask — a deletion's outcome is known
+        // by construction — otherwise it records a baseline row claiming the remote copy survived.
+        var executor = new FakeCliExecutor();
+        executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}]"); // run 1: scan
+        executor.EnqueueOutput(args =>                               // run 1: download
+        {
+            File.WriteAllText(Path.Combine(args[3], "a.txt"), "hello");
+            return "";
+        });
+        executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}]"); // run 2: scan
+        executor.EnqueueOutput("");                                 // run 2: trash succeeds
+        // Any further listing in run 2 would be the stale re-read. Leaving the queue empty makes
+        // the FakeCliExecutor throw if the executor asks — the assertion is "it must not ask".
+        executor.EnqueueOutput("[]");                               // run 3: scan, now consistent
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        await sut.RunAsync(pair);
+        File.Delete(Path.Combine(_localRoot, "a.txt"));
+        var plan = await sut.RunAsync(pair);
+
+        Assert.Equal(1, plan.Stats.ToTrashRemote);
+        Assert.Empty(await stateStore.GetBaselineAsync(pair.Id));
+        Assert.Equal(SyncPairStatus.Ok, (await stateStore.GetPairAsync(pair.Id))!.LastStatus);
+
+        // No listing was issued between the trash and the end of the run.
+        var callsAfterTrash = executor.Calls.SkipWhile(c => !c.Arguments.Contains("trash")).Skip(1);
+        Assert.DoesNotContain(callsAfterTrash, c => c.Arguments.Contains("list"));
     }
 
     [Fact]

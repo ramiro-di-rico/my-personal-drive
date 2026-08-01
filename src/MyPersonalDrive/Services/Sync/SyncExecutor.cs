@@ -182,14 +182,27 @@ public sealed class SyncExecutor
                 await UploadFileAsync(context, action.RelativePath, cancellationToken);
                 break;
 
+            // Both deletions end with the node absent on *both* sides — that's the only shape the
+            // decision table produces them in (§5.2: delete one side only when the other side is
+            // already gone and the survivor is unmodified). So the baseline effect is known
+            // without asking anyone: drop the row.
+            //
+            // Deliberately not re-reading the remote side the way every other operation does.
+            // Proton's listing is not read-your-writes consistent right after a `trash`: a fresh
+            // `filesystem list` issued immediately afterwards still returns the trashed node a
+            // good fraction of the time (reproduced ~1 run in 3). Re-reading therefore recorded a
+            // baseline row claiming the remote copy was alive, moments after we trashed it. It
+            // also saves a ~3.5s CLI call per deletion.
             case SyncOperation.DeleteLocal:
                 MoveToLocalTrash(context.Pair, context.Mapper, action.RelativePath);
-                break;
+                await ClearBaselineAsync(context, action.RelativePath, cancellationToken);
+                return;
 
             case SyncOperation.TrashRemote:
                 await _protonDriveService.TrashItemAsync(context.Mapper.ToRemoteAbsolute(action.RelativePath), cancellationToken);
                 context.Baseline?.InvalidateRemoteFolder(ParentOf(action.RelativePath));
-                break;
+                await ClearBaselineAsync(context, action.RelativePath, cancellationToken);
+                return;
 
             case SyncOperation.ResolveConflictKeepBoth:
                 await ResolveConflictKeepBothAsync(context, action, cancellationToken);
@@ -199,11 +212,7 @@ public sealed class SyncExecutor
                 break; // the baseline write below is the entire point of this operation
 
             case SyncOperation.ClearBaseline:
-                if (context.Baseline is not null)
-                {
-                    await context.Baseline.ClearAsync(action.RelativePath, cancellationToken);
-                }
-
+                await ClearBaselineAsync(context, action.RelativePath, cancellationToken);
                 return; // no fingerprint to record — the row is gone on both sides
 
             default:
@@ -218,6 +227,9 @@ public sealed class SyncExecutor
             await context.Baseline.RecordAsync(action.RelativePath, isFolder, _timeProvider.GetUtcNow(), cancellationToken);
         }
     }
+
+    private static Task ClearBaselineAsync(RunContext context, string relativePath, CancellationToken cancellationToken)
+        => context.Baseline?.ClearAsync(relativePath, cancellationToken) ?? Task.CompletedTask;
 
     /// <summary>
     /// The baseline row's <c>IsFolder</c> has to be right even for operations that don't imply it

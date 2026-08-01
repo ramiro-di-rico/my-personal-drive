@@ -71,19 +71,15 @@
         Appendix A #8's verified argument order (sources first, target parent last). 3 tests.
         Not yet *called* by anything — the consumer is F2's `RenameRemote`/`MoveRemote`.
         Argument order re-verified against the live CLI's `--help` (see Appendix A #11b).
-      - **Still open, and the plan's proposed design for it is unsound:** `RemoteScanner` doesn't
-        cache unchanged subtrees. §6.2 proposes a `RemoteFolderEtag` (hash of a folder's children
-        listing) to skip unchanged subtrees, but that **cannot be correct as specified**: the etag
-        of folder `F` only covers `F`'s direct children, so a file changed inside `F/G/H` leaves
-        `F`'s listing byte-identical and the skip would silently miss the change — a lost-update
-        bug, the worst class for a sync engine. Computing the etag also requires listing `F`
-        anyway, so it saves nothing at `F`'s own level.
-        A sound version needs a propagating signal, which is an open empirical question about the
-        CLI/Proton: does a folder's `modificationTime` bump when a *descendant* changes, or is
-        there an events/changes command? Neither was tested in F0. **Blocked on that
-        investigation** (needs the CLI executable). Until then the honest position is: no subtree
-        caching, which is fine for F1's manual "Sync now" and is a hard prerequisite for F3's
-        polling default.
+      - **Closed as not achievable:** `RemoteScanner` doesn't cache unchanged subtrees, and
+        cannot. §6.2's proposed `RemoteFolderEtag` was **unsound as specified** (a folder's
+        children-listing hash says nothing about its grandchildren, so a change inside `F/G/H`
+        leaves `F`'s listing identical — a silent lost update), and Appendix A #11b then verified
+        against the real account that **no propagating signal exists**: folder `modificationTime`
+        doesn't move for a descendant change (not even for a direct child), and the CLI has no
+        events/delta command. Every remote scan must BFS the whole tree at ~3.5s per folder. This
+        doesn't hurt F1/F2's manual "Sync now", but it makes F3's fixed 5-minute polling default
+        unworkable — see #11b for what F3 has to do instead.
 - [x] **F1 (UI) — done, pending a manual click-through.** New `SyncPanelViewModel` /
       `SyncPairViewModel` (kept out of `MainWindowViewModel` per docs/PLAN-TECH-DEBT.md's
       recommendation), a new `SyncWindow` opened via a 🔁 button in `MainWindow`'s header
@@ -109,7 +105,8 @@
       equivalent) *did* work in this session — Tab successfully moved focus between controls —
       so a future session can likely finish this via Tab+Enter navigation instead of a mouse,
       or by asking the user to click through it directly.
-- [x] **F2 — done (manual bidirectional sync).** 183 tests pass; the AOT publish is clean.
+- [x] **F2 — done (manual bidirectional sync).** 184 unit tests pass plus one gated integration
+      test against the real account; the AOT publish is clean.
 
       Worth recording up front: **the reconciler already implemented the whole of §5.2, TwoWay
       and all four conflict policies included, back in F1** — its status entry undersold it. So
@@ -155,10 +152,28 @@
         currently a download+trash pair. Correct, just more expensive than it needs to be.
       - The recursive folder `download` from Appendix A #5 is still unused; the first sync of a
         pair downloads file-by-file.
-      - Not yet verified end-to-end against the real account (F1's click-through is still
-        outstanding too). Every F2 test is against `FakeCliExecutor`, so the *command strings* are
-        pinned but the CLI's real responses to `upload -c replace` and `create-folder` in a live
-        TwoWay run are not.
+      - F1's UI click-through is still outstanding (see F1's entry) — F2 added the direction and
+        conflict-policy selectors to that same untested dialog.
+
+      **Verified end-to-end against the real CLI and a live account** (2026-08-01), not only mocks.
+      `tests/MyPersonalDrive.Tests/Integration/RealCliTwoWaySyncTests.cs` drives a four-run TwoWay
+      lifecycle inside a throwaway remote folder and trashes it afterward; it is skipped unless
+      `MYPERSONALDRIVE_INTEGRATION=1` (it takes ~1m45s — ~30 CLI calls at ~3.5s each — and needs an
+      interactive `auth login` first). Confirmed on the real account:
+      - run 1: a remote-only file downloads, a local-only file uploads, a local-only folder is
+        created remotely, and the uploaded file's `claimedModificationTime` comes back matching the
+        local mtime we set (which is what keeps the baseline stable instead of drifting each run);
+      - run 2: **zero actions** — the baseline genuinely works against real CLI fingerprints;
+      - run 3: a local edit uploads with `-c replace` and leaves **exactly one** remote copy (no
+        "keep both" sibling), at the new size;
+      - run 4: a local delete trashes the remote copy; `filesystem delete` is never issued.
+
+      **It also caught a real bug that every mock-based test missed**: `TrashRemote` fell through to
+      the shared post-success baseline write, where both sides are now absent, and upserted a
+      both-null row — a baseline entry claiming to know a path that exists nowhere. It self-healed
+      (the next run emits `ClearBaseline`) but cost a wasted queue item and run per deletion.
+      `SyncBaselineWriter.RecordAsync` now deletes the row when both sides are gone. A unit test
+      pins it so the fix doesn't depend on the gated integration run.
 - [ ] **F3 onward**: not started.
 
 Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`
@@ -537,11 +552,12 @@ so skipping the `F` subtree on an unchanged etag silently misses the change. And
 the etag requires listing `F`, it saves no call at `F`'s own level either. Order-stability was
 never the real problem.
 
-What a correct subtree skip needs is a signal that **propagates upward** from a descendant
-change. Open question, untested in F0 (see #11b): does a folder's top-level `modificationTime`
-bump when a descendant changes? Is there a changes/events command in the CLI? If neither exists,
-the only sound optimizations left are per-run (nothing to cache across cycles) and the polling
-interval has to scale with the observed scan duration instead.
+What a correct subtree skip needs is a signal that **propagates upward** from a descendant change.
+**Appendix A #11b tested for one and found none**: a folder's `modificationTime` does not move when
+a descendant changes — not even when its own direct child does — and the CLI has no events/delta
+command. So cross-cycle subtree caching is off the table entirely with this CLI, and the remaining
+levers are: scale the polling interval to the pair's last observed scan duration, and prefer
+user-triggered remote scans over periodic ones on large trees.
 
 ### 6.3 Local watcher — `LocalFileWatcher`
 
@@ -557,8 +573,13 @@ interval has to scale with the observed scan duration instead.
 
 ### 6.4 Remote polling — `SyncScheduler`
 
-- Configurable interval, default **5 minutes**, with exponential backoff up to 30 min after
-  consecutive errors.
+- ~~Configurable interval, default **5 minutes**~~ — **revised by Appendix A #11b.** A remote scan
+  cannot be incremental (no propagating change signal exists, verified), so every cycle costs
+  ~3.5s × folder count. A fixed 5-minute default would have a 50-folder pair scanning ~3 minutes
+  out of every 5. The interval must be **derived from the pair's last observed scan duration**
+  (e.g. at least 10× it, floor 5 min), and for large trees remote scanning should lean on the
+  user's "Sync now" instead of a timer. Exponential backoff up to 30 min after consecutive errors
+  still applies on top.
 - Manual sync always available ("Sync now" per pair and globally).
 - Never two cycles of the same pair in parallel (per-pair lock).
 - Automatic global pause if `IsAuthenticated == false`.
@@ -930,8 +951,9 @@ folders is ~3 minutes just to scan, every polling cycle. This raises the priorit
 - reconsidering whether the default poll interval (5 min) is even long enough headroom for a
   large tree — may need to scale the interval to the pair's last observed scan duration.
 
-**#11b — does a descendant change propagate upward? ⚠️ half-answered.** Needed to make any
-cross-cycle subtree caching sound (see §6.2, whose original etag design is retracted).
+**#11b — does a descendant change propagate upward? ❌ NO, fully answered (2026-08-01).** This
+was needed to make any cross-cycle subtree caching sound (see §6.2, whose etag design is
+retracted). It isn't achievable with this CLI.
 
 **Part 2 — is there a changes/events/delta command? ❌ no, confirmed.** The CLI's complete
 command surface (from top-level `--help`, cli-drive@0.4.2) is: `auth login|logout`;
@@ -946,16 +968,24 @@ Two side notes from that same output: `filesystem move sourcePath... targetParen
 Appendix A never recorded — worth probing, since a single-node metadata call may be the cheapest
 way to poll one folder's fingerprint (though still ~3.5s of process startup, per #11a).
 
-**Part 1 — does a folder's `modificationTime` bump when a descendant changes? Still open.**
-The test: list a folder `F` containing `F/G/`, note `F`'s own entry as seen from its parent
-(`modificationTime`, plus whether any version-ish field appears on folders at all). Upload a file
-into `F/G/`. Re-list `F`'s parent and compare. If it bumps, a cheap depth-1 listing can prune
-whole subtrees; if not, per-folder listings can't be skipped and the polling interval must instead
-scale with the observed scan duration.
+**Part 1 — does a folder's `modificationTime` bump when a descendant changes? ❌ no.** Tested
+directly: created `/my-files/f11b-test/sub`, recorded both folders' `modificationTime` (`…:53:31`
+and `…:53:38`), uploaded a file into `sub`, and re-listed. **Neither timestamp moved** — not the
+grandparent, and *not even `sub`, the file's direct parent*. Folder `modificationTime` tracks only
+the folder's own metadata events (creation, rename), never its contents. `filesystem info` on the
+folder returns the same fields as `list` — no version, no etag, no child count. Folders carry no
+`activeRevision` at all.
 
-Blocked on an authenticated session: the CLI was logged out (`You need to login first`), and
-`auth login` is interactive. Run `~/Apps/proton-drive auth login` first, then this test is ~8 CLI
-calls (~30s). Also note the binary had lost its execute bit; `chmod +x` was needed.
+**Consequence, and it's a hard one:** there is no signal at any level that a subtree changed
+without listing that exact folder. Cross-cycle subtree caching is therefore **impossible with this
+CLI**, not merely unimplemented — every scan must BFS the full tree at ~3.5s per folder. So:
+- F3's polling interval cannot be a fixed 5 minutes. It has to **scale with the pair's last
+  observed scan duration** (a 50-folder tree is ~3 minutes of scanning per cycle), or remote
+  change detection has to become user-triggered rather than periodic.
+- Local→remote sync is unaffected: the filesystem watcher gives real change events (§6.3). It's
+  specifically *remote* change detection that has no efficient path here.
+- Revisit only if the CLI gains an events/delta command, or if the SDK's `treeEventScopeId`
+  becomes queryable.
 
 ### #12 — Parseable upload/download progress — not tested
 
@@ -996,8 +1026,9 @@ remote side has a hash; fall back to `(size, ModifiedAt-with-tolerance)` only wh
 - §3.2 `NodeFingerprint` gains a real, verified meaning for `ContentHash` (SHA-1, not a vague
   "SHA-256, computed lazily") and `NodeId` (verified stable `uid`).
 - §5.4 change detection: hash-first, not hash-as-tiebreaker (see #14).
-- §6.2 remote scanning: the ~3.5s/process cost (see #11a) makes subtree caching load-bearing,
-  not optional, before F3 ships a polling default.
+- §6.2 remote scanning: the ~3.5s/process cost (see #11a) made subtree caching look load-bearing —
+  but #11b then established that it's **impossible** with this CLI (no propagating change signal).
+  F3 must adapt its polling interval to the measured scan duration instead of caching its way out.
 - §7 transfer execution: the `File.SetLastWriteTimeUtc` step after download is now a confirmed
   requirement, not a hedge (see #6).
 - §11 rename problem: solved outright by `uid` + `filesystem move`, not mitigated by heuristics.

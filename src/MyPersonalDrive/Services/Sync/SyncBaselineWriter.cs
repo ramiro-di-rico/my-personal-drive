@@ -61,6 +61,12 @@ public sealed class SyncBaselineWriter
     /// Records the current state of both sides for <paramref name="relativePath"/>. A side that
     /// no longer exists is stored as null, which is exactly what the decision table needs to see
     /// next run (a null baseline side is "changed" against any present fingerprint).
+    ///
+    /// When *both* sides are gone the row is deleted instead. A both-null row would claim the
+    /// baseline knows about a path that no longer exists anywhere, which the next run would have
+    /// to spend a whole `ClearBaseline` queue item undoing — one wasted item and run per deletion.
+    /// This is the shape a deletion leaves behind: after `TrashRemote` (or `DeleteLocal` in a
+    /// TwoWay pair) neither side is present any more.
     /// </summary>
     public async Task RecordAsync(string relativePath, bool isFolder, DateTimeOffset syncedAt, CancellationToken cancellationToken)
     {
@@ -71,6 +77,12 @@ public sealed class SyncBaselineWriter
         }
 
         var remote = await ReadRemoteFingerprintAsync(relativePath, cancellationToken);
+        if (local is null && remote is null)
+        {
+            await ClearAsync(relativePath, cancellationToken);
+            return;
+        }
+
         var entry = new SyncBaselineEntry(relativePath, isFolder, local, remote);
         await _stateStore.UpsertBaselineAsync(_pairId, entry, syncedAt, cancellationToken);
     }

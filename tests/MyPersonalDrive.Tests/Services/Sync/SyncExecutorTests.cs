@@ -243,6 +243,44 @@ public class SyncExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_TwoWay_AfterTrashingRemote_LeavesNoBaselineRowBehind()
+    {
+        // Regression, found by the real-account integration run: TrashRemote falls through to the
+        // shared baseline write, where both sides are now absent. Upserting that would leave a
+        // row claiming the baseline knows a path that exists nowhere, costing the next run a
+        // whole ClearBaseline item to undo — one wasted item and run per deletion.
+        // Strictly ordered responses (one remote folder, so the call order is deterministic):
+        // the remote scan must still see a.txt in run 2, and only the post-trash re-read sees it gone.
+        var executor = new FakeCliExecutor();
+        executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}]"); // run 1: scan
+        executor.EnqueueOutput(args =>                               // run 1: download
+        {
+            File.WriteAllText(Path.Combine(args[3], "a.txt"), "hello");
+            return "";
+        });
+        executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}]"); // run 2: scan — still there remotely
+        executor.EnqueueOutput("");                                 // run 2: trash
+        executor.EnqueueOutput("[]");                               // run 2: baseline re-read — now gone
+        executor.EnqueueOutput("[]");                               // run 3: scan
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        await sut.RunAsync(pair); // baseline established
+        File.Delete(Path.Combine(_localRoot, "a.txt"));
+
+        var plan = await sut.RunAsync(pair);
+
+        Assert.Equal(1, plan.Stats.ToTrashRemote);
+        Assert.Empty(await stateStore.GetBaselineAsync(pair.Id));
+
+        // ...and therefore a third run has nothing left to do at all.
+        Assert.Empty((await sut.RunAsync(pair)).Actions);
+    }
+
+    [Fact]
     public async Task RunAsync_TwoWay_BothSidesDeleted_ClearsTheBaselineRow()
     {
         var executor = new FakeCliExecutor();

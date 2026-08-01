@@ -94,6 +94,44 @@ public class SyncSchedulerTests : IDisposable
     }
 
     [Fact]
+    public async Task PausingAPairWhileTheSchedulerRuns_StopsItsAutomaticCycles()
+    {
+        // The pause is written to the database by the UI, not handed to the scheduler, so this is
+        // really a test that the running loop re-reads pair state instead of trusting its snapshot.
+        var h = await BuildAsync();
+        h.Cli.RespondForPath(RemoteRoot, "[]");
+        await h.Scheduler.PumpOnceAsync(CancellationToken.None);
+        Assert.Equal(1, ListCalls(h.Cli));
+
+        var pair = Assert.Single(await h.Store.GetPairsAsync());
+        await h.Store.SetPairPausedAsync(pair.Id, true);
+
+        // Past both the poll interval and the pair-refresh interval: it would be due if not paused.
+        h.Clock.Advance(TimeSpan.FromMinutes(6));
+        Assert.False(await h.Scheduler.PumpOnceAsync(CancellationToken.None));
+        Assert.Equal(1, ListCalls(h.Cli));
+
+        await h.Scheduler.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ResumingAPausedPair_LetsItRunAgain()
+    {
+        var h = await BuildAsync(paused: true);
+        h.Cli.RespondForPath(RemoteRoot, "[]");
+        Assert.False(await h.Scheduler.PumpOnceAsync(CancellationToken.None));
+
+        var pair = Assert.Single(await h.Store.GetPairsAsync());
+        await h.Store.SetPairPausedAsync(pair.Id, false);
+        h.Clock.Advance(TimeSpan.FromMinutes(11)); // past the pair-refresh interval
+
+        Assert.True(await h.Scheduler.PumpOnceAsync(CancellationToken.None));
+        Assert.Equal(1, ListCalls(h.Cli));
+
+        await h.Scheduler.DisposeAsync();
+    }
+
+    [Fact]
     public async Task AfterACycle_ThePairWaitsOutItsInterval_ThenRunsAgain()
     {
         var h = await BuildAsync();

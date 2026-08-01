@@ -31,6 +31,7 @@ public sealed class SyncPairViewModel : ObservableObject
         RemoveCommand = new AsyncCommand(RemoveAsync, () => !IsBusy, ReportError);
         ResolveConflictsCommand = new AsyncCommand(ResolveConflictsAsync, () => !IsBusy && HasConflicts, ReportError);
         RetryFailedCommand = new AsyncCommand(RetryFailedAsync, () => !IsBusy && HasFailures, ReportError);
+        TogglePauseCommand = new AsyncCommand(TogglePauseAsync, () => !IsBusy, ReportError);
 
         UpdateStatusText();
     }
@@ -77,6 +78,21 @@ public sealed class SyncPairViewModel : ObservableObject
     public AsyncCommand ResolveConflictsCommand { get; }
 
     public AsyncCommand RetryFailedCommand { get; }
+
+    public AsyncCommand TogglePauseCommand { get; }
+
+    /// <summary>
+    /// Paused means "no automatic cycles". Preview and Sync now stay available on purpose: pausing
+    /// expresses "stop doing this on your own", not "refuse my explicit instructions" — §12 lists
+    /// pause and sync-now as separate controls on the same row.
+    /// </summary>
+    public bool IsPaused => _pair.IsPaused;
+
+    public string PauseGlyph => IsPaused ? "▶️" : "⏸️";
+
+    public string PauseTooltip => IsPaused
+        ? "Resume automatic syncing for this pair"
+        : "Pause automatic syncing for this pair (you can still sync it by hand)";
 
     public int ConflictCount
     {
@@ -247,9 +263,27 @@ public sealed class SyncPairViewModel : ObservableObject
         _onRemoved(this);
     }
 
+    private async Task TogglePauseAsync()
+    {
+        IsBusy = true;
+        try
+        {
+            await _stateStore.SetPairPausedAsync(_pair.Id, !_pair.IsPaused);
+            _pair = await _stateStore.GetPairAsync(_pair.Id) ?? _pair;
+        }
+        finally
+        {
+            IsBusy = false;
+            OnPropertyChanged(nameof(IsPaused));
+            OnPropertyChanged(nameof(PauseGlyph));
+            OnPropertyChanged(nameof(PauseTooltip));
+            UpdateStatusText();
+        }
+    }
+
     private void UpdateStatusText()
     {
-        StatusText = _pair.LastStatus switch
+        var status = _pair.LastStatus switch
         {
             SyncPairStatus.Never => "Never synced",
             SyncPairStatus.Ok => $"Up to date ({FormatTime(_pair.LastSyncAt)})",
@@ -257,6 +291,10 @@ public sealed class SyncPairViewModel : ObservableObject
             SyncPairStatus.Error => $"Error: {_pair.LastError}",
             _ => "Unknown",
         };
+
+        // A paused pair saying only "Up to date" would be a lie the moment anything changes, so the
+        // pause is stated first — it's the fact that decides whether the rest is still being kept true.
+        StatusText = _pair.IsPaused ? $"Paused — {status}" : status;
     }
 
     private static string FormatTime(DateTimeOffset? timestamp)

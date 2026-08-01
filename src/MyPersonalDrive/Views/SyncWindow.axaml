@@ -54,6 +54,9 @@
                     <Button ToolTip.Tip="Sync now" Command="{Binding SyncNowCommand}">
                       <TextBlock Text="▶️" />
                     </Button>
+                    <Button ToolTip.Tip="{Binding PauseTooltip}" Command="{Binding TogglePauseCommand}">
+                      <TextBlock Text="{Binding PauseGlyph}" />
+                    </Button>
                     <Button ToolTip.Tip="Remove this pair" Command="{Binding RemoveCommand}">
                       <TextBlock Text="🗑️" />
                     </Button>

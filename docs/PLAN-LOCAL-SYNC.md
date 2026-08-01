@@ -349,9 +349,20 @@
       *database*, not the panel's loaded list, since the scheduler and other windows share it.
       Overlap is compared on normalized paths, so alternate spellings of one folder match while a
       prefix-sharing sibling correctly doesn't.
-- [ ] **F4 (remainder) / F5**: per-pair pause (the `IsPaused` column and `SetPairPausedAsync` exist
-      and are respected, just not exposed), `SyncLog` pruning, fine-grained progress, the remaining
-      §12 validations that need IO (local folder writable, warn on a large existing folder, free-space
+- [x] **F4 (per-pair pause) — done.** The column, the store method and the policy check already
+      existed; what was missing was exposing it and two judgement calls:
+      - **Pause stops automatic cycles only.** Preview and "Sync now" stay available, because pausing
+        expresses "stop doing this on your own", not "refuse my explicit instructions" — §12 lists
+        pause and sync-now as separate controls on the same row.
+      - **A paused pair leads its status with the pause**, ahead of the last result. "Up to date" on
+        a frozen pair becomes a lie the moment anything changes, so the pause is the fact that
+        decides whether the rest of the line is still being kept true.
+
+      The scheduler picks a pause up because it re-reads pair state each refresh rather than trusting
+      its startup snapshot — tested by pausing through the store while the scheduler is live, which
+      is exactly how the UI does it, and by resuming again.
+- [ ] **F4 (remainder) / F5**: `SyncLog` pruning, fine-grained progress, the remaining §12
+      validations that need IO (local folder writable, warn on a large existing folder, free-space
       estimate), and F5's rename detection (`MoveItemsAsync` remains uncalled, so a remote move is
       still download+trash).
 

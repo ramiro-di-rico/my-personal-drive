@@ -358,6 +358,91 @@ public class SyncStateStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Conflicts_StaleOnes_AreClearedWhenTheyStopBeingConflicts()
+    {
+        // Nothing else ever removes a Conflict row, so without this the count only grows and
+        // eventually reports conflicts that no longer exist.
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.TwoWay, ConflictPolicy.Ask);
+        await sut.EnqueueConflictsAsync(pair.Id, [
+            new SyncConflict("still.txt", ConflictReason.BothChanged),
+            new SyncConflict("sorted-out.txt", ConflictReason.BothChanged),
+        ], T0);
+
+        var cleared = await sut.ClearStaleConflictsAsync(pair.Id, ["still.txt"]);
+
+        Assert.Equal(1, cleared);
+        Assert.Equal("still.txt", Assert.Single(await sut.GetConflictActionsAsync(pair.Id)).RelativePath);
+    }
+
+    [Fact]
+    public async Task Conflicts_AllCleared_WhenNothingConflictsAnyMore()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.TwoWay, ConflictPolicy.Ask);
+        await sut.EnqueueConflictsAsync(pair.Id, [new SyncConflict("a.txt", ConflictReason.BothChanged)], T0);
+
+        Assert.Equal(1, await sut.ClearStaleConflictsAsync(pair.Id, []));
+        Assert.Empty(await sut.GetConflictActionsAsync(pair.Id));
+    }
+
+    [Fact]
+    public async Task Conflicts_ClearingStaleOnes_LeavesOtherPairsAndOtherStatesAlone()
+    {
+        var sut = CreateSut();
+        var pairA = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.TwoWay, ConflictPolicy.Ask);
+        var pairB = await sut.CreatePairAsync("/my-files/B", "/home/user/B", SyncDirection.TwoWay, ConflictPolicy.Ask);
+        await sut.EnqueueConflictsAsync(pairA.Id, [new SyncConflict("a.txt", ConflictReason.BothChanged)], T0);
+        await sut.EnqueueConflictsAsync(pairB.Id, [new SyncConflict("a.txt", ConflictReason.BothChanged)], T0);
+        await sut.EnqueueActionsAsync(pairA.Id, [new SyncAction(SyncOperation.DownloadFile, "a.txt", null, 1, 1000)], T0);
+
+        await sut.ClearStaleConflictsAsync(pairA.Id, []);
+
+        Assert.Empty(await sut.GetConflictActionsAsync(pairA.Id));
+        Assert.Single(await sut.GetConflictActionsAsync(pairB.Id));      // other pair untouched
+        Assert.Single(await sut.GetPendingActionsAsync(pairA.Id));       // pending work untouched
+    }
+
+    [Fact]
+    public async Task Conflicts_MarkResolved_TakesTheRowOutOfTheConflictList()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.TwoWay, ConflictPolicy.Ask);
+        await sut.EnqueueConflictsAsync(pair.Id, [new SyncConflict("a.txt", ConflictReason.BothChanged)], T0);
+        var conflict = Assert.Single(await sut.GetConflictActionsAsync(pair.Id));
+
+        await sut.MarkConflictResolvedAsync(conflict.Id, ConflictResolution.KeepBoth, T0.AddMinutes(1));
+
+        Assert.Empty(await sut.GetConflictActionsAsync(pair.Id));
+        Assert.Empty(await sut.GetPendingActionsAsync(pair.Id)); // resolved, not re-queued as work
+    }
+
+    [Fact]
+    public async Task Queue_RetryFailed_RevivesDeadRowsWithACleanSlate()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        await sut.EnqueueActionsAsync(pair.Id, [
+            new SyncAction(SyncOperation.DownloadFile, "a.txt", null, 1, 1000),
+            new SyncAction(SyncOperation.DownloadFile, "b.txt", null, 1, 1000),
+        ], T0);
+        foreach (var row in await sut.GetPendingActionsAsync(pair.Id))
+        {
+            await sut.MarkFailedAsync(row.Id, "gave up", nextAttemptAt: null);
+        }
+
+        Assert.Equal(2, (await sut.GetFailedActionsAsync(pair.Id)).Count);
+
+        Assert.Equal(2, await sut.RetryFailedAsync(pair.Id, T0.AddHours(1)));
+
+        Assert.Empty(await sut.GetFailedActionsAsync(pair.Id));
+        var revived = await sut.GetPendingActionsAsync(pair.Id, T0.AddHours(1));
+        Assert.Equal(2, revived.Count);
+        Assert.All(revived, r => Assert.Equal(0, r.AttemptCount));
+        Assert.All(revived, r => Assert.Null(r.LastError));
+    }
+
+    [Fact]
     public async Task Queue_RowAwaitingItsBackoff_IsNotHandedOutUntilTheTimePasses()
     {
         var sut = CreateSut();

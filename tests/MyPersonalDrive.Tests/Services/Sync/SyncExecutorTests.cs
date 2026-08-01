@@ -541,6 +541,124 @@ public class SyncExecutorTests : IDisposable
         Assert.Contains("conflict", updated.LastError!);
     }
 
+    // ------------------------------------------------------------------ F4: manual resolution (§5.6)
+
+    /// <summary>Parks one Ask conflict on 'a.txt' and returns its queue row, ready to resolve.</summary>
+    private async Task<(SyncPair Pair, QueuedSyncAction Conflict, SyncExecutor Sut, FakeCliExecutor Cli, SyncStateStore Store)> ParkedConflictAsync()
+    {
+        WriteSettledLocalFile("a.txt", "my local version");
+
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath(RemoteRoot, $"[{FileEntry("a.txt", "their remote version")}]");
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay, ConflictPolicy.Ask);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        await sut.RunAsync(pair);
+        var conflict = Assert.Single(await stateStore.GetConflictActionsAsync(pair.Id));
+        return (pair, conflict, sut, executor, stateStore);
+    }
+
+    [Fact]
+    public async Task ResolveConflict_KeepLocal_UploadsTheLocalVersionAndClosesTheRow()
+    {
+        var (pair, conflict, sut, cli, store) = await ParkedConflictAsync();
+
+        await sut.ResolveConflictAsync(pair, conflict, ConflictResolution.KeepLocal);
+
+        var upload = Assert.Single(cli.Calls, c => c.Arguments.Contains("upload"));
+        Assert.Contains("-c", upload.Arguments);
+        Assert.Contains("replace", upload.Arguments);
+        Assert.Equal("my local version", await File.ReadAllTextAsync(Path.Combine(_localRoot, "a.txt")));
+        Assert.Empty(await store.GetConflictActionsAsync(pair.Id));
+        Assert.DoesNotContain(cli.Calls, c => c.Arguments.Contains("download"));
+    }
+
+    [Fact]
+    public async Task ResolveConflict_KeepRemote_DownloadsOverTheLocalVersion()
+    {
+        var (pair, conflict, sut, cli, store) = await ParkedConflictAsync();
+        cli.EnqueueOutput(args =>
+        {
+            File.WriteAllText(Path.Combine(args[3], "a.txt"), "their remote version");
+            return "";
+        });
+
+        await sut.ResolveConflictAsync(pair, conflict, ConflictResolution.KeepRemote);
+
+        Assert.Equal("their remote version", await File.ReadAllTextAsync(Path.Combine(_localRoot, "a.txt")));
+        Assert.Empty(await store.GetConflictActionsAsync(pair.Id));
+        Assert.DoesNotContain(cli.Calls, c => c.Arguments.Contains("upload"));
+    }
+
+    [Fact]
+    public async Task ResolveConflict_KeepBoth_PreservesBothVersions()
+    {
+        var (pair, conflict, sut, cli, store) = await ParkedConflictAsync();
+        cli.EnqueueOutput(args =>
+        {
+            File.WriteAllText(Path.Combine(args[3], "a.txt"), "their remote version");
+            return "";
+        });
+
+        await sut.ResolveConflictAsync(pair, conflict, ConflictResolution.KeepBoth);
+
+        // The remote version takes the original name...
+        Assert.Equal("their remote version", await File.ReadAllTextAsync(Path.Combine(_localRoot, "a.txt")));
+        // ...and the local one survives under a stamped name, and is uploaded rather than stranded.
+        var copy = Assert.Single(Directory.GetFiles(_localRoot, "a (local conflict*"));
+        Assert.Equal("my local version", await File.ReadAllTextAsync(copy));
+        Assert.Contains(cli.Calls, c => c.Arguments.Contains("upload") && c.Arguments.Any(a => a.Contains("local conflict")));
+        Assert.Empty(await store.GetConflictActionsAsync(pair.Id));
+    }
+
+    [Fact]
+    public async Task ResolveConflict_DoesNotWalkTheRemoteTree()
+    {
+        // Resolving one file must not cost a full remote walk — that's ~3.5s per folder (Appendix A
+        // #11a) for a decision the user has already made. Only the conflicting file's own parent is
+        // touched: once before, and once after an upload because that mints a new revision whose
+        // fingerprint §7 requires re-reading.
+        WriteSettledLocalFile("a.txt", "my local version");
+
+        var cli = new FakeCliExecutor();
+        cli.RespondForPath(RemoteRoot, $"[{FileEntry("a.txt", "their remote version")}, {FolderEntry("sub")}]");
+        cli.RespondForPath($"{RemoteRoot}/sub", $"[{FileEntry("deep.txt", "irrelevant")}]");
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay, ConflictPolicy.Ask);
+        var service = new ProtonDriveService(cli);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        await sut.RunAsync(pair);
+        var conflict = Assert.Single(await stateStore.GetConflictActionsAsync(pair.Id));
+        var callsBefore = cli.Calls.Count;
+
+        await sut.ResolveConflictAsync(pair, conflict, ConflictResolution.KeepLocal);
+
+        var duringResolve = cli.Calls.Skip(callsBefore).ToList();
+        Assert.DoesNotContain(duringResolve, c => c.Arguments.Contains($"{RemoteRoot}/sub"));
+        Assert.True(duringResolve.Count(c => c.Arguments.Contains("list")) <= 2,
+            $"expected at most 2 listings of the parent, got {duringResolve.Count(c => c.Arguments.Contains("list"))}");
+    }
+
+    [Fact]
+    public async Task RunAsync_AfterTheConflictIsResolved_StopsReportingIt()
+    {
+        var (pair, conflict, sut, cli, store) = await ParkedConflictAsync();
+        await sut.ResolveConflictAsync(pair, conflict, ConflictResolution.KeepLocal);
+
+        // The remote now matches what we uploaded, so the next run finds no conflict at all — and
+        // must not leave the old row lying around either.
+        cli.RespondForPath(RemoteRoot, $"[{FileEntry("a.txt", "my local version")}]");
+        var plan = await sut.RunAsync(pair);
+
+        Assert.Empty(plan.Conflicts);
+        Assert.Empty(await store.GetConflictActionsAsync(pair.Id));
+    }
+
     // ------------------------------------------------------------------ F2: retries (§7)
 
     [Fact]

@@ -16,6 +16,8 @@ public sealed class SyncPairViewModel : ObservableObject
     private SyncPair _pair;
     private string _statusText = string.Empty;
     private bool _isBusy;
+    private int _conflictCount;
+    private int _failedCount;
 
     public SyncPairViewModel(SyncPair pair, SyncExecutor executor, SyncStateStore stateStore, Action<SyncPairViewModel> onRemoved)
     {
@@ -27,6 +29,8 @@ public sealed class SyncPairViewModel : ObservableObject
         PreviewCommand = new AsyncCommand(PreviewAsync, () => !IsBusy, ReportError);
         SyncNowCommand = new AsyncCommand(RunAsync, () => !IsBusy, ReportError);
         RemoveCommand = new AsyncCommand(RemoveAsync, () => !IsBusy, ReportError);
+        ResolveConflictsCommand = new AsyncCommand(ResolveConflictsAsync, () => !IsBusy && HasConflicts, ReportError);
+        RetryFailedCommand = new AsyncCommand(RetryFailedAsync, () => !IsBusy && HasFailures, ReportError);
 
         UpdateStatusText();
     }
@@ -70,8 +74,51 @@ public sealed class SyncPairViewModel : ObservableObject
 
     public AsyncCommand RemoveCommand { get; }
 
+    public AsyncCommand ResolveConflictsCommand { get; }
+
+    public AsyncCommand RetryFailedCommand { get; }
+
+    public int ConflictCount
+    {
+        get => _conflictCount;
+        private set
+        {
+            if (SetProperty(ref _conflictCount, value))
+            {
+                OnPropertyChanged(nameof(HasConflicts));
+                OnPropertyChanged(nameof(ConflictText));
+                ResolveConflictsCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public int FailedCount
+    {
+        get => _failedCount;
+        private set
+        {
+            if (SetProperty(ref _failedCount, value))
+            {
+                OnPropertyChanged(nameof(HasFailures));
+                RetryFailedCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool HasConflicts => ConflictCount > 0;
+
+    public bool HasFailures => FailedCount > 0;
+
+    public string ConflictText => ConflictCount == 1 ? "⚠ 1 conflict" : $"⚠ {ConflictCount} conflicts";
+
     /// <summary>Shown a dry-run plan; returns true if the user chose to run it immediately.</summary>
     public Func<SyncPlan, Task<bool>>? RequestPreviewConfirmationAsync { get; set; }
+
+    /// <summary>
+    /// Shown the parked conflicts; returns the user's decision per queue row. An absent entry means
+    /// "leave that one alone", so closing the dialog resolves nothing.
+    /// </summary>
+    public Func<IReadOnlyList<QueuedSyncAction>, Task<IReadOnlyDictionary<long, ConflictResolution>>>? RequestConflictResolutionsAsync { get; set; }
 
     public Action<string>? OnError { get; set; }
 
@@ -114,6 +161,83 @@ public sealed class SyncPairViewModel : ObservableObject
         {
             IsBusy = false;
             UpdateStatusText();
+            await RefreshOutstandingAsync();
+        }
+    }
+
+    /// <summary>Re-reads the parked conflicts and dead rows, so the row's badges tell the truth.</summary>
+    public async Task RefreshOutstandingAsync()
+    {
+        ConflictCount = (await _stateStore.GetConflictActionsAsync(_pair.Id)).Count;
+        FailedCount = (await _stateStore.GetFailedActionsAsync(_pair.Id)).Count;
+    }
+
+    private async Task ResolveConflictsAsync()
+    {
+        var requester = RequestConflictResolutionsAsync;
+        if (requester is null)
+        {
+            StatusText = "Resolving conflicts is not available.";
+            return;
+        }
+
+        var conflicts = await _stateStore.GetConflictActionsAsync(_pair.Id);
+        if (conflicts.Count == 0)
+        {
+            await RefreshOutstandingAsync();
+            return;
+        }
+
+        var decisions = await requester(conflicts);
+        if (decisions.Count == 0)
+        {
+            return; // dialog dismissed — deciding nothing must change nothing
+        }
+
+        IsBusy = true;
+        var resolved = 0;
+        try
+        {
+            foreach (var conflict in conflicts.Where(c => decisions.ContainsKey(c.Id)))
+            {
+                // One at a time, and a failure on one file must not abandon the rest: each
+                // resolution is an independent decision the user already made.
+                try
+                {
+                    await _executor.ResolveConflictAsync(_pair, conflict, decisions[conflict.Id]);
+                    resolved++;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    OnError?.Invoke($"Could not resolve '{conflict.RelativePath}': {ex.Message}");
+                }
+            }
+        }
+        finally
+        {
+            IsBusy = false;
+            await RefreshOutstandingAsync();
+        }
+
+        StatusText = resolved == conflicts.Count
+            ? $"Resolved {resolved} conflict(s)."
+            : $"Resolved {resolved} of {decisions.Count} chosen conflict(s); {ConflictCount} still parked.";
+    }
+
+    private async Task RetryFailedAsync()
+    {
+        IsBusy = true;
+        try
+        {
+            var revived = await _stateStore.RetryFailedAsync(_pair.Id, DateTimeOffset.UtcNow);
+            StatusText = revived == 0
+                ? "Nothing to retry."
+                : $"{revived} failed action(s) queued again — they'll run on the next sync.";
+        }
+        finally
+        {
+            IsBusy = false;
+            await RefreshOutstandingAsync();
         }
     }
 

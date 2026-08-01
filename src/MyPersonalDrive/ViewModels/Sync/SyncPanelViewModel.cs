@@ -79,6 +79,9 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// <summary>Shown a dry-run plan; returns true if the user chose to run it immediately. Forwarded to every row.</summary>
     public Func<SyncPlan, Task<bool>>? RequestPreviewConfirmationAsync { get; set; }
 
+    /// <summary>Shown the parked conflicts; returns a decision per queue row. Forwarded to every row.</summary>
+    public Func<IReadOnlyList<QueuedSyncAction>, Task<IReadOnlyDictionary<long, ConflictResolution>>>? RequestConflictResolutionsAsync { get; set; }
+
     public async Task InitializeAsync() => await LoadPairsAsync();
 
     /// <summary>
@@ -143,7 +146,8 @@ public sealed class SyncPanelViewModel : ObservableObject
             Pairs.Clear();
             foreach (var pair in pairs)
             {
-                AddPairViewModel(pair);
+                var row = AddPairViewModel(pair);
+                await row.RefreshOutstandingAsync();
             }
         }
         finally
@@ -152,14 +156,16 @@ public sealed class SyncPanelViewModel : ObservableObject
         }
     }
 
-    private void AddPairViewModel(SyncPair pair)
+    private SyncPairViewModel AddPairViewModel(SyncPair pair)
     {
         var viewModel = new SyncPairViewModel(pair, _executor, _stateStore, RemovePairViewModel)
         {
             RequestPreviewConfirmationAsync = RequestPreviewConfirmationAsync,
+            RequestConflictResolutionsAsync = RequestConflictResolutionsAsync,
             OnError = message => StatusMessage = message,
         };
         Pairs.Add(viewModel);
+        return viewModel;
     }
 
     private void RemovePairViewModel(SyncPairViewModel viewModel) => Pairs.Remove(viewModel);

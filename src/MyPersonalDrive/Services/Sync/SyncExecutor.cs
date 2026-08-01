@@ -70,8 +70,11 @@ public sealed class SyncExecutor
         await _stateStore.EnqueueActionsAsync(pair.Id, plan.Actions, now, cancellationToken);
 
         // Conflicts the reconciler left unresolved (the `Ask` policy) become durable 'Conflict'
-        // rows rather than being dropped on the floor — §5.6.
+        // rows rather than being dropped on the floor — §5.6. Stale ones are cleared first: a
+        // difference resolved by any means at all (the panel, an edit by hand, another client) must
+        // stop being reported, and nothing else ever removes a Conflict row.
         var unresolved = pair.ConflictPolicy == ConflictPolicy.Ask ? plan.Conflicts : [];
+        await _stateStore.ClearStaleConflictsAsync(pair.Id, unresolved.Select(c => c.RelativePath).ToList(), cancellationToken);
         await _stateStore.EnqueueConflictsAsync(pair.Id, unresolved, now, cancellationToken);
 
         var context = new RunContext(pair, mapper, local, remote,
@@ -163,6 +166,82 @@ public sealed class SyncExecutor
         => pair.Direction == SyncDirection.TwoWay
             ? await _stateStore.GetBaselineAsync(pair.Id, cancellationToken)
             : new Dictionary<string, SyncBaselineEntry>();
+
+    /// <summary>
+    /// Carries out one parked conflict's resolution (§5.6's manual path) and marks the row done.
+    ///
+    /// Deliberately does *not* run a full cycle. Resolving one file should not cost a whole-tree
+    /// remote scan — that's ~3.5s per folder (Appendix A #11a) for a decision about a single path —
+    /// and the user has just told us what they want, so there is nothing left to reconcile. Only
+    /// the conflicting file's own parent folder is re-listed, to get the fingerprint a download
+    /// needs for its mtime.
+    /// </summary>
+    public async Task ResolveConflictAsync(SyncPair pair, QueuedSyncAction conflict, ConflictResolution resolution, CancellationToken cancellationToken = default)
+    {
+        var mapper = new PathMapper(pair.RemotePath, pair.LocalPath);
+        var parent = ParentOf(conflict.RelativePath);
+        var remote = new Dictionary<string, NodeFingerprint>(StringComparer.Ordinal);
+
+        try
+        {
+            foreach (var item in await _protonDriveService.LoadFolderAsync(mapper.ToRemoteAbsolute(parent), cancellationToken))
+            {
+                var relativePath = parent.Length == 0 ? item.Name : $"{parent}/{item.Name}";
+                remote[relativePath] = new NodeFingerprint(relativePath, item.IsFolder, item.Size, item.ModifiedAt, item.NodeId, item.ContentHash);
+            }
+        }
+        catch (CliException) when (resolution == ConflictResolution.KeepLocal)
+        {
+            // Keeping the local version doesn't need to know anything about the remote one.
+        }
+
+        var context = new RunContext(pair, mapper, new Dictionary<string, NodeFingerprint>(), remote,
+            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_protonDriveService, _stateStore, mapper, pair.Id) : null);
+        context.Baseline?.SeedFromScan(remote);
+
+        var now = _timeProvider.GetUtcNow();
+        switch (resolution)
+        {
+            case ConflictResolution.KeepLocal:
+                await UploadFileAsync(context, conflict.RelativePath, cancellationToken);
+                break;
+
+            case ConflictResolution.KeepRemote:
+                await DownloadFileAsync(context, conflict.RelativePath, cancellationToken);
+                break;
+
+            case ConflictResolution.KeepBoth:
+                // The conflict row carries no copy name (it was parked before anyone chose), so
+                // stamp one now, from the moment of the decision.
+                var keepBothAction = conflict with { SecondaryPath = BuildConflictCopyPath(conflict.RelativePath, now) };
+                await ResolveConflictKeepBothAsync(context, keepBothAction, cancellationToken);
+                break;
+        }
+
+        if (context.Baseline is not null)
+        {
+            await context.Baseline.RecordAsync(conflict.RelativePath, isFolder: false, now, cancellationToken);
+        }
+
+        await _stateStore.MarkConflictResolvedAsync(conflict.Id, resolution, now, cancellationToken);
+        await LogAsync(context, SyncLogLevel.Info, conflict.RelativePath, $"Conflict resolved by the user: {resolution}.", cancellationToken);
+    }
+
+    /// <summary>
+    /// Same naming as the reconciler's automatic KeepBoth, so a file resolved by hand is
+    /// indistinguishable from one resolved by policy.
+    /// </summary>
+    private static string BuildConflictCopyPath(string relativePath, DateTimeOffset timestamp)
+    {
+        var lastSlash = relativePath.LastIndexOf('/');
+        var directory = lastSlash < 0 ? string.Empty : relativePath[..lastSlash];
+        var fileName = lastSlash < 0 ? relativePath : relativePath[(lastSlash + 1)..];
+        var dot = fileName.LastIndexOf('.');
+        var baseName = dot > 0 ? fileName[..dot] : fileName;
+        var extension = dot > 0 ? fileName[dot..] : string.Empty;
+        var stamped = $"{baseName} (local conflict {timestamp:yyyy-MM-dd HH-mm-ss}){extension}";
+        return directory.Length == 0 ? stamped : $"{directory}/{stamped}";
+    }
 
     private async Task<(IReadOnlyDictionary<string, NodeFingerprint> Local, IReadOnlyDictionary<string, NodeFingerprint> Remote, PathMapper Mapper)> ScanBothSidesAsync(SyncPair pair, CancellationToken cancellationToken)
     {

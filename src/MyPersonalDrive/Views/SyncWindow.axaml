@@ -34,6 +34,17 @@
                     <TextBlock Opacity="0.7" TextWrapping="Wrap" Text="{Binding LocalPath}" />
                     <TextBlock Opacity="0.6" Text="{Binding DirectionText}" />
                     <TextBlock Text="{Binding StatusText}" />
+                    <Button Content="{Binding ConflictText}"
+                            IsVisible="{Binding HasConflicts}"
+                            Command="{Binding ResolveConflictsCommand}"
+                            HorizontalAlignment="Left"
+                            Foreground="#F5C451"
+                            ToolTip.Tip="Decide what to do with each conflicting file" />
+                    <Button Content="↻ Retry failed actions"
+                            IsVisible="{Binding HasFailures}"
+                            Command="{Binding RetryFailedCommand}"
+                            HorizontalAlignment="Left"
+                            ToolTip.Tip="Queue the actions that gave up, to run on the next sync" />
                   </StackPanel>
 
                   <StackPanel Grid.Column="1" Grid.Row="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">

@@ -422,6 +422,95 @@ public sealed class SyncStateStore
         }
     }
 
+    /// <summary>
+    /// Deletes parked conflicts that are no longer conflicts. Called with the paths the *current*
+    /// reconciliation still finds in conflict, so a difference resolved by any means — the panel,
+    /// the user editing files by hand, another client — stops being reported.
+    ///
+    /// Without this a `Conflict` row outlives the situation that created it forever: nothing else
+    /// ever clears one, so the conflict count would only ever grow and would eventually be pure
+    /// fiction.
+    /// </summary>
+    public async Task<int> ClearStaleConflictsAsync(int pairId, IReadOnlyCollection<string> stillConflicting, CancellationToken ct = default)
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+
+        if (stillConflicting.Count == 0)
+        {
+            command.CommandText = "DELETE FROM SyncQueue WHERE PairId = @PairId AND State = 'Conflict'";
+            command.Parameters.AddWithValue("@PairId", pairId);
+            return await command.ExecuteNonQueryAsync(ct);
+        }
+
+        // Parameterized IN list — never string-concatenated, since these are file names.
+        var placeholders = stillConflicting.Select((_, index) => $"@p{index}").ToList();
+        command.CommandText =
+            $"DELETE FROM SyncQueue WHERE PairId = @PairId AND State = 'Conflict' AND RelativePath NOT IN ({string.Join(", ", placeholders)})";
+        command.Parameters.AddWithValue("@PairId", pairId);
+        foreach (var (path, index) in stillConflicting.Select((path, index) => (path, index)))
+        {
+            command.Parameters.AddWithValue($"@p{index}", path);
+        }
+
+        return await command.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>Marks a parked conflict as dealt with, once its resolution has actually been carried out.</summary>
+    public async Task MarkConflictResolvedAsync(long queueId, ConflictResolution resolution, DateTimeOffset resolvedAt, CancellationToken ct = default)
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE SyncQueue
+            SET State = 'Done', CompletedAt = @CompletedAt, LastError = @Resolution
+            WHERE Id = @Id AND State = 'Conflict'
+            """;
+        command.Parameters.AddWithValue("@CompletedAt", FormatTimestamp(resolvedAt));
+        command.Parameters.AddWithValue("@Resolution", $"Resolved: {resolution}");
+        command.Parameters.AddWithValue("@Id", queueId);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
+    /// Puts every permanently-failed row for a pair back in the queue with a clean slate — the
+    /// "try that again" the UI needs for rows whose retries ran out. Returns how many were revived.
+    /// </summary>
+    public async Task<int> RetryFailedAsync(int pairId, DateTimeOffset now, CancellationToken ct = default)
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE SyncQueue
+            SET State = 'Pending', AttemptCount = 0, NextAttemptAt = NULL, LastError = NULL, EnqueuedAt = @Now
+            WHERE PairId = @PairId AND State = 'Failed'
+            """;
+        command.Parameters.AddWithValue("@PairId", pairId);
+        command.Parameters.AddWithValue("@Now", FormatTimestamp(now));
+        return await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<QueuedSyncAction>> GetFailedActionsAsync(int pairId, CancellationToken ct = default)
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, PairId, RelativePath, Operation, Payload, Priority, AttemptCount, State, LastError, EnqueuedAt
+            FROM SyncQueue WHERE PairId = @PairId AND State = 'Failed'
+            ORDER BY RelativePath
+            """;
+        command.Parameters.AddWithValue("@PairId", pairId);
+
+        var actions = new List<QueuedSyncAction>();
+        using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            actions.Add(ReadQueuedAction(reader));
+        }
+
+        return actions;
+    }
+
     public async Task<IReadOnlyList<QueuedSyncAction>> GetConflictActionsAsync(int pairId, CancellationToken ct = default)
     {
         using var connection = OpenConnection();

@@ -312,7 +312,37 @@
          locking before anything else calls in.
       - `RefreshPairsAsync` re-queries the pair list on every 2s tick while no pairs exist (the
          `_pairs.Count > 0` guard never satisfies). Trivial cost, but pointless.
-- [ ] **F4 onward**: not started.
+- [x] **F4 (conflicts panel) — done.** The sharpest gap F2/F3 left: the add-pair dialog offers
+      `Ask` as the *default* policy, and an `Ask` conflict was a dead end — parked as a `Conflict`
+      row with no way to act on it. 262 unit tests, four real-account integration tests, AOT clean.
+
+      - `SyncExecutor.ResolveConflictAsync(pair, conflictRow, ConflictResolution)` carries out one
+        decision: `KeepLocal` uploads, `KeepRemote` downloads, `KeepBoth` reuses the same
+        rename-aside-then-download-then-upload path (and the same stamped copy name) as the
+        automatic policy, so a hand-resolved file is indistinguishable from a policy-resolved one.
+        Deliberately **not** a full cycle: only the conflicting file's own parent folder is
+        re-listed, since a decision about one path shouldn't pay for a whole-tree walk at ~3.5s per
+        folder. A test asserts sibling folders are never listed.
+      - `RetryFailedAsync` + `GetFailedActionsAsync`, surfaced as "↻ Retry failed actions" per row —
+        the manual recovery path for rows that exhausted their retries, which until now depended on
+        the plan happening to re-propose them.
+      - UI: a `⚠ N conflicts` button per pair opening a dialog that lists every conflicting file
+        with its reason in plain language and a per-file choice. **Every file starts on "Decide
+        later"** and dismissing the dialog resolves nothing — these are precisely the cases the
+        engine refused to guess at, so the dialog must not guess either.
+      - One file failing does not abandon the rest: each resolution is an independent decision the
+        user already made, so failures are reported per path and the others still go through.
+
+      **Found and fixed while building it:** nothing ever cleared a `Conflict` row once the
+      underlying conflict was gone. Resolve the difference by any other means — editing files by
+      hand, another client, the policy changing — and the row (and therefore the badge count) would
+      have survived forever, so the conflict count could only grow and would eventually be pure
+      fiction. `ClearStaleConflictsAsync` now runs each cycle against the paths the *current*
+      reconciliation still finds in conflict.
+- [ ] **F4 (remainder) / F5**: per-pair pause (the `IsPaused` column and `SetPairPausedAsync` exist
+      and are respected, just not exposed), `SyncLog` pruning, fine-grained progress, the §12
+      validations still missing (nested-pair detection above all), and F5's rename detection
+      (`MoveItemsAsync` remains uncalled, so a remote move is still download+trash).
 
 Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`
 (the "both sides deleted it" decision-table row needs a distinct effect — delete the stale
@@ -656,6 +686,14 @@ Default strategy **KeepBoth**, the only one that never loses data:
 
 With the `Ask` policy, the plan item stays in `SyncQueue.State = 'Conflict'` and the UI offers
 per-file resolution. **No automatic resolution should ever delete unsynced content.**
+
+Implemented, with two rules worth stating explicitly:
+- **A parked conflict is cleared as soon as it stops being one**, whatever resolved it — the panel,
+  an edit by hand, another client. Nothing else removes a `Conflict` row, so without this the
+  conflict count only ever grows and eventually reports fiction.
+- **The dialog defaults every file to "Decide later."** These are exactly the cases the engine
+  refused to guess at; a pre-selected action would quietly reintroduce the guess, and dismissing the
+  dialog must resolve nothing.
 
 ---
 

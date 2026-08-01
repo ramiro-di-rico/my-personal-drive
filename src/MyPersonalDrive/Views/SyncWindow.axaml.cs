@@ -24,6 +24,7 @@ public partial class SyncWindow : Window
 
         viewModel.RequestNewPairAsync = PromptForNewPairAsync;
         viewModel.RequestPreviewConfirmationAsync = ShowPreviewAsync;
+        viewModel.RequestConflictResolutionsAsync = ShowConflictsAsync;
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -256,6 +257,104 @@ public partial class SyncWindow : Window
         await dialog.ShowDialog(this);
         return result;
     }
+
+    /// <summary>
+    /// §5.6's per-file resolution panel. Every file starts on "Decide later" rather than a default
+    /// action: these are the cases the engine refused to guess at, so the dialog must not guess
+    /// either. Closing without choosing anything therefore changes nothing.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<long, ConflictResolution>> ShowConflictsAsync(IReadOnlyList<QueuedSyncAction> conflicts)
+    {
+        var chosen = new Dictionary<long, ConflictResolution>();
+        var rows = new StackPanel { Spacing = 10 };
+
+        foreach (var conflict in conflicts)
+        {
+            var selector = new ComboBox
+            {
+                Width = 260,
+                ItemsSource = new[] { "Decide later", "Keep both", "Keep my local version", "Keep the Proton Drive version" },
+                SelectedIndex = 0,
+            };
+
+            var id = conflict.Id;
+            selector.SelectionChanged += (_, _) =>
+            {
+                switch (selector.SelectedIndex)
+                {
+                    case 1: chosen[id] = ConflictResolution.KeepBoth; break;
+                    case 2: chosen[id] = ConflictResolution.KeepLocal; break;
+                    case 3: chosen[id] = ConflictResolution.KeepRemote; break;
+                    default: chosen.Remove(id); break;
+                }
+            };
+
+            rows.Children.Add(new StackPanel
+            {
+                Spacing = 4,
+                Children =
+                {
+                    new TextBlock { Text = conflict.RelativePath, FontWeight = Avalonia.Media.FontWeight.Bold, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                    new TextBlock { Text = DescribeReason(conflict.LastError), Opacity = 0.7, FontSize = 12 },
+                    selector,
+                }
+            });
+        }
+
+        var applyButton = new Button { Content = "Apply", IsDefault = true, Width = 100 };
+        var cancelButton = new Button { Content = "Cancel", IsCancel = true, Width = 100 };
+
+        var dialog = new Window
+        {
+            Title = conflicts.Count == 1 ? "Resolve conflict" : $"Resolve {conflicts.Count} conflicts",
+            Width = 560,
+            Height = 460,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                Margin = new Avalonia.Thickness(20),
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Both sides of these files changed since the last sync, so neither can win automatically. "
+                             + "\"Keep both\" never loses anything: your version is renamed aside and uploaded alongside.",
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                        Opacity = 0.8,
+                    },
+                    new ScrollViewer { Height = 280, Content = rows },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 10,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Children = { applyButton, cancelButton }
+                    }
+                }
+            }
+        };
+
+        var apply = false;
+        applyButton.Click += (_, _) =>
+        {
+            apply = true;
+            dialog.Close();
+        };
+        cancelButton.Click += (_, _) => dialog.Close();
+
+        await dialog.ShowDialog(this);
+        return apply ? chosen : new Dictionary<long, ConflictResolution>();
+    }
+
+    private static string DescribeReason(string? reason) => reason switch
+    {
+        nameof(ConflictReason.BothChanged) => "Changed here and on Proton Drive since the last sync.",
+        nameof(ConflictReason.BothAppearedDiffering) => "Appeared on both sides with different content, with no shared history.",
+        nameof(ConflictReason.RemoteDeletedLocalChanged) => "Deleted on Proton Drive, but changed here.",
+        nameof(ConflictReason.LocalDeletedRemoteChanged) => "Deleted here, but changed on Proton Drive.",
+        _ => "Conflicting changes on both sides.",
+    };
 
     private static string FormatBytes(long bytes)
         => bytes switch

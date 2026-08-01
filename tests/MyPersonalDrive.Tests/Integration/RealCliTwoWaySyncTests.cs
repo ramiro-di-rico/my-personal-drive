@@ -45,10 +45,16 @@ public sealed class RealCliTwoWaySyncTests : IDisposable
             {
                 Interlocked.Increment(ref _downloadCount);
             }
+
+            if (e.CommandText.Contains(" upload ", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref _uploadCount);
+            }
         };
     }
 
     private int _downloadCount;
+    private int _uploadCount;
 
     /// <summary>
     /// How many `filesystem download` invocations have been issued. The real executor doesn't record
@@ -56,6 +62,8 @@ public sealed class RealCliTwoWaySyncTests : IDisposable
     /// "the rename transferred nothing" an assertion rather than an assumption.
     /// </summary>
     private int CountDownloads() => Volatile.Read(ref _downloadCount);
+
+    private int CountUploads() => Volatile.Read(ref _uploadCount);
 
     public void Dispose()
     {
@@ -163,6 +171,26 @@ public sealed class RealCliTwoWaySyncTests : IDisposable
         // And it converges: the run after the move has nothing left to do.
         Assert.Empty((await sut.RunAsync(pair)).Actions);
 
+        // ---------- the mirror image: a *local* rename must move it on Proton Drive (backlog B4)
+        // This is the half with no stable local id, so it rests on §11.3's content match. Worth doing
+        // against the live CLI because it is also the only exercise of `filesystem rename` driven by
+        // the engine rather than by the test.
+        File.Move(Path.Combine(_localRoot, "renamed-remotely.txt"), Path.Combine(_localRoot, "renamed-locally.txt"));
+        File.SetLastWriteTimeUtc(Path.Combine(_localRoot, "renamed-locally.txt"), DateTime.UtcNow.AddMinutes(-5));
+        var uploadsBeforeLocalRename = CountUploads();
+
+        var localRenameRun = await sut.RunAsync(pair);
+        _output.WriteLine($"local rename run: {string.Join(", ", localRenameRun.Actions.Select(a => $"{a.Operation} {a.RelativePath}"))}");
+
+        Assert.Equal(1, localRenameRun.Stats.FilesToMoveRemotely);
+        Assert.Equal(0, localRenameRun.Stats.FilesToUpload);
+        Assert.Equal(uploadsBeforeLocalRename, CountUploads()); // nothing re-uploaded
+        var afterLocalRename = await ListRemoteAsync();
+        Assert.Contains("renamed-locally.txt", afterLocalRename.Keys);
+        Assert.DoesNotContain("renamed-remotely.txt", afterLocalRename.Keys);
+
+        Assert.Empty((await sut.RunAsync(pair)).Actions);
+
         // ---------- run 4: a local delete trashes the remote copy, never permanently deletes it
         File.Delete(downloaded);
         var fourth = await sut.RunAsync(pair);
@@ -191,9 +219,9 @@ public sealed class RealCliTwoWaySyncTests : IDisposable
         var baseline = await stateStore.GetBaselineAsync(pair.Id);
         // 'local-only.txt' now lives under the name the remote rename gave it — and the baseline
         // followed the file rather than stranding a row at the old path.
-        Assert.Equal(["local-folder", "renamed-remotely.txt"], baseline.Keys.OrderBy(k => k, StringComparer.Ordinal));
-        Assert.NotNull(baseline["renamed-remotely.txt"].RemoteAtSync!.NodeId);   // the CLI's stable uid
-        Assert.NotNull(baseline["renamed-remotely.txt"].LocalAtSync!.ContentHash); // our own SHA-1
+        Assert.Equal(["local-folder", "renamed-locally.txt"], baseline.Keys.OrderBy(k => k, StringComparer.Ordinal));
+        Assert.NotNull(baseline["renamed-locally.txt"].RemoteAtSync!.NodeId);   // the CLI's stable uid
+        Assert.NotNull(baseline["renamed-locally.txt"].LocalAtSync!.ContentHash); // our own SHA-1
     }
 
     private void WriteSettled(string relativePath, string content)

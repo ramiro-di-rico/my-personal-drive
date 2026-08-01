@@ -17,4 +17,9 @@ public sealed record SyncPlanStats(
     /// into the download count would misreport the work, and omitting them entirely would make a
     /// plan that only moves files look like it does nothing.
     /// </summary>
-    int FilesToMoveLocally = 0);
+    int FilesToMoveLocally = 0,
+    /// <summary>
+    /// Files being moved on Proton Drive to follow a local move — the mirror of
+    /// <see cref="FilesToMoveLocally"/>, and equally free of bytes.
+    /// </summary>
+    int FilesToMoveRemotely = 0);

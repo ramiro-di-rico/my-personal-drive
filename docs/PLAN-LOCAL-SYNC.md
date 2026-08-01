@@ -489,6 +489,36 @@
       produces two — so a short grace after the first arrival was added. That fragility was pre-existing
       and only surfaced under the load the deleted test created.
 
+- [x] **B4 (local→remote rename detection) — done. §11 is now complete in both directions.**
+      361 unit tests, four real-account integration tests, AOT clean.
+
+      This half has no stable local id to key on — §11.2's `st_ino` isn't reachable from .NET without a
+      platform P/Invoke — so it uses §11.3's content match, in its strong form only: **size and SHA-1
+      must both equal what the baseline recorded**, with exactly one candidate. Never mtime, and never
+      size alone: a rename doesn't change either, but neither does an unrelated file that happens to be
+      the same length, and matching on those would make this a guess instead of a match.
+
+      **Where the hashes come from.** The reconciler is pure and `LocalScanner` is stat-only, so
+      neither can hash. `SyncExecutor` fills in `ContentHash` before reconciling, narrowed twice so the
+      one expensive step stays cheap: only files that are new since the baseline, and among those only
+      the ones whose **size** matches something that vanished from the baseline. A move preserves size
+      exactly, so a size matching nothing cannot be a move. A first sync hashes nothing at all — with
+      an empty baseline nothing has disappeared.
+
+      **Execution needs up to two CLI calls**, because each command holds one thing fixed: `move`
+      keeps the name and changes the parent, `rename` keeps the parent and changes the name. Same
+      parent → rename; same name → move; both changing → move *then* rename, so the node reaches its
+      destination folder before taking its final name. A failure between the two leaves it in the right
+      folder under the old name — nothing lost, and the next cycle plans from what it actually finds.
+
+      Also suppresses the old remote path as a deletion, for the same reason a trash does (Appendix A
+      #15): a stale listing still reporting it, with the baseline row already moved, reads as "new
+      remotely" and would download the file back under its old name.
+
+      **Verified against the real account in both directions in one run**: a remote rename produces
+      `RenameLocal` with no downloads, and a local rename produces `RenameRemote` with no uploads —
+      both counted off the live command stream rather than assumed.
+
 Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`
 (the "both sides deleted it" decision-table row needs a distinct effect — delete the stale
 `SyncState` row — from `UpdateBaselineOnly`, which means "record the current state").
@@ -1029,7 +1059,10 @@ expensive) or, worse, in TwoWay mode **re-upload the original from the local bas
 **F0 verified the CLI's `uid` is stable across both `filesystem rename` and `filesystem move`**,
 and that `filesystem move` exists as a direct operation (not just rename+copy+trash). So:
 
-**Status**: mechanism 1 below is implemented for `TwoWay` pairs (see F5 in Status); 2 and 3 are not.
+**Status**: implemented for `TwoWay` pairs in both directions. Mechanism 1 (the `uid`) drives remote
+moves; mechanism 3 (content match) drives local ones, because mechanism 2's `st_ino` isn't reachable
+from .NET without a platform P/Invoke — so 3 turned out to be the *primary* local mechanism rather
+than a fallback. One-way pairs still transfer, since they keep no baseline to correlate against.
 
 1. **Primary mechanism (verified, use this)**: `SyncState.RemoteNodeId` = the CLI's `uid`.
    Reconciliation on the remote side is indexed by `uid`, not path. When a `uid` known from the
@@ -1167,7 +1200,7 @@ actionable as a set. Roughly in the order worth doing.
 
 | # | Item | Why it was deferred, and what to do |
 |---|---|---|
-| B4 | **Local→remote rename detection** (§11's other half). | Needs local identity. §11.2's `st_ino` isn't reachable from .NET without a platform P/Invoke, which is why this half stopped. The way in is §11.3's content-hash match: a path that vanished locally plus one that appeared whose SHA-1 equals the baseline's recorded `ContentHash`, with **exactly one** candidate — no native code, and the hasher's doc comment already anticipates hashing only when a cheap comparison is inconclusive. Executing it needs `MoveItemsAsync` (written, still uncalled) *plus* `filesystem rename`, because `move` keeps the node's name: same parent + new name is a rename, new parent + same name is a move, and both changing needs both calls. |
+| ~~B4~~ | ~~**Local→remote rename detection** (§11's other half).~~ **Done** — see the B4 entry in Status. `MoveItemsAsync` is finally called. |
 | B5 | **Rename detection for `RemoteToLocal` pairs.** | They keep no baseline by design, so there's no identity to correlate and a remote move still costs a delete+download. Making it work would mean matching on `(size, mtime)` with nothing to confirm it — the guess §11.3 says to refuse. Would require giving one-way pairs a baseline purely for identity. |
 | B6 | **Fine-grained transfer progress.** | Appendix A #12 was never tested: whether `upload`/`download` emit parseable progress on stdout is still unknown. `CliCommandOutputEventArgs` already streams lines, so the plumbing exists. Per-*action* progress ("12 of 48") needs none of that and is the bigger win — see §12. |
 | B7 | **Interactive priority over the CLI gate.** | §9 wants the browser's requests served ahead of sync's. Not built because the semaphore is held per *invocation* (~3.5s), so the worst case is already a short wait. Revisit only if that proves annoying in practice. |

@@ -51,6 +51,7 @@ public static class SyncReconciler
         if (direction == SyncDirection.TwoWay)
         {
             DetectRemoteMoves(local, remote, baseline, tolerance, actions, handledByMove);
+            DetectLocalMoves(local, remote, baseline, tolerance, actions, handledByMove);
         }
 
         var allPaths = new SortedSet<string>(StringComparer.Ordinal);
@@ -166,6 +167,83 @@ public static class SyncReconciler
                 PriorityFor(SyncOperation.RenameLocal, oldPath)));
             handled.Add(oldPath);
             handled.Add(newPath);
+        }
+    }
+
+    /// <summary>
+    /// Finds files the *local* side moved or renamed, and answers with a remote move instead of an
+    /// upload plus a trash — §11's other half.
+    ///
+    /// Unlike the remote side there is no stable local id to key on: §11.2's <c>st_ino</c> isn't
+    /// reachable from .NET without a platform P/Invoke. So this uses §11.3's content match, and
+    /// insists on the strong form of it: **size and SHA-1 must both equal what the baseline recorded**,
+    /// with exactly one candidate. Never mtime — a rename doesn't change mtime, but neither does
+    /// anything else about an unrelated file that happens to be the same size, and mtime alone would
+    /// make this a guess rather than a match.
+    ///
+    /// Requires the caller to have filled <see cref="NodeFingerprint.ContentHash"/> on newly-appeared
+    /// local files (<see cref="SyncExecutor"/> does, only for plausible candidates), since
+    /// <see cref="LocalScanner"/> is stat-only and this function does no IO.
+    /// </summary>
+    private static void DetectLocalMoves(
+        IReadOnlyDictionary<string, NodeFingerprint> local,
+        IReadOnlyDictionary<string, NodeFingerprint> remote,
+        IReadOnlyDictionary<string, SyncBaselineEntry> baseline,
+        TimeSpan tolerance,
+        List<SyncAction> actions,
+        HashSet<string> handled)
+    {
+        // Newly-appeared local files that carry a hash: the only possible destinations of a move.
+        var candidates = local
+            .Where(entry => !entry.Value.IsFolder
+                            && entry.Value.ContentHash is not null
+                            && !baseline.ContainsKey(entry.Key)
+                            && !handled.Contains(entry.Key))
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var (oldPath, entry) in baseline)
+        {
+            if (entry.IsFolder || handled.Contains(oldPath) || local.ContainsKey(oldPath))
+            {
+                continue; // folders aren't moved as units; and it hasn't disappeared locally
+            }
+
+            if (entry.LocalAtSync?.ContentHash is not { } hash || entry.LocalAtSync.Size is not { } size)
+            {
+                continue; // nothing recorded to match against
+            }
+
+            var matches = candidates
+                .Where(c => c.Value.Size == size && string.Equals(c.Value.ContentHash, hash, StringComparison.Ordinal))
+                .ToList();
+
+            if (matches.Count != 1)
+            {
+                continue; // none, or ambiguous — §11.3 says fall back rather than pick one
+            }
+
+            var newPath = matches[0].Key;
+
+            // The remote side must still hold the old path untouched, and have nothing at the new one:
+            // otherwise moving the remote node would discard a remote change or overwrite a different
+            // file.
+            if (!remote.TryGetValue(oldPath, out var remoteOld)
+                || !AreEquivalent(remoteOld, entry.RemoteAtSync, tolerance)
+                || remote.ContainsKey(newPath))
+            {
+                continue;
+            }
+
+            actions.Add(new SyncAction(SyncOperation.RenameRemote, oldPath, newPath, matches[0].Value.Size,
+                PriorityFor(SyncOperation.RenameRemote, oldPath)));
+            handled.Add(oldPath);
+            handled.Add(newPath);
+            candidates.Remove(matches[0]); // one destination can only be one move's target
         }
     }
 
@@ -414,7 +492,7 @@ public static class SyncReconciler
 
     private static SyncPlanStats ComputeStats(IReadOnlyList<SyncAction> actions, IReadOnlyList<SyncConflict> conflicts)
     {
-        int filesToDownload = 0, filesToUpload = 0, foldersLocal = 0, foldersRemote = 0, deleteLocal = 0, trashRemote = 0, movesLocal = 0;
+        int filesToDownload = 0, filesToUpload = 0, foldersLocal = 0, foldersRemote = 0, deleteLocal = 0, trashRemote = 0, movesLocal = 0, movesRemote = 0;
         long bytesToDownload = 0, bytesToUpload = 0;
 
         foreach (var action in actions)
@@ -444,6 +522,9 @@ public static class SyncReconciler
                 case SyncOperation.RenameLocal:
                     movesLocal++;
                     break;
+                case SyncOperation.RenameRemote:
+                    movesRemote++;
+                    break;
                 case SyncOperation.ResolveConflictKeepBoth:
                     filesToDownload++;
                     filesToUpload++;
@@ -453,6 +534,6 @@ public static class SyncReconciler
             }
         }
 
-        return new SyncPlanStats(filesToDownload, filesToUpload, foldersLocal, foldersRemote, deleteLocal, trashRemote, conflicts.Count, bytesToDownload, bytesToUpload, movesLocal);
+        return new SyncPlanStats(filesToDownload, filesToUpload, foldersLocal, foldersRemote, deleteLocal, trashRemote, conflicts.Count, bytesToDownload, bytesToUpload, movesLocal, movesRemote);
     }
 }

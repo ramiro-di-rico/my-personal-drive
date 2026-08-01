@@ -340,7 +340,76 @@ public sealed class SyncExecutor
         local = _echoSuppressor.Filter(pair.Id, SyncSide.Local, local);
         remote = _echoSuppressor.Filter(pair.Id, SyncSide.Remote, remote);
 
+        if (pair.Direction == SyncDirection.TwoWay)
+        {
+            local = await HashLocalMoveCandidatesAsync(pair, mapper, local, cancellationToken);
+        }
+
         return (local, remote, mapper);
+    }
+
+    /// <summary>
+    /// Fills in <see cref="NodeFingerprint.ContentHash"/> for the local files that could be the
+    /// destination of a move, so the pure reconciler can match them against the baseline's recorded
+    /// hash (§11.3 / backlog B4). <see cref="LocalScanner"/> is stat-only by design and the reconciler
+    /// does no IO, so this is the only place the hashes can come from.
+    ///
+    /// Narrowed twice, because hashing is the one genuinely expensive thing here:
+    /// <list type="bullet">
+    /// <item>Only files that are new since the baseline — an existing path can't be a move's target.</item>
+    /// <item>Only those whose <b>size</b> matches something that disappeared from the baseline. A move
+    /// preserves size exactly, so a size that matches nothing cannot be a move, and this alone turns
+    /// "hash everything new" into "hash the handful that could possibly match".</item>
+    /// </list>
+    /// A first sync hashes nothing at all: with an empty baseline nothing has disappeared.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, NodeFingerprint>> HashLocalMoveCandidatesAsync(
+        SyncPair pair, PathMapper mapper, IReadOnlyDictionary<string, NodeFingerprint> local, CancellationToken cancellationToken)
+    {
+        var baseline = await _stateStore.GetBaselineAsync(pair.Id, cancellationToken);
+
+        var vanishedSizes = baseline
+            .Where(entry => !entry.Value.IsFolder
+                            && !local.ContainsKey(entry.Key)
+                            && entry.Value.LocalAtSync?.ContentHash is not null
+                            && entry.Value.LocalAtSync.Size is not null)
+            .Select(entry => entry.Value.LocalAtSync!.Size!.Value)
+            .ToHashSet();
+
+        if (vanishedSizes.Count == 0)
+        {
+            return local;
+        }
+
+        var candidates = local
+            .Where(entry => !entry.Value.IsFolder
+                            && entry.Value.Size is { } size
+                            && vanishedSizes.Contains(size)
+                            && !baseline.ContainsKey(entry.Key))
+            .Select(entry => entry.Key)
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return local;
+        }
+
+        var hashed = new Dictionary<string, NodeFingerprint>(local, StringComparer.Ordinal);
+        foreach (var relativePath in candidates)
+        {
+            try
+            {
+                var hash = await LocalFileHasher.ComputeSha1Async(mapper.ToLocalAbsolute(relativePath), cancellationToken);
+                hashed[relativePath] = hashed[relativePath] with { ContentHash = hash };
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Unreadable right now: leave it hashless, which simply means no move is detected for
+                // it and the ordinary upload path handles it.
+            }
+        }
+
+        return hashed;
     }
 
     private async Task ExecuteOneAsync(RunContext context, QueuedSyncAction action, CancellationToken cancellationToken)
@@ -397,6 +466,10 @@ public sealed class SyncExecutor
             case SyncOperation.RenameLocal:
                 await RenameLocalAsync(context, action, cancellationToken);
                 return; // its own baseline bookkeeping — two paths change, not one
+
+            case SyncOperation.RenameRemote:
+                await RenameRemoteAsync(context, action, cancellationToken);
+                return;
 
             case SyncOperation.UpdateBaselineOnly:
                 break; // the baseline write below is the entire point of this operation
@@ -569,6 +642,61 @@ public sealed class SyncExecutor
 
         await LogAsync(context, SyncLogLevel.Info, action.RelativePath,
             $"Moved locally to '{action.SecondaryPath}' to match Proton Drive, without re-downloading it.", cancellationToken);
+    }
+
+    /// <summary>
+    /// Mirrors a local move on Proton Drive, instead of uploading the content again and trashing the
+    /// old copy (§11 / backlog B4).
+    ///
+    /// Needs up to two CLI calls, because the two commands each hold one thing fixed:
+    /// `filesystem move` keeps the node's name and changes its parent, `filesystem rename` keeps the
+    /// parent and changes the name. So a move that also renames needs both — move first, then rename,
+    /// so the node reaches its destination folder before it takes its final name. If the second call
+    /// fails the node is left in the right folder under the old name; nothing is lost, and the next
+    /// cycle's rescan plans from whatever it actually finds.
+    /// </summary>
+    private async Task RenameRemoteAsync(RunContext context, QueuedSyncAction action, CancellationToken cancellationToken)
+    {
+        if (action.SecondaryPath is null)
+        {
+            throw new InvalidOperationException($"A remote move of '{action.RelativePath}' has no destination path.");
+        }
+
+        var oldParent = ParentOf(action.RelativePath);
+        var newParent = ParentOf(action.SecondaryPath);
+        var oldName = NameOf(action.RelativePath);
+        var newName = NameOf(action.SecondaryPath);
+
+        var currentRemotePath = context.Mapper.ToRemoteAbsolute(action.RelativePath);
+
+        if (!string.Equals(oldParent, newParent, StringComparison.Ordinal))
+        {
+            await _protonDriveService.MoveItemAsync(currentRemotePath, context.Mapper.ToRemoteAbsolute(newParent), cancellationToken);
+            // It now lives in the new folder, still under the old name.
+            currentRemotePath = context.Mapper.ToRemoteAbsolute(newParent.Length == 0 ? oldName : $"{newParent}/{oldName}");
+            context.Baseline?.InvalidateRemoteFolder(oldParent);
+            context.Baseline?.InvalidateRemoteFolder(newParent);
+        }
+
+        if (!string.Equals(oldName, newName, StringComparison.Ordinal))
+        {
+            await _protonDriveService.RenameItemAsync(currentRemotePath, newName, cancellationToken);
+            context.Baseline?.InvalidateRemoteFolder(newParent);
+        }
+
+        // The old remote path is gone. Suppressed for the same reason a trash is (Appendix A #15): a
+        // stale listing still reporting it, with the baseline row already moved, reads as "new
+        // remotely" — and would download the file back under its old name.
+        _echoSuppressor.SuppressDeletion(context.Pair.Id, SyncSide.Remote, action.RelativePath);
+
+        if (context.Baseline is not null)
+        {
+            await context.Baseline.ClearAsync(action.RelativePath, cancellationToken);
+            await context.Baseline.RecordAsync(action.SecondaryPath, isFolder: false, _timeProvider.GetUtcNow(), cancellationToken);
+        }
+
+        await LogAsync(context, SyncLogLevel.Info, action.RelativePath,
+            $"Moved on Proton Drive to '{action.SecondaryPath}' to match this machine, without re-uploading it.", cancellationToken);
     }
 
     /// <summary>

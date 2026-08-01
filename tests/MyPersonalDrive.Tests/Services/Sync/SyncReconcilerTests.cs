@@ -626,4 +626,161 @@ public class SyncReconcilerTests
         Assert.True(moveIndex >= 0 && deleteIndex >= 0);
         Assert.True(moveIndex < deleteIndex, "the move must be planned before any deletion");
     }
+
+    // ---- F5/B4: local move detection (§11.3's content match, no local id available) ----
+
+    /// <summary>
+    /// 'old/x.pdf' was in sync; the user has since moved that file to 'new/x.pdf' locally. The
+    /// destination carries the hash the executor computed for it (the scanner is stat-only).
+    /// </summary>
+    private static SyncPlan ReconcileAfterLocalMove(
+        string oldPath = "old/x.pdf",
+        string newPath = "new/x.pdf",
+        long size = 100,
+        string movedHash = "hash-a",
+        NodeFingerprint? remoteOverride = null,
+        Dictionary<string, NodeFingerprint>? extraRemote = null,
+        Dictionary<string, NodeFingerprint>? extraLocal = null)
+    {
+        var local = Map(new NodeFingerprint(newPath, false, size, T1, null, movedHash));
+        if (extraLocal is not null)
+        {
+            foreach (var (k, v) in extraLocal) { local[k] = v; }
+        }
+
+        var remote = Map(remoteOverride ?? RemoteFp(oldPath, "uid-1", size));
+        if (extraRemote is not null)
+        {
+            foreach (var (k, v) in extraRemote) { remote[k] = v; }
+        }
+
+        var baseline = BaselineMap(BaselineOf(oldPath, false,
+            new NodeFingerprint(oldPath, false, 100, T0, null, "hash-a"),
+            RemoteFp(oldPath, "uid-1")));
+
+        return SyncReconciler.Reconcile(1, SyncDirection.TwoWay, ConflictPolicy.Ask, local, remote, baseline, Timestamp);
+    }
+
+    [Fact]
+    public void ALocalMove_BecomesARemoteMove_NotAnUploadPlusTrash()
+    {
+        var plan = ReconcileAfterLocalMove();
+
+        var action = Assert.Single(plan.Actions);
+        Assert.Equal(SyncOperation.RenameRemote, action.Operation);
+        Assert.Equal("old/x.pdf", action.RelativePath);
+        Assert.Equal("new/x.pdf", action.SecondaryPath);
+        Assert.Equal(1, plan.Stats.FilesToMoveRemotely);
+        Assert.Equal(0, plan.Stats.FilesToUpload);
+        Assert.Equal(0, plan.Stats.ToTrashRemote);
+        Assert.Equal(0, plan.Stats.BytesToUpload);
+    }
+
+    [Fact]
+    public void ALocalRenameInPlace_IsAlsoJustARemoteMove()
+    {
+        var plan = ReconcileAfterLocalMove(oldPath: "notes.txt", newPath: "notes-final.txt");
+
+        Assert.Equal(SyncOperation.RenameRemote, Assert.Single(plan.Actions).Operation);
+    }
+
+    [Fact]
+    public void AMoveIsRefused_WhenTheContentDiffers()
+    {
+        // Same size, different hash: a different file that happens to be the same length. Matching on
+        // size alone would move the wrong node — which is exactly why mtime/size heuristics are refused.
+        var plan = ReconcileAfterLocalMove(movedHash: "hash-different");
+
+        Assert.DoesNotContain(plan.Actions, a => a.Operation == SyncOperation.RenameRemote);
+        Assert.Contains(plan.Actions, a => a.Operation == SyncOperation.UploadFile);
+    }
+
+    [Fact]
+    public void AMoveIsRefused_WhenTheDestinationHasNoHashYet()
+    {
+        // The executor only hashes plausible candidates; without a hash there is nothing to match, so
+        // the ordinary upload path takes it.
+        var local = Map(FileFp("new/x.pdf", hash: null));
+        var remote = Map(RemoteFp("old/x.pdf", "uid-1"));
+        var baseline = BaselineMap(BaselineOf("old/x.pdf", false, FileFp("old/x.pdf"), RemoteFp("old/x.pdf", "uid-1")));
+
+        var plan = SyncReconciler.Reconcile(1, SyncDirection.TwoWay, ConflictPolicy.Ask, local, remote, baseline, Timestamp);
+
+        Assert.DoesNotContain(plan.Actions, a => a.Operation == SyncOperation.RenameRemote);
+    }
+
+    [Fact]
+    public void AmbiguousContent_RefusesToGuess()
+    {
+        // Two new local files with identical content: "which one is the move?" has no correct answer.
+        var local = Map(
+            new NodeFingerprint("new/x.pdf", false, 100, T1, null, "hash-a"),
+            new NodeFingerprint("other/x.pdf", false, 100, T1, null, "hash-a"));
+        var remote = Map(RemoteFp("old/x.pdf", "uid-1"));
+        var baseline = BaselineMap(BaselineOf("old/x.pdf", false, FileFp("old/x.pdf"), RemoteFp("old/x.pdf", "uid-1")));
+
+        var plan = SyncReconciler.Reconcile(1, SyncDirection.TwoWay, ConflictPolicy.Ask, local, remote, baseline, Timestamp);
+
+        Assert.DoesNotContain(plan.Actions, a => a.Operation == SyncOperation.RenameRemote);
+    }
+
+    [Fact]
+    public void AMoveIsRefused_WhenTheRemoteCopyChangedMeanwhile()
+    {
+        // Moving the remote node would discard the remote edit.
+        var plan = ReconcileAfterLocalMove(remoteOverride: RemoteFp("old/x.pdf", "uid-1", size: 999, hash: "hash-remote-edit"));
+
+        Assert.DoesNotContain(plan.Actions, a => a.Operation == SyncOperation.RenameRemote);
+    }
+
+    [Fact]
+    public void AMoveIsRefused_WhenSomethingAlreadyOccupiesTheRemoteDestination()
+    {
+        var plan = ReconcileAfterLocalMove(
+            extraRemote: new Dictionary<string, NodeFingerprint> { ["new/x.pdf"] = RemoteFp("new/x.pdf", "uid-2", hash: "hash-other") });
+
+        Assert.DoesNotContain(plan.Actions, a => a.Operation == SyncOperation.RenameRemote);
+    }
+
+    [Fact]
+    public void AFileThatMerelyAppeared_IsAnUploadNotAMove()
+    {
+        // Nothing disappeared, so nothing moved.
+        var local = Map(new NodeFingerprint("fresh.txt", false, 10, T1, null, "hash-fresh"));
+
+        var plan = SyncReconciler.Reconcile(1, SyncDirection.TwoWay, ConflictPolicy.Ask, local, Empty, NoBaseline, Timestamp);
+
+        Assert.Equal(SyncOperation.UploadFile, Assert.Single(plan.Actions).Operation);
+    }
+
+    [Fact]
+    public void OneDestinationCannotSatisfyTwoMoves()
+    {
+        // Two baseline files with identical content both vanished, and only one new file appeared. The
+        // first match claims it; the second must fall back rather than plan a second move onto the
+        // same destination.
+        var local = Map(new NodeFingerprint("new/x.pdf", false, 100, T1, null, "hash-same"));
+        var remote = Map(RemoteFp("a.pdf", "uid-1", hash: "hash-same"), RemoteFp("b.pdf", "uid-2", hash: "hash-same"));
+        var baseline = BaselineMap(
+            BaselineOf("a.pdf", false, new NodeFingerprint("a.pdf", false, 100, T0, null, "hash-same"), RemoteFp("a.pdf", "uid-1", hash: "hash-same")),
+            BaselineOf("b.pdf", false, new NodeFingerprint("b.pdf", false, 100, T0, null, "hash-same"), RemoteFp("b.pdf", "uid-2", hash: "hash-same")));
+
+        var plan = SyncReconciler.Reconcile(1, SyncDirection.TwoWay, ConflictPolicy.Ask, local, remote, baseline, Timestamp);
+
+        Assert.Equal(1, plan.Stats.FilesToMoveRemotely);
+        // The other one is a genuine local deletion, so its remote copy goes to the trash.
+        Assert.Equal(1, plan.Stats.ToTrashRemote);
+    }
+
+    [Fact]
+    public void LocalMoveDetectionNeedsABaseline_SoOneWayMirrorsStillTransfer()
+    {
+        var local = Map(new NodeFingerprint("new/x.pdf", false, 100, T1, null, "hash-a"));
+        var remote = Map(RemoteFp("old/x.pdf", "uid-1"));
+
+        var plan = SyncReconciler.Reconcile(1, SyncDirection.LocalToRemote, ConflictPolicy.Ask, local, remote, NoBaseline, Timestamp);
+
+        Assert.DoesNotContain(plan.Actions, a => a.Operation == SyncOperation.RenameRemote);
+        Assert.Contains(plan.Actions, a => a.Operation == SyncOperation.UploadFile);
+    }
 }

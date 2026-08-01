@@ -717,6 +717,139 @@ public class SyncExecutorTests : IDisposable
         Assert.Equal("content", await File.ReadAllTextAsync(Path.Combine(_localRoot, "archive", "x.pdf")));
     }
 
+    // ------------------------------------------------------------------ B4: local moves (§11.3)
+
+    /// <summary>
+    /// Gets a pair to a state where 'x.pdf' is in sync at the root, then returns everything needed to
+    /// move it locally and run again.
+    /// </summary>
+    private async Task<(SyncPair Pair, SyncExecutor Sut, FakeCliExecutor Cli, SyncStateStore Store)> SyncedFileAsync(string content = "the content")
+    {
+        var executor = new FakeCliExecutor();
+        executor.EnqueueOutput($"[{FileEntry("x.pdf", content, uid: "uid-x", hash: "hash-x")}]");
+        executor.EnqueueOutput(args =>
+        {
+            File.WriteAllText(Path.Combine(args[3], "x.pdf"), content);
+            return "";
+        });
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        await sut.RunAsync(pair);
+        return (pair, sut, executor, stateStore);
+    }
+
+    private void MoveLocally(string from, string to)
+    {
+        var source = Path.Combine(_localRoot, from);
+        var destination = Path.Combine(_localRoot, to);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        File.Move(source, destination);
+        File.SetLastWriteTimeUtc(destination, DateTime.UtcNow.AddMinutes(-5)); // past the settling guard
+    }
+
+    [Fact]
+    public async Task RunAsync_TwoWay_ALocalRename_RenamesRemotelyWithoutReuploading()
+    {
+        var (pair, sut, cli, store) = await SyncedFileAsync();
+        var uploadsBefore = cli.Calls.Count(c => c.Arguments.Contains("upload"));
+
+        MoveLocally("x.pdf", "y.pdf");
+        cli.EnqueueOutput($"[{FileEntry("x.pdf", "the content", uid: "uid-x", hash: "hash-x")}]"); // scan: still at the old name
+        cli.EnqueueOutput("");                                                                     // the rename
+        cli.EnqueueOutput($"[{FileEntry("y.pdf", "the content", uid: "uid-x", hash: "hash-x")}]"); // baseline re-read
+
+        var plan = await sut.RunAsync(pair);
+
+        Assert.Equal(1, plan.Stats.FilesToMoveRemotely);
+        var rename = Assert.Single(cli.Calls, c => c.Arguments.Contains("rename"));
+        Assert.Equal(["filesystem", "rename", $"{RemoteRoot}/x.pdf", "y.pdf"], rename.Arguments);
+
+        // Nothing re-uploaded, and no move call: same parent, so a rename alone suffices.
+        Assert.Equal(uploadsBefore, cli.Calls.Count(c => c.Arguments.Contains("upload")));
+        Assert.DoesNotContain(cli.Calls, c => c.Arguments.Contains("move"));
+
+        var baseline = await store.GetBaselineAsync(pair.Id);
+        Assert.Equal(["y.pdf"], baseline.Keys);
+    }
+
+    [Fact]
+    public async Task RunAsync_TwoWay_ALocalMoveIntoAFolder_MovesRemotelyKeepingTheName()
+    {
+        var (pair, sut, cli, store) = await SyncedFileAsync();
+
+        Directory.CreateDirectory(Path.Combine(_localRoot, "archive"));
+        MoveLocally("x.pdf", Path.Combine("archive", "x.pdf"));
+
+        cli.EnqueueOutput($"[{FileEntry("x.pdf", "the content", uid: "uid-x", hash: "hash-x")}]"); // scan root
+        cli.EnqueueOutput("");                                                                     // create-folder archive
+        cli.EnqueueOutput("");                                                                     // the move
+        cli.EnqueueOutput($"[{FolderEntry("archive")}]");                                           // baseline re-reads
+        cli.EnqueueOutput($"[{FileEntry("x.pdf", "the content", uid: "uid-x", hash: "hash-x")}]");
+
+        var plan = await sut.RunAsync(pair);
+
+        Assert.Equal(1, plan.Stats.FilesToMoveRemotely);
+        var move = Assert.Single(cli.Calls, c => c.Arguments.Contains("move"));
+        Assert.Equal(["filesystem", "move", $"{RemoteRoot}/x.pdf", $"{RemoteRoot}/archive"], move.Arguments);
+
+        // Same name, so no rename was needed.
+        Assert.DoesNotContain(cli.Calls, c => c.Arguments.Contains("rename"));
+        Assert.Equal(["archive", "archive/x.pdf"], (await store.GetBaselineAsync(pair.Id)).Keys.OrderBy(k => k, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_TwoWay_ALocalMoveThatAlsoRenames_IssuesMoveThenRename()
+    {
+        // The case that needs both commands: `move` keeps the name, `rename` keeps the parent. Move
+        // first, so the node reaches its destination folder before taking its final name.
+        var (pair, sut, cli, _) = await SyncedFileAsync();
+
+        Directory.CreateDirectory(Path.Combine(_localRoot, "archive"));
+        MoveLocally("x.pdf", Path.Combine("archive", "renamed.pdf"));
+
+        cli.EnqueueOutput($"[{FileEntry("x.pdf", "the content", uid: "uid-x", hash: "hash-x")}]"); // scan root
+        cli.EnqueueOutput("");                                                                     // create-folder
+        cli.EnqueueOutput("");                                                                     // move
+        cli.EnqueueOutput("");                                                                     // rename
+        cli.EnqueueOutput($"[{FolderEntry("archive")}]");
+        cli.EnqueueOutput($"[{FileEntry("renamed.pdf", "the content", uid: "uid-x", hash: "hash-x")}]");
+
+        await sut.RunAsync(pair);
+
+        var move = Assert.Single(cli.Calls, c => c.Arguments.Contains("move"));
+        var rename = Assert.Single(cli.Calls, c => c.Arguments.Contains("rename"));
+        Assert.Equal(["filesystem", "move", $"{RemoteRoot}/x.pdf", $"{RemoteRoot}/archive"], move.Arguments);
+
+        // The rename targets the node at its *new* parent, under the name the move left it with.
+        Assert.Equal(["filesystem", "rename", $"{RemoteRoot}/archive/x.pdf", "renamed.pdf"], rename.Arguments);
+        Assert.True(cli.Calls.IndexOf(move) < cli.Calls.IndexOf(rename));
+    }
+
+    [Fact]
+    public async Task RunAsync_TwoWay_NothingVanishedLocally_HashesNothing()
+    {
+        // Hashing is the one expensive step, so it must not happen just because files are new. With an
+        // empty baseline nothing has disappeared, so there is no move to look for.
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath(RemoteRoot, "[]");
+        WriteSettledLocalFile("a.txt", "aaa");
+        WriteSettledLocalFile("b.txt", "bbb");
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        var plan = await sut.PreviewAsync(pair);
+
+        Assert.Equal(2, plan.Stats.FilesToUpload);
+        Assert.Equal(0, plan.Stats.FilesToMoveRemotely);
+    }
+
     // ------------------------------------------------------------------ F2: conflicts (§5.6)
 
     [Fact]

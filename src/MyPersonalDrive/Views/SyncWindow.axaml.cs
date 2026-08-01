@@ -189,7 +189,12 @@ public partial class SyncWindow : Window
 
         if (stats.FilesToMoveLocally > 0)
         {
-            lines.Add($"↔ {stats.FilesToMoveLocally} file(s) moved to follow Proton Drive — no re-download needed.");
+            lines.Add($"↔ {stats.FilesToMoveLocally} file(s) moved locally to follow Proton Drive — no re-download needed.");
+        }
+
+        if (stats.FilesToMoveRemotely > 0)
+        {
+            lines.Add($"↔ {stats.FilesToMoveRemotely} file(s) moved on Proton Drive to follow this machine — no re-upload needed.");
         }
 
         if (stats.Conflicts > 0)

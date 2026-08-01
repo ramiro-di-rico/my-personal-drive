@@ -55,6 +55,28 @@ public sealed class ProtonDriveService
     public Task CreateFolderAsync(string parentPath, string name, CancellationToken cancellationToken = default)
         => _executor.ExecuteAsync(["filesystem", "create-folder", parentPath, name], cancellationToken);
 
+    /// <summary>
+    /// Moves nodes into another folder, keeping their names. Per docs/PLAN-LOCAL-SYNC.md
+    /// Appendix A #3/#8 this preserves each node's <c>uid</c> (only <c>parentUid</c> changes),
+    /// which is what makes a remote move a single cheap call instead of copy+trash. The CLI
+    /// takes the target parent folder last, after one or more source paths.
+    /// </summary>
+    public Task MoveItemsAsync(IReadOnlyList<string> paths, string targetParentPath, CancellationToken cancellationToken = default)
+    {
+        if (paths.Count == 0)
+        {
+            throw new ArgumentException("At least one source path is required.", nameof(paths));
+        }
+
+        var arguments = new List<string> { "filesystem", "move" };
+        arguments.AddRange(paths);
+        arguments.Add(targetParentPath);
+        return _executor.ExecuteAsync(arguments, cancellationToken);
+    }
+
+    public Task MoveItemAsync(string path, string targetParentPath, CancellationToken cancellationToken = default)
+        => MoveItemsAsync([path], targetParentPath, cancellationToken);
+
     public Task CopyItemAsync(string sourcePath, string targetParentPath, string? newName = null, CancellationToken cancellationToken = default)
     {
         var arguments = new List<string> { "filesystem", "copy" };

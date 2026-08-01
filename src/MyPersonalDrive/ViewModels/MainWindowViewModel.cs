@@ -273,6 +273,18 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public async Task InitializeAsync()
     {
+        // Sync's crash recovery (docs/PLAN-LOCAL-SYNC.md §7) belongs at app startup, before the
+        // user can trigger a sync — but it must never keep the browser from loading, so a
+        // failure here is reported and swallowed rather than propagated.
+        try
+        {
+            await SyncPanel.RecoverFromPreviousRunAsync();
+        }
+        catch (Exception ex)
+        {
+            AppendCommandLine($"[warn] Sync startup recovery failed: {ex.Message}");
+        }
+
         if (!string.IsNullOrWhiteSpace(CliPath) && IsAuthenticated)
         {
             await GoToRootAsync();

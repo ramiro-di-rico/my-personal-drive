@@ -44,6 +44,39 @@ public class ProtonDriveServiceCommandTests
     }
 
     [Fact]
+    public async Task Move_SingleItem_PutsTheTargetParentLast()
+    {
+        var (service, executor) = CreateSut();
+        executor.EnqueueOutput("");
+
+        await service.MoveItemAsync("/my-files/a.txt", "/my-files/target");
+
+        var call = Assert.Single(executor.Calls);
+        Assert.Equal(["filesystem", "move", "/my-files/a.txt", "/my-files/target"], call.Arguments);
+    }
+
+    [Fact]
+    public async Task Move_MultipleItems_PassesEverySourceBeforeTheTarget()
+    {
+        var (service, executor) = CreateSut();
+        executor.EnqueueOutput("");
+
+        await service.MoveItemsAsync(["/my-files/a.txt", "/my-files/b.txt"], "/my-files/target");
+
+        var call = Assert.Single(executor.Calls);
+        Assert.Equal(["filesystem", "move", "/my-files/a.txt", "/my-files/b.txt", "/my-files/target"], call.Arguments);
+    }
+
+    [Fact]
+    public async Task Move_WithNoSources_ThrowsWithoutInvokingTheCli()
+    {
+        var (service, executor) = CreateSut();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => service.MoveItemsAsync([], "/my-files/target"));
+        Assert.Empty(executor.Calls);
+    }
+
+    [Fact]
     public async Task Copy_WithoutNewName_OmitsTheNameFlag()
     {
         var (service, executor) = CreateSut();

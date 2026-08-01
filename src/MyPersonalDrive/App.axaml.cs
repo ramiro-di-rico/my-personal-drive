@@ -27,7 +27,7 @@ public partial class App : Application
             // shared DriveDatabaseMigrations, so either can be constructed independently.
             var syncStateStore = new SyncStateStore(Path.Combine(settings.BaseFolder, "cache.db"));
             var syncExecutor = new SyncExecutor(service, syncStateStore, new LocalScanner(), new RemoteScanner(service));
-            var syncPanelViewModel = new SyncPanelViewModel(syncStateStore, syncExecutor);
+            var syncPanelViewModel = new SyncPanelViewModel(syncStateStore, syncExecutor, new SyncCrashRecovery(syncStateStore));
 
             desktop.MainWindow = new MainWindow
             {

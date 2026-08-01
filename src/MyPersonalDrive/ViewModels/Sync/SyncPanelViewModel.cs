@@ -14,13 +14,16 @@ public sealed class SyncPanelViewModel : ObservableObject
 {
     private readonly SyncStateStore _stateStore;
     private readonly SyncExecutor _executor;
+    private readonly SyncCrashRecovery _crashRecovery;
     private string _statusMessage = "Add a folder to start syncing it from Proton Drive.";
     private bool _isBusy;
+    private bool _hasRecovered;
 
-    public SyncPanelViewModel(SyncStateStore stateStore, SyncExecutor executor)
+    public SyncPanelViewModel(SyncStateStore stateStore, SyncExecutor executor, SyncCrashRecovery crashRecovery)
     {
         _stateStore = stateStore;
         _executor = executor;
+        _crashRecovery = crashRecovery;
         Pairs = new ObservableCollection<SyncPairViewModel>();
 
         AddPairCommand = new AsyncCommand(AddPairAsync, () => !IsBusy, ReportError);
@@ -59,6 +62,27 @@ public sealed class SyncPanelViewModel : ObservableObject
     public Func<SyncPlan, Task<bool>>? RequestPreviewConfirmationAsync { get; set; }
 
     public async Task InitializeAsync() => await LoadPairsAsync();
+
+    /// <summary>
+    /// docs/PLAN-LOCAL-SYNC.md §7's startup step: requeue work a previous run died holding, and
+    /// clear its half-downloaded temp files. Called once from the app's startup path (not from
+    /// <see cref="InitializeAsync"/>, which runs every time the Sync window opens — re-running
+    /// this while a sync is in flight would requeue rows that genuinely *are* running).
+    /// </summary>
+    public async Task RecoverFromPreviousRunAsync()
+    {
+        if (_hasRecovered)
+        {
+            return;
+        }
+
+        _hasRecovered = true;
+        var cleared = await _crashRecovery.RecoverAsync();
+        if (cleared > 0)
+        {
+            StatusMessage = $"Recovered from a previous run: cleared {cleared} leftover download folder(s).";
+        }
+    }
 
     private async Task LoadPairsAsync()
     {

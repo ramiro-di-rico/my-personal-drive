@@ -6,6 +6,9 @@ namespace MyPersonalDrive.Tests.Services;
 public class CliErrorClassifierTests
 {
     [Theory]
+    // The first case is the real message, captured verbatim from cli-drive@0.4.2 on stderr with
+    // exit code 1 (docs/PLAN-LOCAL-SYNC.md Appendix A #10) — the rest are defensive variants.
+    [InlineData("You need to login first")]
     [InlineData("Error: login first")]
     [InlineData("You are not authenticated")]
     [InlineData("not logged in")]

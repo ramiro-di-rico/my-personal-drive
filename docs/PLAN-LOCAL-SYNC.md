@@ -55,14 +55,33 @@
       had exactly the right content and the right restored mtime, the folder was created, and
       cleanup (local temp dir, remote test folder) left no trace.
 
-      **Known gaps, deliberately deferred:**
-      - `ResetRunningToPendingAsync` (crash safety) is implemented and tested but nothing calls
-        it yet — belongs in the composition root once there's an entry point that starts sync.
-      - `RemoteScanner` doesn't yet cache unchanged subtrees (Appendix A #11a's ~3.5s/call
-        finding makes this matter more than the original plan assumed) — fine for a manual,
-        on-demand "Sync now" (F1's actual target), will matter once F3 adds polling.
-      - `MoveItemAsync` on `ProtonDriveService` still isn't wired up (only needed once
-        `TwoWay`/rename support lands in F2).
+      **Known gaps — two of three now closed:**
+      - ~~`ResetRunningToPendingAsync` (crash safety) is implemented and tested but nothing calls
+        it yet.~~ **Done.** New `SyncCrashRecovery` service does both halves of §7's startup step
+        (requeue `Running` rows + delete each pair's leftover `.mypersonaldrive-tmp`), called
+        once from `MainWindowViewModel.InitializeAsync` via
+        `SyncPanelViewModel.RecoverFromPreviousRunAsync` — deliberately *not* from the Sync
+        window's `InitializeAsync`, which runs on every window open and would requeue rows that
+        genuinely are running. A failure there is logged to the activity console, never
+        propagated (the browser must still start). 4 tests.
+      - ~~`MoveItemAsync` on `ProtonDriveService` still isn't wired up.~~ **Done.**
+        `MoveItemsAsync(paths, targetParentPath)` + a single-path convenience overload, matching
+        Appendix A #8's verified argument order (sources first, target parent last). 3 tests.
+        Not yet *called* by anything — the consumer is F2's `RenameRemote`/`MoveRemote`.
+        Argument order re-verified against the live CLI's `--help` (see Appendix A #11b).
+      - **Still open, and the plan's proposed design for it is unsound:** `RemoteScanner` doesn't
+        cache unchanged subtrees. §6.2 proposes a `RemoteFolderEtag` (hash of a folder's children
+        listing) to skip unchanged subtrees, but that **cannot be correct as specified**: the etag
+        of folder `F` only covers `F`'s direct children, so a file changed inside `F/G/H` leaves
+        `F`'s listing byte-identical and the skip would silently miss the change — a lost-update
+        bug, the worst class for a sync engine. Computing the etag also requires listing `F`
+        anyway, so it saves nothing at `F`'s own level.
+        A sound version needs a propagating signal, which is an open empirical question about the
+        CLI/Proton: does a folder's `modificationTime` bump when a *descendant* changes, or is
+        there an events/changes command? Neither was tested in F0. **Blocked on that
+        investigation** (needs the CLI executable). Until then the honest position is: no subtree
+        caching, which is fine for F1's manual "Sync now" and is a hard prerequisite for F3's
+        polling default.
 - [x] **F1 (UI) — done, pending a manual click-through.** New `SyncPanelViewModel` /
       `SyncPairViewModel` (kept out of `MainWindowViewModel` per docs/PLAN-TECH-DEBT.md's
       recommendation), a new `SyncWindow` opened via a 🔁 button in `MainWindow`'s header
@@ -458,9 +477,19 @@ Depends on F0 #4:
   folders whose parent hasn't changed. A full scan of a drive with 500 folders would be
   500 processes: **it must be shown as progress and be cancelable**.
 
-Optimization: store a synthetic `RemoteFolderEtag` (a hash of the children listing) in
+~~Optimization: store a synthetic `RemoteFolderEtag` (a hash of the children listing) in
 `SyncState` to skip unchanged subtrees between cycles. Only valid if the remote listing is
-order-stable.
+order-stable.~~ **Retracted — this is not correct.** A folder's children-listing hash says
+nothing about its *grandchildren*: a file changed inside `F/G/H` leaves `F`'s listing identical,
+so skipping the `F` subtree on an unchanged etag silently misses the change. And since computing
+the etag requires listing `F`, it saves no call at `F`'s own level either. Order-stability was
+never the real problem.
+
+What a correct subtree skip needs is a signal that **propagates upward** from a descendant
+change. Open question, untested in F0 (see #11b): does a folder's top-level `modificationTime`
+bump when a descendant changes? Is there a changes/events command in the CLI? If neither exists,
+the only sound optimizations left are per-run (nothing to cache across cycles) and the polling
+interval has to scale with the observed scan duration instead.
 
 ### 6.3 Local watcher — `LocalFileWatcher`
 
@@ -818,14 +847,18 @@ single calls, not a heuristic-guarded copy+trash fallback.
 untested — did not risk it), `filesystem empty-trash`. The engine should use `trash` exclusively,
 per §11's safety rule; `delete`/`empty-trash` are for a future "empty trash" UI action, not sync.
 
-### #10 — Distinct exit codes / stable messages ⚠️ partially verified
+### #10 — Distinct exit codes / stable messages ⚠️ mostly verified
 
-Confirmed one message: a nonexistent path produces `Node not found: <name>`, exit code 1 —
-matches `CliErrorClassifier`'s existing `"not found"` substring rule, no change needed. **Did
-not** verify the "not authenticated" message wording (would have required logging out of a real
-session with no easy way to log back in non-interactively) or quota/network errors. Still exit
-code 1 for everything observed — no distinct codes per failure type. `CliErrorClassifier`
-remains substring-based; revisit if a future session can safely trigger an auth failure.
+Confirmed two messages:
+- A nonexistent path produces `Node not found: <name>`, exit code 1 — matches
+  `CliErrorClassifier`'s existing `"not found"` substring rule.
+- **An unauthenticated invocation produces exactly `You need to login first`, on stderr, exit
+  code 1** (verified 2026-07-31 in a session that happened to find the CLI logged out — no
+  deliberate logout needed after all). `CliErrorClassifier`'s existing `"login first"` rule
+  already matches it; a regression test now pins the verbatim string.
+
+Still **not** verified: quota and network errors. Still exit code 1 for everything observed —
+no distinct codes per failure type, so `CliErrorClassifier` stays substring-based.
 
 ### #11 — Concurrent processes ✅ fine, but see the cost note below
 
@@ -839,10 +872,38 @@ took ~4.2s total, barely more than one sequential call — the overhead is per-p
 per-request). This changes the calculus in §6.2: BFS-per-folder for the remote scanner is
 **far more expensive than "N processes"** suggested — it's **N × ~3.5s**. A drive with 50
 folders is ~3 minutes just to scan, every polling cycle. This raises the priority of:
-- the `RemoteFolderEtag`-based subtree-skip optimization in §6.2, from "nice to have" to
-  "needed before F3's 5-minute polling default is usable on any non-trivial drive", and
+- a subtree-skip optimization in §6.2, from "nice to have" to "needed before F3's 5-minute
+  polling default is usable on any non-trivial drive" — but see §6.2: the `RemoteFolderEtag`
+  design originally proposed there is unsound, and a correct replacement depends on #11b below, and
 - reconsidering whether the default poll interval (5 min) is even long enough headroom for a
   large tree — may need to scale the interval to the pair's last observed scan duration.
+
+**#11b — does a descendant change propagate upward? ⚠️ half-answered.** Needed to make any
+cross-cycle subtree caching sound (see §6.2, whose original etag design is retracted).
+
+**Part 2 — is there a changes/events/delta command? ❌ no, confirmed.** The CLI's complete
+command surface (from top-level `--help`, cli-drive@0.4.2) is: `auth login|logout`;
+`filesystem list|info|create-folder|upload|download|rename|copy|move|trash|restore|delete|empty-trash`;
+`sharing status|invite|leave|remove|set-url|remove-url`; `invitation list|accept|reject`. No
+event stream, no delta query, nothing that exposes `treeEventScopeId`. So an incremental remote
+scan can only be built out of `list`/`info` calls.
+
+Two side notes from that same output: `filesystem move sourcePath... targetParentPath`
+**re-confirms #8's argument order** (sources first, target parent last — matches
+`ProtonDriveService.MoveItemsAsync`), and there is a **`filesystem info path`** command that
+Appendix A never recorded — worth probing, since a single-node metadata call may be the cheapest
+way to poll one folder's fingerprint (though still ~3.5s of process startup, per #11a).
+
+**Part 1 — does a folder's `modificationTime` bump when a descendant changes? Still open.**
+The test: list a folder `F` containing `F/G/`, note `F`'s own entry as seen from its parent
+(`modificationTime`, plus whether any version-ish field appears on folders at all). Upload a file
+into `F/G/`. Re-list `F`'s parent and compare. If it bumps, a cheap depth-1 listing can prune
+whole subtrees; if not, per-folder listings can't be skipped and the polling interval must instead
+scale with the observed scan duration.
+
+Blocked on an authenticated session: the CLI was logged out (`You need to login first`), and
+`auth login` is interactive. Run `~/Apps/proton-drive auth login` first, then this test is ~8 CLI
+calls (~30s). Also note the binary had lost its execute bit; `chmod +x` was needed.
 
 ### #12 — Parseable upload/download progress — not tested
 

@@ -435,6 +435,27 @@
         one being waited on. Failures count too: the counter measures progress through the queue, not
         successes. An idle cycle reports nothing at all, so the row doesn't flicker.
 
+- [x] **B1 (node names containing `/`) — done.** Two distinct problems hid behind one backlog line.
+
+      **The CLI argument.** `CombinePath` concatenated parent and name with `/` and never escaped the
+      name's own slashes, so a node genuinely called `in/voice` produced a path indistinguishable from
+      a folder `in` containing `voice`. Verified against the real account before writing anything:
+      Proton happily accepts such a folder, the escaped path lists it (exit 0), and the unescaped one
+      fails with **`Node not found: in`** — so every browser command aimed at such a node (download,
+      rename, trash) was broken. `CombinePath` now escapes as the CLI documents.
+
+      **The sync engine's identity model, which was the deeper half.** On Linux `/` is the one byte a
+      filename may not contain, so such a node *cannot* be mirrored locally under its real name.
+      `RemoteScanner` therefore skips it and reports it, and the executor logs a warning naming the
+      file and what to do (rename it in Proton Drive). Skipping is the honest answer: the alternative
+      is inventing a substitute name, which in a `TwoWay` pair would upload back as a second,
+      differently-named copy. It also keeps every relative path in the engine unambiguously
+      `/`-separated, so no path-splitting code had to learn about escapes. A folder with an unmappable
+      name isn't descended into either, since its children are equally unrepresentable.
+
+      Previously this produced a download aimed at an unresolvable path: a permanently failing queue
+      row and an inscrutable error, once per such file, forever.
+
 Added during implementation, not in the original §3.2 model list: `SyncOperation.ClearBaseline`
 (the "both sides deleted it" decision-table row needs a distinct effect — delete the stale
 `SyncState` row — from `UpdateBaselineOnly`, which means "record the current state").
@@ -1024,9 +1045,9 @@ Implemented in `SyncPairValidator` (pure, so the rules are covered exhaustively 
 
 - [x] It's not nested inside (nor contains) another existing pair — **on both sides**, see below.
 - [x] It's not `$HOME` or `/`, and the remote path is absolute.
-- [ ] The local folder exists and is writable (needs IO; not in the pure validator).
-- [ ] Warn if it already contains many files (it will trigger a mass upload).
-- [ ] Sufficient free space for a `RemoteToLocal` (estimated from the sizes in the remote listing).
+- [x] The local folder exists and is writable — `LocalFolderInspector`, checked by probing.
+- [x] Warn if it already contains many files, for directions that would upload them.
+- [x] Sufficient free space — evaluated at **preview** time, not here; see the F4 entry for why.
 
 **Why overlap is a hard error rather than a warning**, on each side:
 
@@ -1105,7 +1126,7 @@ actionable as a set. Roughly in the order worth doing.
 
 | # | Item | Why it was deferred, and what to do |
 |---|---|---|
-| B1 | **`PathMapper` doesn't escape a literal `/` inside a node name.** | The CLI escapes it with a backslash when building a path argument (`filesystem --help`), and `ProtonDriveService.CombinePath` doesn't. A node whose real name contains a slash round-trips wrongly *today* — it isn't hypothetical, just unobserved in testing. Fix in `PathMapper`/`CombinePath` together, with a test using such a name against the real account. |
+| ~~B1~~ | ~~**A literal `/` inside a node name isn't escaped.**~~ **Done** — see the B1 entry in Status. Confirmed against the real account first: Proton accepts a folder named `in/voice`, the escaped path lists it (exit 0) and the unescaped one fails with `Node not found: in`. |
 | B2 | **Two data races in `SyncScheduler`.** | `PairRuntime.IsDirty` is written from watcher threadpool threads and read from the loop; `_pairs` is mutated by the loop while `PumpOnceAsync` is public. Correct today only because the app's loop is the sole caller. Lock `_pairs` and make `IsDirty` interlocked before anything else calls in. |
 | B3 | **`LocalFileWatcher.NeedsFullScan` is never reset.** | Set on buffer overflow; only the scheduler's copy is cleared, so once overflowed every later batch re-flags it. Harmless while the flag is informational (the executor always full-scans anyway) — a trap the moment an incremental local scan exists. |
 

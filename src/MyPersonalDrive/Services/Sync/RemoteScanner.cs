@@ -4,6 +4,13 @@ namespace MyPersonalDrive.Services.Sync;
 
 public interface IRemoteScanner
 {
+    /// <summary>
+    /// Raised for a node the scanner deliberately left out because its name can't be represented
+    /// locally. Reported rather than silently dropped: a file the user can see in Proton Drive but
+    /// never in their synced folder needs an explanation, not silence.
+    /// </summary>
+    event EventHandler<string>? NodeSkipped;
+
     Task<IReadOnlyDictionary<string, NodeFingerprint>> ScanAsync(
         string remoteRoot, PathMapper pathMapper, ExclusionMatcher exclusions, CancellationToken cancellationToken = default);
 }
@@ -28,6 +35,8 @@ public sealed class RemoteScanner : IRemoteScanner
     private readonly ProtonDriveService _service;
     private readonly int _maxConcurrency;
 
+    public event EventHandler<string>? NodeSkipped;
+
     public RemoteScanner(ProtonDriveService service, int maxConcurrency = 1)
     {
         _service = service;
@@ -51,6 +60,17 @@ public sealed class RemoteScanner : IRemoteScanner
             {
                 foreach (var item in items)
                 {
+                    // A name containing '/' cannot exist as a local filename on Linux, so this node
+                    // can't be mirrored under its real name. Skipping keeps the engine's whole
+                    // identity model intact — relative paths stay unambiguously '/'-separated — where
+                    // the alternative would be to invent a substitute name, which in a TwoWay pair
+                    // would then upload back as a second, differently-named copy.
+                    if (ProtonDriveService.HasUnmappableName(item.Name))
+                    {
+                        NodeSkipped?.Invoke(this, item.Name);
+                        continue;
+                    }
+
                     var relativePath = pathMapper.ToRelativeFromRemote(item.Path);
                     if (exclusions.IsExcluded(relativePath, item.IsFolder))
                     {

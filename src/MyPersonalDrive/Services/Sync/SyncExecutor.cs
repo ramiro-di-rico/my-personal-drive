@@ -311,7 +311,29 @@ public sealed class SyncExecutor
 
         Directory.CreateDirectory(pair.LocalPath);
         var local = await _localScanner.ScanAsync(pair.LocalPath, exclusions, cancellationToken);
-        var remote = await _remoteScanner.ScanAsync(pair.RemotePath, mapper, exclusions, cancellationToken);
+
+        // Subscribed per scan: a node the scanner had to leave out is only discoverable here, and a
+        // file visible in Proton Drive but never in the synced folder needs an explanation.
+        var skipped = new List<string>();
+        void OnSkipped(object? _, string name) => skipped.Add(name);
+        _remoteScanner.NodeSkipped += OnSkipped;
+        IReadOnlyDictionary<string, NodeFingerprint> remote;
+        try
+        {
+            remote = await _remoteScanner.ScanAsync(pair.RemotePath, mapper, exclusions, cancellationToken);
+        }
+        finally
+        {
+            _remoteScanner.NodeSkipped -= OnSkipped;
+        }
+
+        foreach (var name in skipped.Distinct(StringComparer.Ordinal))
+        {
+            await _stateStore.LogAsync(pair.Id, SyncLogLevel.Warning, name,
+                $"Skipped '{name}': its name contains '/', which can't be used in a local filename. " +
+                "It stays on Proton Drive but won't be synced — rename it there to include it.",
+                _timeProvider.GetUtcNow(), cancellationToken);
+        }
 
         // Applied to both sides' scans, and to the preview as much as to the run — otherwise the
         // dry-run would offer to download a file this engine just deleted (Appendix A #15).

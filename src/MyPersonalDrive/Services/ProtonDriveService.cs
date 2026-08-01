@@ -356,13 +356,44 @@ public sealed class ProtonDriveService
         return items;
     }
 
+    /// <summary>
+    /// Builds a remote path, escaping any <c>/</c> inside the node's own name as <c>\/</c> — the
+    /// convention `filesystem list --help` documents ("Escape / in node names with a backslash",
+    /// example `/my-files/folder/foo\/bar`).
+    ///
+    /// Without this, a node genuinely named <c>foo/bar</c> produced a path indistinguishable from a
+    /// folder <c>foo</c> containing <c>bar</c>, so every command aimed at it — download, rename,
+    /// trash — failed with "Node not found". Not hypothetical, just unobserved: Proton allows the
+    /// character, only the path syntax needs the escape.
+    /// </summary>
     public static string CombinePath(string parentPath, string name)
     {
+        var escapedName = EscapeNodeName(name);
         if (string.IsNullOrWhiteSpace(parentPath) || parentPath == "/")
         {
-            return "/" + name;
+            return "/" + escapedName;
         }
 
-        return parentPath.TrimEnd('/') + "/" + name;
+        return parentPath.TrimEnd('/') + "/" + escapedName;
     }
+
+    /// <summary>
+    /// True when a node's name contains a character that makes it unrepresentable as a local file.
+    /// On Linux <c>/</c> is the one byte a filename may not contain, so such a node cannot be
+    /// mirrored under its real name at all — which is why the sync engine skips them rather than
+    /// inventing a substitute (see <see cref="Sync.RemoteScanner"/>).
+    /// </summary>
+    public static bool HasUnmappableName(string name) => name.Contains('/', StringComparison.Ordinal);
+
+    /// <summary>
+    /// Escapes the path-separator meaning out of a node's own name.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>/</c> is escaped, because that is the only escape the CLI documents. A name containing
+    /// the literal two characters <c>\/</c> would therefore round-trip ambiguously — unresolvable
+    /// without knowing the CLI's exact unescaping, and not worth guessing at for a case Proton's own
+    /// clients would struggle to create.
+    /// </remarks>
+    private static string EscapeNodeName(string name)
+        => name.Contains('/', StringComparison.Ordinal) ? name.Replace("/", "\\/", StringComparison.Ordinal) : name;
 }

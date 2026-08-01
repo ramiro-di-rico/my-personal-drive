@@ -158,4 +158,42 @@ public class RemoteScannerTests
             return _responses[arguments[^1]];
         }
     }
+
+    // ---- node names that can't exist locally (backlog B1) ----
+
+    [Fact]
+    public async Task ANodeWhoseNameContainsASlash_IsSkippedAndReported()
+    {
+        // '/' is the one byte a Linux filename may not contain, so this node can't be mirrored under
+        // its real name. Skipping keeps relative paths unambiguously '/'-separated; the alternative
+        // would be inventing a substitute name that a TwoWay pair would upload back as a second copy.
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath("/my-files/Docs", $"[{FileJson("uid-ok", "ok.txt", 3, "2026-01-01T00:00:00.000Z", "hash-ok")}, {FileJson("uid-slash", "in/voice.pdf", 3, "2026-01-01T00:00:00.000Z", "hash-slash")}]");
+        var service = new ProtonDriveService(executor);
+        var scanner = new RemoteScanner(service);
+
+        var skipped = new List<string>();
+        scanner.NodeSkipped += (_, name) => skipped.Add(name);
+
+        var result = await scanner.ScanAsync("/my-files/Docs", new PathMapper("/my-files/Docs", "/tmp/x"), new ExclusionMatcher([]));
+
+        Assert.Equal(["ok.txt"], result.Keys);
+        Assert.Equal(["in/voice.pdf"], skipped);
+    }
+
+    [Fact]
+    public async Task AFolderWithAnUnmappableName_IsNotDescendedInto()
+    {
+        // Its children can't be represented locally either, and listing them would cost a CLI call
+        // per folder to produce paths that would then have to be thrown away.
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath("/my-files/Docs", $"[{FolderJson("uid-ab", "a/b")}]");
+        var service = new ProtonDriveService(executor);
+        var scanner = new RemoteScanner(service);
+
+        var result = await scanner.ScanAsync("/my-files/Docs", new PathMapper("/my-files/Docs", "/tmp/x"), new ExclusionMatcher([]));
+
+        Assert.Empty(result);
+        Assert.Single(executor.Calls); // only the root was listed
+    }
 }

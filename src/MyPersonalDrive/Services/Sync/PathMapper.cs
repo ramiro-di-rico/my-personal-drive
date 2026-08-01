@@ -9,13 +9,12 @@ namespace MyPersonalDrive.Services.Sync;
 /// rule" — nothing outside this class should combine or split these paths ad hoc.
 /// </summary>
 /// <remarks>
-/// Known limitation, not handled here: the CLI escapes a literal <c>/</c> inside a node name
-/// with a backslash when building a path argument (`filesystem --help`: "Escape / in node
-/// names with a backslash"). <see cref="ProtonDriveService.CombinePath"/> does not currently
-/// apply that escaping, so a node whose real name contains a literal slash would round-trip
-/// incorrectly through the CLI today. This was not observed in Appendix A's F0 testing and is
-/// out of scope for the initial RemoteToLocal milestone; flagged here for whoever tackles
-/// TwoWay rename support, since that's where it would first bite.
+/// A node whose real name contains a literal <c>/</c> never reaches this class. Such a name cannot
+/// exist as a local filename on Linux at all, so <see cref="RemoteScanner"/> skips those nodes and
+/// reports them, which is what keeps every relative path here unambiguously <c>/</c>-separated.
+/// <see cref="ProtonDriveService.CombinePath"/> escapes them as <c>\/</c> for the CLI's benefit so
+/// the file browser can still address them (verified: the escaped path lists, the unescaped one
+/// fails with "Node not found").
 /// </remarks>
 public sealed class PathMapper
 {

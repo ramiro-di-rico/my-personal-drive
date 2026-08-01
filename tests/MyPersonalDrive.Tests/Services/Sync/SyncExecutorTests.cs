@@ -482,6 +482,39 @@ public class SyncExecutorTests : IDisposable
         Assert.True(pendingOrFailed.Count <= 1, $"expected at most one live row, found {pendingOrFailed.Count}");
     }
 
+    [Fact]
+    public async Task RunAsync_ANodeWhoseNameCannotExistLocally_IsSkippedAndExplained()
+    {
+        // Backlog B1. Before this, such a node produced a relative path indistinguishable from a
+        // nested one, so the download was aimed at a path the CLI couldn't resolve and failed every
+        // run forever with "Node not found" — a permanently broken action and an inscrutable error.
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath(RemoteRoot, $"[{FileEntry("ok.txt", "fine")}, {FileEntry("in/voice.pdf", "cannot")}]");
+        executor.EnqueueOutput(args =>
+        {
+            File.WriteAllText(Path.Combine(args[3], "ok.txt"), "fine");
+            return "";
+        });
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore);
+        var service = new ProtonDriveService(executor);
+        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+
+        var plan = await sut.RunAsync(pair);
+
+        // Only the usable file is planned, and the run is clean rather than partially failed.
+        Assert.Equal(1, plan.Stats.FilesToDownload);
+        Assert.Equal("ok.txt", Assert.Single(plan.Actions).RelativePath);
+        Assert.Equal(SyncPairStatus.Ok, (await stateStore.GetPairAsync(pair.Id))!.LastStatus);
+
+        // And the user is told why the other one never appears, with what to do about it.
+        var logs = await stateStore.GetRecentLogsAsync(pair.Id, 50);
+        var warning = Assert.Single(logs, l => l.Level == SyncLogLevel.Warning);
+        Assert.Contains("in/voice.pdf", warning.Message);
+        Assert.Contains("rename it there", warning.Message);
+    }
+
     // ------------------------------------------------------------------ F4: progress (§12)
 
     [Fact]

@@ -148,4 +148,48 @@ public class ProtonDriveServiceCommandTests
         var call = Assert.Single(executor.Calls);
         Assert.Equal(["filesystem", "create-folder", "/my-files", "New Folder"], call.Arguments);
     }
+
+    // ---- node names containing '/' (backlog B1; the CLI's own escaping rule) ----
+
+    [Fact]
+    public void CombinePath_EscapesASlashInsideTheNodesOwnName()
+    {
+        // `filesystem list --help`: "Escape / in node names with a backslash", example
+        // /my-files/folder/foo\/bar. Unescaped, this path was indistinguishable from a folder
+        // 'foo' containing 'bar', so every command aimed at the node failed with "Node not found".
+        Assert.Equal("/my-files/foo\\/bar", ProtonDriveService.CombinePath("/my-files", "foo/bar"));
+    }
+
+    [Fact]
+    public void CombinePath_LeavesOrdinaryNamesAlone()
+    {
+        Assert.Equal("/my-files/report.pdf", ProtonDriveService.CombinePath("/my-files", "report.pdf"));
+        Assert.Equal("/report.pdf", ProtonDriveService.CombinePath("/", "report.pdf"));
+        Assert.Equal("/my-files/a/b.txt", ProtonDriveService.CombinePath("/my-files/a", "b.txt"));
+    }
+
+    [Fact]
+    public async Task Trash_OnANodeWhoseNameContainsASlash_SendsTheEscapedPath()
+    {
+        var (service, executor) = CreateSut();
+        executor.EnqueueOutput("");
+
+        await service.TrashItemAsync(ProtonDriveService.CombinePath("/my-files", "in/voice.pdf"));
+
+        var call = Assert.Single(executor.Calls);
+        Assert.Equal(["filesystem", "trash", "/my-files/in\\/voice.pdf"], call.Arguments);
+    }
+
+    [Theory]
+    [InlineData("foo/bar", true)]
+    [InlineData("a/b/c", true)]
+    [InlineData("ordinary.txt", false)]
+    [InlineData("with spaces and \u00e1ccents.txt", false)]
+    [InlineData("back\\slash.txt", false)]
+    public void UnmappableNames_AreExactlyThoseContainingASlash(string name, bool expected)
+    {
+        // '/' is the one byte a Linux filename may not contain, so it's the only name that cannot be
+        // mirrored locally at all — a backslash is perfectly legal in a filename.
+        Assert.Equal(expected, ProtonDriveService.HasUnmappableName(name));
+    }
 }

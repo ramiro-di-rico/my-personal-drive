@@ -7,7 +7,7 @@
         Width="1280"
         Height="800">
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" ColumnDefinitions="*,Auto">
-    <Border Grid.Row="0" Grid.ColumnSpan="2" Padding="16" Background="#20242D">
+    <Border Grid.Row="0" Grid.ColumnSpan="2" Padding="16" Background="{DynamicResource PanelBackgroundBrush}">
       <StackPanel Spacing="8">
         <TextBlock FontSize="20" Text="Proton Drive browser" />
         <TextBlock Opacity="0.8" Text="Point the app at the Proton Drive CLI, then browse /my-files." />
@@ -36,7 +36,7 @@
     </StackPanel>
 
     <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="16" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
-      <Border Grid.Column="0" Padding="12,10" Background="#151922" CornerRadius="6">
+      <Border Grid.Column="0" Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
         <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
@@ -119,7 +119,7 @@
       </TreeView>
     </Grid>
 
-    <Border Grid.Row="3" Grid.Column="1" Margin="0,16,16,16" Padding="16" Width="340" Background="#151922">
+    <Border Grid.Row="3" Grid.Column="1" Margin="0,16,16,16" Padding="16" Width="340" Background="{DynamicResource CardBackgroundBrush}">
       <StackPanel Spacing="10">
         <TextBlock FontSize="18" Text="Status" />
         <Border Name="StatusBorder"
@@ -143,9 +143,6 @@
             </Style>
             <Style Selector="Border#StatusBorder.warning">
               <Setter Property="Background" Value="#FFF3CD" />
-            </Style>
-            <Style Selector="TextBlock#StatusText">
-              <Setter Property="Foreground" Value="White" />
             </Style>
             <Style Selector="Border#StatusBorder.warning TextBlock#StatusText">
               <Setter Property="Foreground" Value="#856404" />
@@ -176,7 +173,7 @@
       </StackPanel>
     </Border>
 
-    <Border Grid.Row="4" Grid.ColumnSpan="2" Margin="16,0,16,16" Padding="12" Background="#11151D" CornerRadius="6">
+    <Border Grid.Row="4" Grid.ColumnSpan="2" Margin="16,0,16,16" Padding="12" Background="{DynamicResource ConsoleBackgroundBrush}" CornerRadius="6">
       <StackPanel Spacing="8">
         <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsLoading}">
           <ProgressBar Width="120" IsIndeterminate="True" />

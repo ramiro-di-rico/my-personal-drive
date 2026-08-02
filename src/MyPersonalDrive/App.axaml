@@ -4,4 +4,21 @@
   <Application.Styles>
     <FluentTheme />
   </Application.Styles>
+
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#E9EBF2" />
+          <SolidColorBrush x:Key="CardBackgroundBrush" Color="#DCE0EA" />
+          <SolidColorBrush x:Key="ConsoleBackgroundBrush" Color="#D3D8E3" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#20242D" />
+          <SolidColorBrush x:Key="CardBackgroundBrush" Color="#151922" />
+          <SolidColorBrush x:Key="ConsoleBackgroundBrush" Color="#11151D" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
 </Application>

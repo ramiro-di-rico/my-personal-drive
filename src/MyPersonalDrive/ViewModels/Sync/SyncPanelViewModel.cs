@@ -76,6 +76,13 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// <summary>Prompts for a new pair's settings; null means the user canceled.</summary>
     public Func<Task<NewSyncPairRequest?>>? RequestNewPairAsync { get; set; }
 
+    /// <summary>
+    /// Lists a remote folder's children, for the "Add pair" dialog's remote folder picker.
+    /// Wired to <see cref="Services.ProtonDriveService.GetChildrenAsync"/>; left null disables
+    /// the picker button (the dialog falls back to typing the path by hand).
+    /// </summary>
+    public Func<string, CancellationToken, Task<IReadOnlyList<DriveItem>>>? GetRemoteFolderChildren { get; set; }
+
     /// <summary>Shown a dry-run plan; returns true if the user chose to run it immediately. Forwarded to every row.</summary>
     public Func<SyncPlan, IReadOnlyList<string>, Task<bool>>? RequestPreviewConfirmationAsync { get; set; }
 

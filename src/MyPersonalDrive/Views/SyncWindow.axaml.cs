@@ -8,6 +8,12 @@ namespace MyPersonalDrive.Views;
 
 public partial class SyncWindow : Window
 {
+    // Matches MainWindowViewModel's own root — Proton Drive's filesystem CLI is rooted there,
+    // not at "/".
+    private const string RemoteRootPath = "/my-files";
+
+    private SyncPanelViewModel? _viewModel;
+
     public SyncWindow()
     {
         InitializeComponent();
@@ -22,6 +28,7 @@ public partial class SyncWindow : Window
             return;
         }
 
+        _viewModel = viewModel;
         viewModel.RequestNewPairAsync = PromptForNewPairAsync;
         viewModel.RequestPreviewConfirmationAsync = ShowPreviewAsync;
         viewModel.RequestConflictResolutionsAsync = ShowConflictsAsync;
@@ -45,7 +52,8 @@ public partial class SyncWindow : Window
 
     private async Task<NewSyncPairRequest?> PromptForNewPairAsync()
     {
-        var remoteBox = new TextBox { PlaceholderText = "/my-files/Documents", Width = 380 };
+        var remoteBox = new TextBox { PlaceholderText = "/my-files/Documents", Width = 280 };
+        var remoteBrowseButton = new Button { Content = "📂 Browse", IsVisible = _viewModel?.GetRemoteFolderChildren is not null };
         var localBox = new TextBox { Width = 280, IsReadOnly = true, PlaceholderText = "Choose a local folder..." };
         var browseButton = new Button { Content = "📂 Browse" };
 
@@ -105,6 +113,15 @@ public partial class SyncWindow : Window
             }
         };
 
+        remoteBrowseButton.Click += async (_, _) =>
+        {
+            var chosen = await PromptForRemoteFolderAsync(RemoteRootPath);
+            if (chosen is not null)
+            {
+                remoteBox.Text = chosen;
+            }
+        };
+
         var addButton = new Button { Content = "Add", IsDefault = true, Width = 80 };
         var cancelButton = new Button { Content = "Cancel", IsCancel = true, Width = 80 };
 
@@ -112,7 +129,7 @@ public partial class SyncWindow : Window
         {
             Title = "Add sync pair",
             Width = 480,
-            Height = 420,
+            Height = 460,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Content = new StackPanel
             {
@@ -121,7 +138,12 @@ public partial class SyncWindow : Window
                 Children =
                 {
                     new TextBlock { Text = "Remote folder path:", FontWeight = Avalonia.Media.FontWeight.Bold },
-                    remoteBox,
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 8,
+                        Children = { remoteBox, remoteBrowseButton }
+                    },
                     new TextBlock { Text = "Local folder:", FontWeight = Avalonia.Media.FontWeight.Bold },
                     new StackPanel
                     {
@@ -173,6 +195,129 @@ public partial class SyncWindow : Window
 
         cancelButton.Click += (_, _) => dialog.Close();
 
+        await dialog.ShowDialog(this);
+        return result;
+    }
+
+    /// <summary>
+    /// A click-through folder browser for the remote side, mirroring the local "Browse" picker
+    /// so the user never has to type a Proton Drive path by hand. Only existing folders can be
+    /// reached this way — there's no "create folder" affordance here, unlike the local picker
+    /// which can point at a not-yet-existing directory.
+    /// </summary>
+    private async Task<string?> PromptForRemoteFolderAsync(string startPath)
+    {
+        var getChildren = _viewModel?.GetRemoteFolderChildren;
+        if (getChildren is null)
+        {
+            return null;
+        }
+
+        var currentPath = startPath;
+        var pathHistory = new Stack<string>();
+
+        var pathText = new TextBlock { FontWeight = Avalonia.Media.FontWeight.Bold, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+        var upButton = new Button { Content = "⬆ Up", IsEnabled = false };
+        var statusText = new TextBlock { Opacity = 0.7, IsVisible = false };
+        var itemsPanel = new StackPanel { Spacing = 4 };
+        var selectButton = new Button { Content = "Select this folder", IsDefault = true, Width = 160 };
+        var cancelButton = new Button { Content = "Cancel", IsCancel = true, Width = 80 };
+
+        var dialog = new Window
+        {
+            Title = "Choose a remote folder",
+            Width = 480,
+            Height = 480,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Spacing = 10,
+                Margin = new Avalonia.Thickness(20),
+                Children =
+                {
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 8,
+                        Children = { upButton, pathText }
+                    },
+                    new ScrollViewer { Height = 300, Content = itemsPanel },
+                    statusText,
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 10,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Children = { selectButton, cancelButton }
+                    }
+                }
+            }
+        };
+
+        async Task LoadAsync()
+        {
+            pathText.Text = currentPath;
+            upButton.IsEnabled = pathHistory.Count > 0;
+            itemsPanel.Children.Clear();
+            statusText.IsVisible = true;
+            statusText.Text = "Loading...";
+
+            try
+            {
+                var children = await getChildren(currentPath, CancellationToken.None);
+                var folders = children
+                    .Where(item => item.IsFolder)
+                    .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                statusText.IsVisible = folders.Count == 0;
+                statusText.Text = "(no subfolders here)";
+
+                foreach (var folder in folders)
+                {
+                    var childPath = folder.Path;
+                    var folderButton = new Button
+                    {
+                        Content = $"📁 {folder.Name}",
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        HorizontalContentAlignment = HorizontalAlignment.Left,
+                    };
+                    folderButton.Click += async (_, _) =>
+                    {
+                        pathHistory.Push(currentPath);
+                        currentPath = childPath;
+                        await LoadAsync();
+                    };
+                    itemsPanel.Children.Add(folderButton);
+                }
+            }
+            catch (Exception ex)
+            {
+                statusText.IsVisible = true;
+                statusText.Text = $"Couldn't list this folder: {ex.Message}";
+            }
+        }
+
+        upButton.Click += async (_, _) =>
+        {
+            if (pathHistory.Count == 0)
+            {
+                return;
+            }
+
+            currentPath = pathHistory.Pop();
+            await LoadAsync();
+        };
+
+        string? result = null;
+        selectButton.Click += (_, _) =>
+        {
+            result = currentPath;
+            dialog.Close();
+        };
+        cancelButton.Click += (_, _) => dialog.Close();
+
+        _ = LoadAsync();
         await dialog.ShowDialog(this);
         return result;
     }

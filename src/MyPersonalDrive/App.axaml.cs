@@ -34,7 +34,10 @@ public partial class App : Application
             var syncScheduler = new SyncScheduler(
                 syncStateStore, syncExecutor, echoSuppressor,
                 isAuthenticated: () => settings.Load().IsAuthenticated);
-            var syncPanelViewModel = new SyncPanelViewModel(syncStateStore, syncExecutor, new SyncCrashRecovery(syncStateStore), syncScheduler);
+            var syncPanelViewModel = new SyncPanelViewModel(syncStateStore, syncExecutor, new SyncCrashRecovery(syncStateStore), syncScheduler)
+            {
+                GetRemoteFolderChildren = service.GetChildrenAsync,
+            };
 
             desktop.MainWindow = new MainWindow
             {

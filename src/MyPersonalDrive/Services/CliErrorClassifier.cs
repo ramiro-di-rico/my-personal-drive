@@ -12,7 +12,15 @@ internal static class CliErrorClassifier
 {
     public static CliErrorKind Classify(int exitCode, string stdout, string stderr)
     {
-        var text = stderr.Length > 0 ? stderr : stdout;
+        // Both streams, not one or the other: when the CLI crashes internally it writes a bare
+        // `====` banner to stderr and the actual diagnosis to stdout, so preferring stderr threw
+        // away the only useful text (verified — docs/PLAN-LOCAL-SYNC.md Appendix A #11).
+        var text = string.Concat(stderr, "\n", stdout);
+
+        if (Contains(text, "SQLITE_BUSY") || Contains(text, "database is locked"))
+        {
+            return CliErrorKind.Busy;
+        }
 
         if (Contains(text, "login first") || Contains(text, "not authenticated") || Contains(text, "not logged in"))
         {

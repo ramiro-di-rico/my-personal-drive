@@ -11,6 +11,8 @@ public sealed record RecordedCall(IReadOnlyList<string> Arguments, TimeSpan? Tim
 public sealed class FakeCliExecutor : IProtonDriveCliExecutor
 {
     private readonly Queue<Func<IReadOnlyList<string>, string>> _responses = new();
+    private readonly Dictionary<string, string> _responsesByLastArgument = new();
+    private readonly object _lock = new();
 
     public List<RecordedCall> Calls { get; } = [];
 
@@ -27,18 +29,43 @@ public sealed class FakeCliExecutor : IProtonDriveCliExecutor
     /// <summary>Queues a failure the next call should throw.</summary>
     public void EnqueueFailure(CliException exception) => _responses.Enqueue(_ => throw exception);
 
+    /// <summary>
+    /// Routes by the call's last argument (the target path, for every command this app issues)
+    /// instead of call order — needed for BFS-style scanners that make several concurrent
+    /// calls whose relative order isn't deterministic. Takes priority over the queue.
+    /// </summary>
+    public void RespondForPath(string path, string stdout) => _responsesByLastArgument[path] = stdout;
+
     public Task<string> ExecuteAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken = default, TimeSpan? timeout = null)
     {
-        Calls.Add(new RecordedCall(arguments, timeout));
-        CommandStarted?.Invoke(this, new CliCommandStartedEventArgs(string.Join(' ', arguments)));
-
-        if (_responses.Count == 0)
+        lock (_lock)
         {
-            throw new InvalidOperationException("FakeCliExecutor received a call with no queued response. Call EnqueueOutput/EnqueueFailure first.");
+            Calls.Add(new RecordedCall(arguments, timeout));
         }
 
-        var respond = _responses.Dequeue();
-        var result = respond(arguments);
+        CommandStarted?.Invoke(this, new CliCommandStartedEventArgs(string.Join(' ', arguments)));
+
+        string result;
+        if (_responsesByLastArgument.Count > 0 && arguments.Count > 0 && _responsesByLastArgument.TryGetValue(arguments[^1], out var byPath))
+        {
+            result = byPath;
+        }
+        else
+        {
+            Func<IReadOnlyList<string>, string> respond;
+            lock (_lock)
+            {
+                if (_responses.Count == 0)
+                {
+                    throw new InvalidOperationException($"FakeCliExecutor received a call ({string.Join(' ', arguments)}) with no matching response. Call EnqueueOutput/RespondForPath first.");
+                }
+
+                respond = _responses.Dequeue();
+            }
+
+            result = respond(arguments);
+        }
+
         CommandFinished?.Invoke(this, new CliCommandFinishedEventArgs(string.Join(' ', arguments), 0));
         return Task.FromResult(result);
     }

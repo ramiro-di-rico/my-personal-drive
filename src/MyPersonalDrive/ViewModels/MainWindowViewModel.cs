@@ -13,6 +13,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly AppSettingsService _settings;
     private readonly Stack<string> _navigationHistory = new();
     private CancellationTokenSource? _cts;
+    private DriveNodeViewModel? _selectedNode;
     private readonly string _rootPath = "/my-files";
     private const int MaxCommandLogLines = 200;
     private readonly List<string> _commandLogLines = new();
@@ -37,12 +38,15 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _selectedModified = "None";
     private string _selectedOwner = "None";
     private string _selectedShared = "None";
+    private bool _hasSelection;
+    private bool _isSettingsView;
 
-    public MainWindowViewModel(ProtonDriveService service, DriveCacheService cacheService, AppSettingsService settings)
+    public MainWindowViewModel(ProtonDriveService service, DriveCacheService cacheService, AppSettingsService settings, Sync.SyncPanelViewModel syncPanel)
     {
         _service = service;
         _cacheService = cacheService;
         _settings = settings;
+        SyncPanel = syncPanel;
 
         var appSettings = settings.Load();
         _cliPath = appSettings.CliPath;
@@ -65,11 +69,15 @@ public sealed class MainWindowViewModel : ObservableObject
         ToggleCommandConsoleCommand = new AsyncCommand(ToggleCommandConsoleAsync, onError: HandleUnexpectedError);
         DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity, HandleUnexpectedError);
         ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, HandleUnexpectedError);
+        ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
+        ShowSettingsCommand = new AsyncCommand(ShowSettingsAsync, onError: HandleUnexpectedError);
     }
 
     public ObservableCollection<DriveNodeViewModel> RootItems { get; }
 
     public ObservableCollection<BreadcrumbSegmentViewModel> BreadcrumbItems { get; }
+
+    public Sync.SyncPanelViewModel SyncPanel { get; }
 
     public AsyncCommand AuthenticateCommand { get; }
 
@@ -88,6 +96,21 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand DownloadActivityCommand { get; }
 
     public AsyncCommand ClearActivityCommand { get; }
+
+    public AsyncCommand ShowExplorerCommand { get; }
+
+    public AsyncCommand ShowSettingsCommand { get; }
+
+    /// <summary>
+    /// Which of the two top-level views is on screen. The explorer (folder browser) and the
+    /// settings view (CLI connection + sync pairs) share one window instead of stacking dialogs,
+    /// so this is a plain view switch, not a navigation stack.
+    /// </summary>
+    public bool IsSettingsView
+    {
+        get => _isSettingsView;
+        private set => SetProperty(ref _isSettingsView, value);
+    }
 
     public Func<Task<IReadOnlyList<string>>>? RequestUploadFilesAsync { get; set; }
 
@@ -221,6 +244,13 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _selectedShared, value);
     }
 
+    /// <summary>Whether the Status panel's per-item fields (as opposed to the current-folder ones) have anything to show.</summary>
+    public bool HasSelection
+    {
+        get => _hasSelection;
+        private set => SetProperty(ref _hasSelection, value);
+    }
+
     public bool IsCommandConsoleVisible
     {
         get => _isCommandConsoleVisible;
@@ -270,6 +300,19 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public async Task InitializeAsync()
     {
+        // Sync's crash recovery (docs/PLAN-LOCAL-SYNC.md §7) belongs at app startup, before the
+        // user can trigger a sync — but it must never keep the browser from loading, so a
+        // failure here is reported and swallowed rather than propagated.
+        try
+        {
+            await SyncPanel.RecoverFromPreviousRunAsync();
+            await SyncPanel.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            AppendCommandLine($"[warn] Sync startup recovery failed: {ex.Message}");
+        }
+
         if (!string.IsNullOrWhiteSpace(CliPath) && IsAuthenticated)
         {
             await GoToRootAsync();
@@ -643,6 +686,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task HandleRowClickAsync(DriveItem item)
     {
+        SelectRow(RootItems.FirstOrDefault(node => node.Item.Path == item.Path));
         SelectItem(item);
 
         if (!item.IsFolder)
@@ -651,6 +695,21 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         await NavigateIntoAsync(item.Path);
+    }
+
+    private void SelectRow(DriveNodeViewModel? node)
+    {
+        if (_selectedNode is not null)
+        {
+            _selectedNode.IsSelected = false;
+        }
+
+        _selectedNode = node;
+
+        if (node is not null)
+        {
+            node.IsSelected = true;
+        }
     }
 
     private async Task LoadFolderAsync(string path, bool clearSelection)
@@ -772,10 +831,23 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void DisplayItems(IEnumerable<DriveItem> items)
     {
+        // Rebuilding replaces every row's view-model, so the previous selection highlight would
+        // otherwise vanish even on a plain refresh (which intentionally keeps the side panel's
+        // selection) — carry it forward onto whichever new row still matches that path.
+        var previouslySelectedPath = _selectedNode?.Path;
+        _selectedNode = null;
+
         RootItems.Clear();
         foreach (var item in items.OrderByDescending(item => item.IsFolder).ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
         {
-            RootItems.Add(new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, HandleUnexpectedError));
+            var node = new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, HandleUnexpectedError);
+            if (previouslySelectedPath is not null && item.Path == previouslySelectedPath)
+            {
+                node.IsSelected = true;
+                _selectedNode = node;
+            }
+
+            RootItems.Add(node);
         }
     }
 
@@ -802,14 +874,16 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectedKind = item.IsFolder ? "Folder" : "File";
         SelectedPath = item.Path;
         SelectedSize = item.Size is null ? "None" : $"{item.Size:n0} bytes";
-        SelectedModified = item.ModifiedAt ?? "None";
+        SelectedModified = item.ModifiedAt is { } modifiedAt ? modifiedAt.ToLocalTime().ToString("g") : "None";
         SelectedOwner = item.Owner ?? "None";
         SelectedShared = item.IsShared ? "Yes" : "No";
+        HasSelection = true;
         StatusMessage = $"Selected {item.Name}.";
     }
 
     private void ClearSelection()
     {
+        _selectedNode = null;
         SelectedName = "None";
         SelectedKind = "None";
         SelectedPath = "None";
@@ -817,6 +891,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectedModified = "None";
         SelectedOwner = "None";
         SelectedShared = "None";
+        HasSelection = false;
     }
 
     private void ResetBrowserState()
@@ -852,6 +927,18 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task ToggleCommandConsoleAsync()
     {
         IsCommandConsoleVisible = !IsCommandConsoleVisible;
+        await Task.CompletedTask;
+    }
+
+    private async Task ShowExplorerAsync()
+    {
+        IsSettingsView = false;
+        await Task.CompletedTask;
+    }
+
+    private async Task ShowSettingsAsync()
+    {
+        IsSettingsView = true;
         await Task.CompletedTask;
     }
 

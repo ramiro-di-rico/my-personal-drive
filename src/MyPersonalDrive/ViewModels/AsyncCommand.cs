@@ -20,7 +20,13 @@ public sealed class AsyncCommand : ICommand
 
     public bool CanExecute(object? parameter) => !_isExecuting && (_canExecute?.Invoke() ?? true);
 
-    public async void Execute(object? parameter)
+    /// <summary>
+    /// `ICommand.Execute` is `async void`, so a caller cannot await the work it starts. That's
+    /// fine for a button click but useless to anything that needs to know when the command
+    /// finished — tests, above all. This is the same body, awaitable; <see cref="Execute"/> is
+    /// now just the fire-and-forget wrapper the binding layer needs.
+    /// </summary>
+    public async Task ExecuteAsync(object? parameter = null)
     {
         if (!CanExecute(parameter))
         {
@@ -50,6 +56,8 @@ public sealed class AsyncCommand : ICommand
             RaiseCanExecuteChanged();
         }
     }
+
+    public async void Execute(object? parameter) => await ExecuteAsync(parameter);
 
     public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
 }

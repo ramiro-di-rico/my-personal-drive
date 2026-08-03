@@ -9,6 +9,7 @@ public sealed class DriveNodeViewModel : ObservableObject
     private readonly Func<DriveItem, Task> _trashItemAsync;
     private readonly Func<DriveItem, Task> _renameItemAsync;
     private readonly Func<DriveItem, Task> _copyItemAsync;
+    private bool _isSelected;
 
     public DriveNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Func<DriveItem, Task> downloadItemAsync, Func<DriveItem, Task> trashItemAsync, Func<DriveItem, Task> renameItemAsync, Func<DriveItem, Task> copyItemAsync, Action<Exception>? onError = null)
     {
@@ -31,9 +32,13 @@ public sealed class DriveNodeViewModel : ObservableObject
 
     public bool IsFile => !Item.IsFolder;
 
-    public string DisplayName => string.IsNullOrWhiteSpace(Item.Name) ? Item.Path : Item.Name;
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set => SetProperty(ref _isSelected, value);
+    }
 
-    public string Icon => Item.IsFolder ? "🗂️" : "📄";
+    public string DisplayName => string.IsNullOrWhiteSpace(Item.Name) ? Item.Path : Item.Name;
 
     public string Path => Item.Path;
 
@@ -41,7 +46,7 @@ public sealed class DriveNodeViewModel : ObservableObject
 
     public string? SizeText => Item.Size is null ? null : $"{Item.Size:n0} bytes";
 
-    public string? ModifiedText => Item.ModifiedAt;
+    public string? ModifiedText => Item.ModifiedAt?.ToLocalTime().ToString("g");
 
     public string? OwnerText => Item.Owner;
 

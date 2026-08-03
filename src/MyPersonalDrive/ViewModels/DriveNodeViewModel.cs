@@ -33,8 +33,6 @@ public sealed class DriveNodeViewModel : ObservableObject
 
     public string DisplayName => string.IsNullOrWhiteSpace(Item.Name) ? Item.Path : Item.Name;
 
-    public string Icon => Item.IsFolder ? "🗂️" : "📄";
-
     public string Path => Item.Path;
 
     public string Kind => Item.IsFolder ? "Folder" : "File";

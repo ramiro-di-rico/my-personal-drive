@@ -353,9 +353,9 @@ public partial class MainWindow : Window
     private async Task<NewSyncPairRequest?> PromptForNewPairAsync(SyncPanelViewModel syncPanel, string remoteRootPath)
     {
         var remoteBox = new TextBox { PlaceholderText = "/my-files/Documents", Width = 280 };
-        var remoteBrowseButton = new Button { Content = "📂 Browse", IsVisible = syncPanel.GetRemoteFolderChildren is not null };
+        var remoteBrowseButton = new Button { Content = "Browse", IsVisible = syncPanel.GetRemoteFolderChildren is not null };
         var localBox = new TextBox { Width = 280, IsReadOnly = true, PlaceholderText = "Choose a local folder..." };
-        var browseButton = new Button { Content = "📂 Browse" };
+        var browseButton = new Button { Content = "Browse" };
 
         // RemoteToLocal stays first, and therefore the default: it's the only direction that
         // cannot destroy anything in the cloud (docs/PLAN-LOCAL-SYNC.md §15).

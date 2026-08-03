@@ -7,6 +7,45 @@
         Title="MyPersonalDrive"
         Width="1280"
         Height="800">
+  <Window.Styles>
+    <!--
+      Per-row icon-only actions (copy/rename/download/trash on a folder row, preview/sync-now/
+      pause/remove on a sync pair) stay invisible until the row is hovered or one of them gets
+      keyboard focus. Opacity (not IsVisible) keeps their layout space reserved, so nothing
+      shifts when they fade in — and ":pointerover" on the row container already cascades from
+      any descendant the pointer is over, so hovering the row's label is enough.
+    -->
+    <Style Selector=".hoverGroup Button.rowAction">
+      <Setter Property="Opacity" Value="0" />
+      <Setter Property="Transitions">
+        <Transitions>
+          <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector=".hoverGroup:pointerover Button.rowAction">
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector=".hoverGroup Button.rowAction:focus-visible">
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+
+    <!--
+      Row background tint: a neutral tint on hover so any row reads as interactive, and the
+      accent — reserved for "this is the important one" — on the row actually selected. Order
+      matters here: ".selected" is declared after ":pointerover" so it still wins when a selected
+      row is also under the pointer.
+    -->
+    <Style Selector="Grid.hoverGroup">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Grid.hoverGroup:pointerover">
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    </Style>
+    <Style Selector="Grid.hoverGroup.selected">
+      <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+    </Style>
+  </Window.Styles>
   <Grid RowDefinitions="Auto,Auto,*">
     <Border Grid.Row="0" Padding="16" Background="{DynamicResource PanelBackgroundBrush}">
       <StackPanel Spacing="8">
@@ -18,7 +57,8 @@
     <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="16,16,16,0">
       <StackPanel.Styles>
         <Style Selector="Button.active">
-          <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+          <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+          <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
           <Setter Property="FontWeight" Value="Bold" />
         </Style>
       </StackPanel.Styles>
@@ -42,6 +82,9 @@
     <Grid Grid.Row="2" RowDefinitions="Auto,*,Auto" IsVisible="{Binding !IsSettingsView}">
       <Grid Grid.Row="0" Margin="16" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
         <Border Grid.Column="0" Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
+          <ScrollViewer x:Name="BreadcrumbScroll"
+                        HorizontalScrollBarVisibility="Auto"
+                        VerticalScrollBarVisibility="Disabled">
           <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>
@@ -57,6 +100,7 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
+          </ScrollViewer>
         </Border>
 
         <Button Grid.Column="1" ToolTip.Tip="Go back" Command="{Binding BackCommand}">
@@ -75,9 +119,10 @@
           <TreeView ItemsSource="{Binding RootItems}">
             <TreeView.ItemTemplate>
               <DataTemplate x:DataType="vm:DriveNodeViewModel">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto"
-                      Margin="0,0,0,6"
-                      Background="Transparent">
+                <Grid Classes="hoverGroup"
+                      Classes.selected="{Binding IsSelected}"
+                      ColumnDefinitions="*,Auto,Auto,Auto,Auto"
+                      Margin="0,0,0,6">
                   <Button Grid.Column="0"
                           Command="{Binding RowCommand}"
                           ToolTip.Tip="Select item or open folder"
@@ -92,6 +137,7 @@
                   </Button>
 
                   <Button Grid.Column="1"
+                          Classes="rowAction"
                           ToolTip.Tip="Create a copy"
                           Margin="8,0,0,0"
                           Command="{Binding CopyCommand}">
@@ -99,6 +145,7 @@
                   </Button>
 
                   <Button Grid.Column="2"
+                          Classes="rowAction"
                           ToolTip.Tip="Rename item"
                           Margin="8,0,0,0"
                           Command="{Binding RenameCommand}">
@@ -106,6 +153,7 @@
                   </Button>
 
                   <Button Grid.Column="3"
+                          Classes="rowAction"
                           ToolTip.Tip="Download file"
                           Margin="8,0,0,0"
                           Command="{Binding DownloadCommand}"
@@ -114,6 +162,7 @@
                   </Button>
 
                   <Button Grid.Column="4"
+                          Classes="rowAction"
                           ToolTip.Tip="Move to trash"
                           Margin="8,0,0,0"
                           Command="{Binding TrashCommand}"
@@ -159,20 +208,28 @@
               </Border.Styles>
             </Border>
 
-            <TextBlock FontWeight="Bold" Text="Selected item" />
-            <TextBlock Text="{Binding SelectedName}" />
-            <TextBlock FontWeight="Bold" Text="Type" />
-            <TextBlock Text="{Binding SelectedKind}" />
-            <TextBlock FontWeight="Bold" Text="Path" />
-            <TextBlock TextWrapping="Wrap" Text="{Binding SelectedPath}" />
-            <TextBlock FontWeight="Bold" Text="Size" />
-            <TextBlock Text="{Binding SelectedSize}" />
-            <TextBlock FontWeight="Bold" Text="Modified" />
-            <TextBlock TextWrapping="Wrap" Text="{Binding SelectedModified}" />
-            <TextBlock FontWeight="Bold" Text="Owner" />
-            <TextBlock TextWrapping="Wrap" Text="{Binding SelectedOwner}" />
-            <TextBlock FontWeight="Bold" Text="Shared" />
-            <TextBlock Text="{Binding SelectedShared}" />
+            <TextBlock Opacity="0.7"
+                       TextWrapping="Wrap"
+                       Text="Select a file or folder to see its details."
+                       IsVisible="{Binding !HasSelection}" />
+
+            <StackPanel Spacing="10" IsVisible="{Binding HasSelection}">
+              <TextBlock FontWeight="Bold" Text="Selected item" />
+              <TextBlock Text="{Binding SelectedName}" />
+              <TextBlock FontWeight="Bold" Text="Type" />
+              <TextBlock Text="{Binding SelectedKind}" />
+              <TextBlock FontWeight="Bold" Text="Path" />
+              <TextBlock TextWrapping="Wrap" Text="{Binding SelectedPath}" />
+              <TextBlock FontWeight="Bold" Text="Size" />
+              <TextBlock Text="{Binding SelectedSize}" />
+              <TextBlock FontWeight="Bold" Text="Modified" />
+              <TextBlock TextWrapping="Wrap" Text="{Binding SelectedModified}" />
+              <TextBlock FontWeight="Bold" Text="Owner" />
+              <TextBlock TextWrapping="Wrap" Text="{Binding SelectedOwner}" />
+              <TextBlock FontWeight="Bold" Text="Shared" />
+              <TextBlock Text="{Binding SelectedShared}" />
+            </StackPanel>
+
             <TextBlock FontWeight="Bold" Text="Current folder" />
             <TextBlock TextWrapping="Wrap" Text="{Binding CurrentPath}" />
             <TextBlock FontWeight="Bold" Text="Root" />
@@ -240,7 +297,7 @@
                 <Button ToolTip.Tip="Select proton-drive executable" Click="BrowseCliPath">
                   <Path Classes="icon" Data="{StaticResource IconFolder}" />
                 </Button>
-                <Button ToolTip.Tip="Authenticate to Proton Drive" Command="{Binding AuthenticateCommand}">
+                <Button Classes="primary" ToolTip.Tip="Authenticate to Proton Drive" Command="{Binding AuthenticateCommand}">
                   <Path Classes="icon" Data="{StaticResource IconKey}" />
                 </Button>
                 <Button ToolTip.Tip="Logout from Proton Drive" Command="{Binding LogoutCommand}">
@@ -263,7 +320,7 @@
                          Text="Keeps a Proton Drive folder and a local folder in step — download only, upload only, or two-way. It runs on its own: local edits are picked up within seconds, and Proton Drive is re-checked periodically, less often for pairs that take longer to scan. &quot;Sync now&quot; is only for skipping the wait." />
 
               <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button Command="{Binding AddPairCommand}">
+                <Button Classes="primary" Command="{Binding AddPairCommand}">
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <Path Classes="icon" Data="{StaticResource IconPlus}" />
                     <TextBlock Text="Add pair" />
@@ -283,7 +340,7 @@
               <ItemsControl ItemsSource="{Binding Pairs}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="syncVm:SyncPairViewModel">
-                    <Border Padding="12" Margin="0,0,0,8" Background="{DynamicResource PanelBackgroundBrush}" CornerRadius="6">
+                    <Border Classes="hoverGroup" Padding="12" Margin="0,0,0,8" Background="{DynamicResource PanelBackgroundBrush}" CornerRadius="6">
                       <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
                         <StackPanel Grid.Column="0" Grid.Row="0" Spacing="4">
                           <TextBlock FontWeight="Bold" Text="{Binding RemotePath}" />
@@ -304,19 +361,19 @@
                         </StackPanel>
 
                         <StackPanel Grid.Column="1" Grid.Row="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
-                          <Button ToolTip.Tip="Preview changes before syncing" Command="{Binding PreviewCommand}">
+                          <Button Classes="rowAction" ToolTip.Tip="Preview changes before syncing" Command="{Binding PreviewCommand}">
                             <Path Classes="icon" Data="{StaticResource IconEye}" />
                           </Button>
-                          <Button ToolTip.Tip="Sync now" Command="{Binding SyncNowCommand}">
+                          <Button Classes="rowAction" ToolTip.Tip="Sync now" Command="{Binding SyncNowCommand}">
                             <Path Classes="icon" Data="{StaticResource IconPlay}" />
                           </Button>
-                          <Button ToolTip.Tip="{Binding PauseTooltip}" Command="{Binding TogglePauseCommand}">
+                          <Button Classes="rowAction" ToolTip.Tip="{Binding PauseTooltip}" Command="{Binding TogglePauseCommand}">
                             <Panel>
                               <Path Classes="icon" Data="{StaticResource IconPlay}" IsVisible="{Binding IsPaused}" />
                               <Path Classes="icon" Data="{StaticResource IconPause}" IsVisible="{Binding !IsPaused}" />
                             </Panel>
                           </Button>
-                          <Button ToolTip.Tip="Remove this pair" Command="{Binding RemoveCommand}">
+                          <Button Classes="rowAction" ToolTip.Tip="Remove this pair" Command="{Binding RemoveCommand}">
                             <Path Classes="icon" Data="{StaticResource IconTrash}" />
                           </Button>
                         </StackPanel>

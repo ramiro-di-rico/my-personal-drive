@@ -1,6 +1,8 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.ViewModels;
 using MyPersonalDrive.ViewModels.Sync;
@@ -15,6 +17,17 @@ public partial class MainWindow : Window
         DataContextChanged += OnDataContextChanged;
         Opened += OnOpened;
     }
+
+    /// <summary>
+    /// Deep paths would otherwise overflow the breadcrumb bar's fixed width with no way to see
+    /// the folder you're actually in. Rather than truncating segments (which hides the middle of
+    /// the path you might want to click back into), it scrolls — and always to the current
+    /// folder, which is what you care about after navigating. Posted after the items collection
+    /// actually changes so the ScrollViewer's Extent already reflects the new content; setting
+    /// Offset past the max clamps to the real end.
+    /// </summary>
+    private void ScrollBreadcrumbToEnd(object? sender, EventArgs e)
+        => Dispatcher.UIThread.Post(() => BreadcrumbScroll.Offset = new Vector(double.MaxValue, 0), DispatcherPriority.Background);
 
     private async void BrowseCliPath(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
@@ -51,6 +64,9 @@ public partial class MainWindow : Window
         viewModel.RequestCreateFolderAsync = PromptForNewFolderNameAsync;
         viewModel.RequestDownloadFolderAsync = PickDownloadFolderAsync;
         viewModel.RequestSaveActivityAsync = PickSaveActivityAsync;
+
+        viewModel.BreadcrumbItems.CollectionChanged -= ScrollBreadcrumbToEnd;
+        viewModel.BreadcrumbItems.CollectionChanged += ScrollBreadcrumbToEnd;
 
         viewModel.SyncPanel.RequestNewPairAsync = () => PromptForNewPairAsync(viewModel.SyncPanel, viewModel.RootPath);
         viewModel.SyncPanel.RequestPreviewConfirmationAsync = ShowPreviewAsync;

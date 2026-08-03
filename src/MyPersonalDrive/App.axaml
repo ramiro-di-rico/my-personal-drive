@@ -12,6 +12,16 @@
       <Setter Property="StrokeLineCap" Value="Round" />
       <Setter Property="StrokeJoin" Value="Round" />
     </Style>
+
+    <!-- The one primary action per section (Authenticate, Add pair) gets the accent; everything
+         else stays neutral so the accent still means something. -->
+    <Style Selector="Button.primary">
+      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AccentForegroundBrush}" />
+    </Style>
+    <Style Selector="Button.primary Path.icon">
+      <Setter Property="Stroke" Value="{DynamicResource AccentForegroundBrush}" />
+    </Style>
   </Application.Styles>
 
   <Application.Resources>
@@ -25,12 +35,18 @@
           <SolidColorBrush x:Key="CardBackgroundBrush" Color="#DCE0EA" />
           <SolidColorBrush x:Key="ConsoleBackgroundBrush" Color="#D3D8E3" />
           <SolidColorBrush x:Key="IconBrush" Color="#1B1F27" />
+          <SolidColorBrush x:Key="AccentBrush" Color="#6D4AFF" />
+          <SolidColorBrush x:Key="AccentForegroundBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="AccentMutedBrush" Color="#1A6D4AFF" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
           <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#20242D" />
           <SolidColorBrush x:Key="CardBackgroundBrush" Color="#151922" />
           <SolidColorBrush x:Key="ConsoleBackgroundBrush" Color="#11151D" />
           <SolidColorBrush x:Key="IconBrush" Color="#E7E9EE" />
+          <SolidColorBrush x:Key="AccentBrush" Color="#8B7CFF" />
+          <SolidColorBrush x:Key="AccentForegroundBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="AccentMutedBrush" Color="#268B7CFF" />
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
     </ResourceDictionary>

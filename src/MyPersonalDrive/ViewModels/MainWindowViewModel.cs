@@ -13,6 +13,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly AppSettingsService _settings;
     private readonly Stack<string> _navigationHistory = new();
     private CancellationTokenSource? _cts;
+    private DriveNodeViewModel? _selectedNode;
     private readonly string _rootPath = "/my-files";
     private const int MaxCommandLogLines = 200;
     private readonly List<string> _commandLogLines = new();
@@ -37,6 +38,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _selectedModified = "None";
     private string _selectedOwner = "None";
     private string _selectedShared = "None";
+    private bool _hasSelection;
     private bool _isSettingsView;
 
     public MainWindowViewModel(ProtonDriveService service, DriveCacheService cacheService, AppSettingsService settings, Sync.SyncPanelViewModel syncPanel)
@@ -240,6 +242,13 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _selectedShared;
         private set => SetProperty(ref _selectedShared, value);
+    }
+
+    /// <summary>Whether the Status panel's per-item fields (as opposed to the current-folder ones) have anything to show.</summary>
+    public bool HasSelection
+    {
+        get => _hasSelection;
+        private set => SetProperty(ref _hasSelection, value);
     }
 
     public bool IsCommandConsoleVisible
@@ -677,6 +686,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task HandleRowClickAsync(DriveItem item)
     {
+        SelectRow(RootItems.FirstOrDefault(node => node.Item.Path == item.Path));
         SelectItem(item);
 
         if (!item.IsFolder)
@@ -685,6 +695,21 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         await NavigateIntoAsync(item.Path);
+    }
+
+    private void SelectRow(DriveNodeViewModel? node)
+    {
+        if (_selectedNode is not null)
+        {
+            _selectedNode.IsSelected = false;
+        }
+
+        _selectedNode = node;
+
+        if (node is not null)
+        {
+            node.IsSelected = true;
+        }
     }
 
     private async Task LoadFolderAsync(string path, bool clearSelection)
@@ -806,10 +831,23 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void DisplayItems(IEnumerable<DriveItem> items)
     {
+        // Rebuilding replaces every row's view-model, so the previous selection highlight would
+        // otherwise vanish even on a plain refresh (which intentionally keeps the side panel's
+        // selection) — carry it forward onto whichever new row still matches that path.
+        var previouslySelectedPath = _selectedNode?.Path;
+        _selectedNode = null;
+
         RootItems.Clear();
         foreach (var item in items.OrderByDescending(item => item.IsFolder).ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
         {
-            RootItems.Add(new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, HandleUnexpectedError));
+            var node = new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, HandleUnexpectedError);
+            if (previouslySelectedPath is not null && item.Path == previouslySelectedPath)
+            {
+                node.IsSelected = true;
+                _selectedNode = node;
+            }
+
+            RootItems.Add(node);
         }
     }
 
@@ -839,11 +877,13 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectedModified = item.ModifiedAt is { } modifiedAt ? modifiedAt.ToLocalTime().ToString("g") : "None";
         SelectedOwner = item.Owner ?? "None";
         SelectedShared = item.IsShared ? "Yes" : "No";
+        HasSelection = true;
         StatusMessage = $"Selected {item.Name}.";
     }
 
     private void ClearSelection()
     {
+        _selectedNode = null;
         SelectedName = "None";
         SelectedKind = "None";
         SelectedPath = "None";
@@ -851,6 +891,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectedModified = "None";
         SelectedOwner = "None";
         SelectedShared = "None";
+        HasSelection = false;
     }
 
     private void ResetBrowserState()

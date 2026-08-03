@@ -37,6 +37,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _selectedModified = "None";
     private string _selectedOwner = "None";
     private string _selectedShared = "None";
+    private bool _isSettingsView;
 
     public MainWindowViewModel(ProtonDriveService service, DriveCacheService cacheService, AppSettingsService settings, Sync.SyncPanelViewModel syncPanel)
     {
@@ -66,6 +67,8 @@ public sealed class MainWindowViewModel : ObservableObject
         ToggleCommandConsoleCommand = new AsyncCommand(ToggleCommandConsoleAsync, onError: HandleUnexpectedError);
         DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity, HandleUnexpectedError);
         ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, HandleUnexpectedError);
+        ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
+        ShowSettingsCommand = new AsyncCommand(ShowSettingsAsync, onError: HandleUnexpectedError);
     }
 
     public ObservableCollection<DriveNodeViewModel> RootItems { get; }
@@ -91,6 +94,21 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand DownloadActivityCommand { get; }
 
     public AsyncCommand ClearActivityCommand { get; }
+
+    public AsyncCommand ShowExplorerCommand { get; }
+
+    public AsyncCommand ShowSettingsCommand { get; }
+
+    /// <summary>
+    /// Which of the two top-level views is on screen. The explorer (folder browser) and the
+    /// settings view (CLI connection + sync pairs) share one window instead of stacking dialogs,
+    /// so this is a plain view switch, not a navigation stack.
+    /// </summary>
+    public bool IsSettingsView
+    {
+        get => _isSettingsView;
+        private set => SetProperty(ref _isSettingsView, value);
+    }
 
     public Func<Task<IReadOnlyList<string>>>? RequestUploadFilesAsync { get; set; }
 
@@ -279,6 +297,7 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             await SyncPanel.RecoverFromPreviousRunAsync();
+            await SyncPanel.InitializeAsync();
         }
         catch (Exception ex)
         {
@@ -867,6 +886,18 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task ToggleCommandConsoleAsync()
     {
         IsCommandConsoleVisible = !IsCommandConsoleVisible;
+        await Task.CompletedTask;
+    }
+
+    private async Task ShowExplorerAsync()
+    {
+        IsSettingsView = false;
+        await Task.CompletedTask;
+    }
+
+    private async Task ShowSettingsAsync()
+    {
+        IsSettingsView = true;
         await Task.CompletedTask;
     }
 

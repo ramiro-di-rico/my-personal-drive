@@ -23,12 +23,17 @@ public interface IRemoteScanner
 /// ~3.5s of process-startup overhead regardless of folder size (Appendix A #11a), and subtree
 /// caching is impossible with this CLI (#11b), so a scan is unavoidably O(folders) × 3.5s.
 ///
-/// <b>Concurrency defaults to 1 on purpose.</b> It used to default to 3, on the strength of
-/// Appendix A #11's single trial of four parallel `list` calls. Re-testing found that trial was
-/// simply lucky: concurrent `proton-drive` processes intermittently crash on the CLI's *own*
-/// internal SQLite cache with `SQLITE_BUSY` (~1 in 3 calls in a three-way race), taking the whole
-/// scan down with them. Raise this only against a CLI version verified to serialize its cache
-/// access.
+/// <b>Concurrency is back above 1</b>, but for a different reason than the original Appendix A #11
+/// trial claimed. That trial got lucky; concurrent `proton-drive` processes really do crash on the
+/// CLI's own SQLite cache with `SQLITE_BUSY`, and still do in cli-drive@0.6.0. What Appendix A #16
+/// established is that the contention is entirely over the one *shared* cache file, so
+/// <see cref="ProtonDriveCliExecutor"/> now gives each concurrent process a private
+/// `XDG_CACHE_HOME` — measured at 64 clean calls out of 64 with eight in flight, against 15
+/// failures in 64 sharing one cache. The executor is what makes this safe; this number only says
+/// how wide the BFS wave is allowed to get.
+///
+/// Default of 0 defers to the executor's own ceiling, which is derived from the CPU count — the
+/// ~3.5s per call is Node.js startup, so cores are the real limit.
 /// </summary>
 public sealed class RemoteScanner : IRemoteScanner
 {
@@ -37,15 +42,25 @@ public sealed class RemoteScanner : IRemoteScanner
 
     public event EventHandler<string>? NodeSkipped;
 
-    public RemoteScanner(ProtonDriveService service, int maxConcurrency = 1)
+    public RemoteScanner(ProtonDriveService service, int maxConcurrency = 0)
     {
         _service = service;
-        _maxConcurrency = maxConcurrency;
+        _maxConcurrency = maxConcurrency > 0
+            ? maxConcurrency
+            : Math.Clamp(Environment.ProcessorCount, 1, 8);
     }
 
     public async Task<IReadOnlyDictionary<string, NodeFingerprint>> ScanAsync(
         string remoteRoot, PathMapper pathMapper, ExclusionMatcher exclusions, CancellationToken cancellationToken = default)
     {
+        // Once per scan, never per folder. `filesystem list` answers from the CLI's cache and never
+        // revalidates a folder it has already listed (Appendix A #16), so a scan starting from a
+        // warm cache can silently omit nodes that exist — which a TwoWay pair would then read as
+        // remote deletions. Within the scan the cache is left alone: it is what keeps the walk from
+        // paying a cold start per folder, and a few seconds of drift inside one scan is the same
+        // staleness window the engine already tolerates.
+        await _service.ResetRemoteCacheAsync(cancellationToken);
+
         var result = new Dictionary<string, NodeFingerprint>();
         using var semaphore = new SemaphoreSlim(_maxConcurrency);
         var currentWave = new List<string> { remoteRoot };

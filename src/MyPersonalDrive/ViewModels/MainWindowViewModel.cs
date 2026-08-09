@@ -12,6 +12,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly DriveCacheService _cacheService;
     private readonly AppSettingsService _settings;
     private readonly Stack<string> _navigationHistory = new();
+    private readonly TimeProvider _timeProvider;
+    private readonly RemoteViewFreshnessPolicy _remoteViewFreshness = new();
     private CancellationTokenSource? _cts;
     private DriveNodeViewModel? _selectedNode;
     private readonly string _rootPath = "/my-files";
@@ -41,8 +43,9 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _hasSelection;
     private bool _isSettingsView;
 
-    public MainWindowViewModel(ProtonDriveService service, DriveCacheService cacheService, AppSettingsService settings, Sync.SyncPanelViewModel syncPanel)
+    public MainWindowViewModel(ProtonDriveService service, DriveCacheService cacheService, AppSettingsService settings, Sync.SyncPanelViewModel syncPanel, TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _service = service;
         _cacheService = cacheService;
         _settings = settings;
@@ -447,7 +450,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         try
         {
-            await LoadFolderAsync(CurrentPath, clearSelection: false);
+            await LoadFolderAsync(CurrentPath, clearSelection: false, forceFreshRemoteView: true);
         }
         catch (InvalidOperationException ex)
         {
@@ -712,7 +715,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    private async Task LoadFolderAsync(string path, bool clearSelection)
+    private async Task LoadFolderAsync(string path, bool clearSelection, bool forceFreshRemoteView = false)
     {
         _cts?.Cancel();
         _cts = new CancellationTokenSource();
@@ -744,14 +747,14 @@ public sealed class MainWindowViewModel : ObservableObject
                 IsLoading = false;
 
                 // Fire and forget CLI fetch to keep UI responsive and command finished
-                _ = FetchFromCliAndUpdateCacheAsync(path, clearSelection, token);
+                _ = FetchFromCliAndUpdateCacheAsync(path, clearSelection, forceFreshRemoteView, token);
                 return;
             }
             else
             {
                 // Clear items while waiting for CLI
                 DisplayItems(Array.Empty<DriveItem>());
-                await FetchFromCliAndUpdateCacheAsync(path, clearSelection, token);
+                await FetchFromCliAndUpdateCacheAsync(path, clearSelection, forceFreshRemoteView, token);
             }
         }
         catch (OperationCanceledException)
@@ -771,10 +774,25 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    private async Task FetchFromCliAndUpdateCacheAsync(string path, bool clearSelection, CancellationToken token)
+    /// <summary>
+    /// Discards the CLI's cached view of the remote tree when it can no longer be trusted, so the
+    /// listing that follows comes from the server. Explicit only on the user's own Refresh; on
+    /// navigation it fires at most once per <see cref="RemoteViewFreshnessWindow"/>.
+    /// </summary>
+    private async Task EnsureFreshRemoteViewAsync(bool force, CancellationToken token)
+    {
+        if (_remoteViewFreshness.ShouldRefresh(_timeProvider.GetUtcNow(), force))
+        {
+            await _service.ResetRemoteCacheAsync(token);
+        }
+    }
+
+    private async Task FetchFromCliAndUpdateCacheAsync(string path, bool clearSelection, bool forceFreshRemoteView, CancellationToken token)
     {
         try
         {
+            await EnsureFreshRemoteViewAsync(forceFreshRemoteView, token);
+
             // 2. Fetch from CLI
             var items = await _service.LoadFolderAsync(path, token);
 

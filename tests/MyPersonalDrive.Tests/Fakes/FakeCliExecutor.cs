@@ -16,6 +16,19 @@ public sealed class FakeCliExecutor : IProtonDriveCliExecutor
 
     public List<RecordedCall> Calls { get; } = [];
 
+    /// <summary>How many times the remote cache was discarded, so a test can assert a scan asked for a fresh view.</summary>
+    public int RemoteCacheResets { get; private set; }
+
+    public Task ResetRemoteCacheAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_lock)
+        {
+            RemoteCacheResets++;
+        }
+
+        return Task.CompletedTask;
+    }
+
     public event EventHandler<CliCommandStartedEventArgs>? CommandStarted;
     public event EventHandler<CliCommandOutputEventArgs>? CommandOutput;
     public event EventHandler<CliCommandFinishedEventArgs>? CommandFinished;

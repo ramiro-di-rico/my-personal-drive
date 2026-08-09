@@ -22,6 +22,14 @@ public sealed class ProtonDriveService
     public event EventHandler<CliCommandFinishedEventArgs>? CommandFinished;
 
     /// <summary>
+    /// See <see cref="IProtonDriveCliExecutor.ResetRemoteCacheAsync"/>. Exposed here because the
+    /// scanner holds a service, not an executor, and it is the scanner that knows when a fresh view
+    /// of the remote tree is required.
+    /// </summary>
+    public Task ResetRemoteCacheAsync(CancellationToken cancellationToken = default)
+        => _executor.ResetRemoteCacheAsync(cancellationToken);
+
+    /// <summary>
     /// Raised when the JSON listing parser fell back to the best-effort text parser, or when
     /// an unrecognized-but-valid JSON shape was encountered. Surfaced to the UI so silent
     /// mis-parses are visible instead of just producing a wrong-looking listing.

@@ -38,6 +38,43 @@ public sealed class SyncStateStore
         return connection;
     }
 
+    // ---------------------------------------------------------------- AppSettings
+
+    private const string AutomaticSyncEnabledKey = "AutomaticSyncEnabled";
+
+    /// <summary>
+    /// Whether the automatic sync loop should be running. Defaults to true for a database that
+    /// has never recorded a choice, so existing users keep the behaviour they had before this
+    /// setting existed.
+    /// </summary>
+    public async Task<bool> GetAutomaticSyncEnabledAsync(CancellationToken ct = default)
+        => await GetSettingAsync(AutomaticSyncEnabledKey, ct) is not "0";
+
+    public async Task SetAutomaticSyncEnabledAsync(bool isEnabled, CancellationToken ct = default)
+        => await SetSettingAsync(AutomaticSyncEnabledKey, isEnabled ? "1" : "0", ct);
+
+    private async Task<string?> GetSettingAsync(string key, CancellationToken ct)
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT Value FROM AppSettings WHERE Key = @Key";
+        command.Parameters.AddWithValue("@Key", key);
+        return await command.ExecuteScalarAsync(ct) as string;
+    }
+
+    private async Task SetSettingAsync(string key, string value, CancellationToken ct)
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO AppSettings (Key, Value) VALUES (@Key, @Value)
+            ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;
+            """;
+        command.Parameters.AddWithValue("@Key", key);
+        command.Parameters.AddWithValue("@Value", value);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     // ---------------------------------------------------------------- SyncPairs
 
     public async Task<SyncPair> CreatePairAsync(

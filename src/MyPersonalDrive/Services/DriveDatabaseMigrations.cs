@@ -93,5 +93,15 @@ public static class DriveDatabaseMigrations
                 Message      TEXT NOT NULL
             );
             """),
+
+        // Key/value app settings that have to survive a restart. First user: whether the
+        // automatic sync loop was left on or off (a user who turns it off doesn't expect it
+        // back on the next launch).
+        new SqliteMigration(4, """
+            CREATE TABLE AppSettings (
+                Key   TEXT PRIMARY KEY,
+                Value TEXT NOT NULL
+            );
+            """),
     ];
 }

@@ -118,8 +118,17 @@ public sealed class SyncPanelViewModel : ObservableObject
         }
 
         // Only after recovery: starting the loop first could hand a cycle a queue whose 'Running'
-        // rows haven't been requeued yet.
-        _scheduler?.Start();
+        // rows haven't been requeued yet. And only if the user hadn't switched automatic sync
+        // off in a previous run — that choice is meant to outlive the process.
+        if (_scheduler is not null && await _stateStore.GetAutomaticSyncEnabledAsync())
+        {
+            _scheduler.Start();
+        }
+        else if (_scheduler is not null)
+        {
+            StatusMessage = "Automatic sync is off (as you left it). Turn it on to resume automatic cycles.";
+        }
+
         RaiseAutomaticSyncState();
     }
 
@@ -133,11 +142,13 @@ public sealed class SyncPanelViewModel : ObservableObject
         if (_scheduler.IsRunning)
         {
             await _scheduler.StopAsync();
+            await _stateStore.SetAutomaticSyncEnabledAsync(false);
             StatusMessage = "Automatic sync paused. Local changes won't be picked up until you resume it.";
         }
         else
         {
             _scheduler.Start();
+            await _stateStore.SetAutomaticSyncEnabledAsync(true);
             StatusMessage = "Automatic sync resumed.";
         }
 

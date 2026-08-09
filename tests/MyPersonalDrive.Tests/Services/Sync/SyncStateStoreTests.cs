@@ -40,6 +40,23 @@ public class SyncStateStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task AutomaticSyncEnabled_DefaultsToTrue()
+    {
+        Assert.True(await CreateSut().GetAutomaticSyncEnabledAsync());
+    }
+
+    [Fact]
+    public async Task AutomaticSyncEnabled_SurvivesANewStoreOverTheSameDatabase()
+    {
+        await CreateSut().SetAutomaticSyncEnabledAsync(false);
+
+        Assert.False(await CreateSut().GetAutomaticSyncEnabledAsync());
+
+        await CreateSut().SetAutomaticSyncEnabledAsync(true);
+        Assert.True(await CreateSut().GetAutomaticSyncEnabledAsync());
+    }
+
+    [Fact]
     public async Task GetPair_ById_ReturnsMatchingPair()
     {
         var sut = CreateSut();

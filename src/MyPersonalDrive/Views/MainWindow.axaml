@@ -307,6 +307,18 @@
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
               </StackPanel>
+
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock VerticalAlignment="Center" Text="Versión del CLI:" />
+                <TextBlock VerticalAlignment="Center"
+                           MaxWidth="420"
+                           TextWrapping="Wrap"
+                           Opacity="0.8"
+                           Text="{Binding CliVersion}" />
+                <Button ToolTip.Tip="Re-read the CLI version" Command="{Binding CheckCliVersionCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+                </Button>
+              </StackPanel>
             </StackPanel>
           </Border>
         </StackPanel>

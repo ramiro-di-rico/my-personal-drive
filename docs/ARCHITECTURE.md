@@ -144,6 +144,20 @@ operation to a command line. **This is the catalog of what's currently known abo
 | `CreateFolderAsync` | `filesystem create-folder "<parent>" "<name>"` |
 | `CopyItemAsync` | `filesystem copy [-n "<newName>"] "<src>" "<targetParent>"` |
 | `UploadFilesAsync` | `filesystem upload [-c keep-both\|replace\|skip] "<f1>" "<f2>"… "<parent>"` |
+| `GetCliVersionAsync` | `--version` |
+
+`--version` is the one command here that is not a subcommand. Captured from `cli-drive@0.6.0`:
+
+```
+Proton Drive CLI cli-drive@0.6.0+f8e16aac
+Proton Drive SDK js@0.19.2+f8e16aac
+```
+
+The service returns the first line verbatim and parses nothing — the app only displays it, and
+splitting `cli-drive@0.6.0+f8e16aac` into fields would assume a format the CLI hasn't promised.
+The second line is the bundled SDK, not the CLI, so it is dropped. `--help` on that build lists
+**no `update`/`self-update` subcommand**: checking for a newer release would need an external
+source, which is why the settings view shows the installed version only.
 
 Forwards all three executor events upward.
 

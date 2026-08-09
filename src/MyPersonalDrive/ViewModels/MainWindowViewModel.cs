@@ -42,6 +42,9 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _selectedShared = "None";
     private bool _hasSelection;
     private bool _isSettingsView;
+    private const string UnknownCliVersion = "Unknown";
+    private string _cliVersion = UnknownCliVersion;
+    private bool _isCheckingCliVersion;
 
     public MainWindowViewModel(ProtonDriveService service, DriveCacheService cacheService, AppSettingsService settings, Sync.SyncPanelViewModel syncPanel, TimeProvider? timeProvider = null)
     {
@@ -74,6 +77,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, HandleUnexpectedError);
         ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
         ShowSettingsCommand = new AsyncCommand(ShowSettingsAsync, onError: HandleUnexpectedError);
+        CheckCliVersionCommand = new AsyncCommand(CheckCliVersionAsync, CanCheckCliVersion, HandleUnexpectedError);
     }
 
     public ObservableCollection<DriveNodeViewModel> RootItems { get; }
@@ -103,6 +107,30 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand ShowExplorerCommand { get; }
 
     public AsyncCommand ShowSettingsCommand { get; }
+
+    public AsyncCommand CheckCliVersionCommand { get; }
+
+    /// <summary>
+    /// What `proton-drive --version` last reported, or why it could not be read. Shown as-is in the
+    /// settings view; the CLI owns the wording, this view model does not reformat it.
+    /// </summary>
+    public string CliVersion
+    {
+        get => _cliVersion;
+        private set => SetProperty(ref _cliVersion, value);
+    }
+
+    public bool IsCheckingCliVersion
+    {
+        get => _isCheckingCliVersion;
+        private set
+        {
+            if (SetProperty(ref _isCheckingCliVersion, value))
+            {
+                CheckCliVersionCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
 
     /// <summary>
     /// Which of the two top-level views is on screen. The explorer (folder browser) and the
@@ -136,6 +164,8 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _cliPath, value))
             {
+                // A different executable is a different version; what was read no longer applies.
+                CliVersion = UnknownCliVersion;
                 PersistSettings();
                 RaiseCommandStates();
             }
@@ -940,6 +970,7 @@ public sealed class MainWindowViewModel : ObservableObject
         CreateFolderCommand.RaiseCanExecuteChanged();
         DownloadActivityCommand.RaiseCanExecuteChanged();
         ClearActivityCommand.RaiseCanExecuteChanged();
+        CheckCliVersionCommand.RaiseCanExecuteChanged();
     }
 
     private async Task ToggleCommandConsoleAsync()
@@ -957,7 +988,41 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task ShowSettingsAsync()
     {
         IsSettingsView = true;
-        await Task.CompletedTask;
+
+        // Read it on the way in, so the settings view is never showing a stale or empty version,
+        // but only once per configured path — the CLI costs a whole process launch (~3.5s cold).
+        if (CliVersion == UnknownCliVersion && !string.IsNullOrWhiteSpace(CliPath))
+        {
+            await CheckCliVersionAsync();
+        }
+    }
+
+    private bool CanCheckCliVersion() => !IsCheckingCliVersion && !string.IsNullOrWhiteSpace(CliPath);
+
+    private async Task CheckCliVersionAsync()
+    {
+        IsCheckingCliVersion = true;
+        try
+        {
+            var version = await _service.GetCliVersionAsync();
+            CliVersion = string.IsNullOrWhiteSpace(version)
+                ? "The CLI reported no version."
+                : version;
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Includes CliException. The CLI's own text is the most useful thing on screen here:
+            // if `--version` is not the flag this build understands, the user sees exactly that.
+            CliVersion = $"Unavailable: {ex.Message}";
+        }
+        catch (FileNotFoundException ex)
+        {
+            CliVersion = $"Unavailable: {ex.Message}";
+        }
+        finally
+        {
+            IsCheckingCliVersion = false;
+        }
     }
 
     private async Task DownloadActivityAsync()

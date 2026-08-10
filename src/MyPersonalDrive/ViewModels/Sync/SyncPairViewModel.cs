@@ -159,6 +159,7 @@ public sealed class SyncPairViewModel : ObservableObject
         {
             var plan = await _executor.PreviewAsync(_pair);
             UpdateStatusText();
+            await RefreshOutstandingAsync();
 
             var warnings = new List<string>();
             if (LocalFolderInspector.CheckFreeSpace(_pair.LocalPath, plan.Stats.BytesToDownload) is { } spaceWarning)

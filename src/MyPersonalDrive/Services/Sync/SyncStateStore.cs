@@ -527,6 +527,46 @@ public sealed class SyncStateStore
         return await command.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>
+    /// Deletes <c>Failed</c> rows the current plan no longer proposes. Mirrors
+    /// <see cref="ClearStaleConflictsAsync"/>: <see cref="EnqueueActionsAsync"/> only revives a
+    /// <c>Failed</c> row when the fresh plan re-proposes the exact same (path, operation) pair, so a
+    /// failure whose difference disappeared by any other means — a manual fix, another client, the
+    /// file simply being deleted — was never being cleared. It just sat in <c>SyncQueue</c> forever,
+    /// which is what let the "Retry failed actions" badge disagree with a fresh preview that finds
+    /// nothing to do.
+    /// </summary>
+    public async Task<int> ClearStaleFailedActionsAsync(int pairId, IReadOnlyList<SyncAction> currentPlan, CancellationToken ct = default)
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+
+        if (currentPlan.Count == 0)
+        {
+            command.CommandText = "DELETE FROM SyncQueue WHERE PairId = @PairId AND State = 'Failed'";
+            command.Parameters.AddWithValue("@PairId", pairId);
+            return await command.ExecuteNonQueryAsync(ct);
+        }
+
+        // Parameterized (path, operation) pairs — never string-concatenated, since these are file names.
+        var clauses = new List<string>();
+        for (var i = 0; i < currentPlan.Count; i++)
+        {
+            clauses.Add($"(RelativePath = @path{i} AND Operation = @op{i})");
+        }
+
+        command.CommandText =
+            $"DELETE FROM SyncQueue WHERE PairId = @PairId AND State = 'Failed' AND NOT ({string.Join(" OR ", clauses)})";
+        command.Parameters.AddWithValue("@PairId", pairId);
+        for (var i = 0; i < currentPlan.Count; i++)
+        {
+            command.Parameters.AddWithValue($"@path{i}", currentPlan[i].RelativePath);
+            command.Parameters.AddWithValue($"@op{i}", currentPlan[i].Operation.ToString());
+        }
+
+        return await command.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<IReadOnlyList<QueuedSyncAction>> GetFailedActionsAsync(int pairId, CancellationToken ct = default)
     {
         using var connection = OpenConnection();

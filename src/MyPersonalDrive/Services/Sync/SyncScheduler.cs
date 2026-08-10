@@ -70,7 +70,13 @@ public sealed class SyncScheduler : IAsyncDisposable
         }
 
         _cts = new CancellationTokenSource();
-        _loop = RunLoopAsync(_cts.Token);
+
+        // Task.Run, not a bare call: `Start` is invoked from the UI thread, so a bare call would
+        // capture Avalonia's synchronization context and post every continuation in the loop back to
+        // the UI thread. That deadlocked shutdown outright — `ShutdownRequested` blocks the UI thread
+        // waiting on this task (App.axaml.cs), while the task needs that same thread to advance. It
+        // also meant every await point in a sync cycle competed with rendering for no reason.
+        _loop = Task.Run(() => RunLoopAsync(_cts.Token));
     }
 
     public async Task StopAsync()

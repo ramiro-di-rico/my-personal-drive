@@ -149,7 +149,7 @@ public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
                 await _slots.WaitAsync(cancellationToken);
             }
 
-            DiscardAllCaches();
+            await DiscardAllCachesAsync();
             Volatile.Write(ref _readCachesDirty, 0);
         }
         finally
@@ -181,7 +181,7 @@ public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
                 return;
             }
 
-            DiscardAllCaches();
+            await DiscardAllCachesAsync();
             Volatile.Write(ref _readCachesDirty, 0);
         }
         finally
@@ -189,6 +189,13 @@ public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
             _cacheResetGate.Release();
         }
     }
+
+    /// <summary>
+    /// Off the calling thread: recursively deleting the slot directories is synchronous file I/O, and
+    /// the browse path reaches this from the UI thread, where a slow disk would show up as the window
+    /// freezing. Same reason the SQLite stores hop off-thread — see <see cref="SqliteOffThread"/>.
+    /// </summary>
+    private Task DiscardAllCachesAsync() => Task.Run(DiscardAllCaches);
 
     private void DiscardAllCaches()
     {

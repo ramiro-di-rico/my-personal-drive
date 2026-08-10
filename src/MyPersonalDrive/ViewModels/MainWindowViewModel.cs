@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Data.Common;
 using System.IO;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
@@ -854,6 +855,20 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (InvalidOperationException ex)
         {
             await Dispatcher.UIThread.InvokeAsync(() => HandleLoadError(path, ex));
+        }
+        catch (DbException ex)
+        {
+            // The local cache database, not the CLI. `DbException` is not an
+            // `InvalidOperationException`, so before this it escaped both catches — and on the
+            // cached path this method is fire-and-forget, so nothing observed it at all: the listing
+            // silently stayed at whatever the cache held. The usual cause is write contention with
+            // the sync engine over the shared cache.db, which now fails in seconds instead of
+            // hanging, so it needs to actually say something.
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                StatusMessage = $"Loaded {path} but could not update the local cache: {ex.Message}";
+                IsWarning = true;
+            });
         }
     }
 

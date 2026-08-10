@@ -1,6 +1,6 @@
 # MyPersonalDrive — Technical Reference
 
-> Reference document describing the current state of the application (branch `main`, commit `b7982ef`).
+> Reference document describing the current state of the application (branch `main`, commit `de22168`).
 > Meant to give full context to any future chat/session without having to re-read all the code.
 
 ---
@@ -15,8 +15,9 @@ Current functional state: browse `/my-files`, upload, download, rename, copy, cr
 move to trash, and a live console showing CLI output. There's a local SQLite cache used to
 paint the UI instantly while the CLI responds.
 
-**Explicitly NOT present today**: synchronization with a local directory. That's the subject of
-[PLAN-LOCAL-SYNC.md](PLAN-LOCAL-SYNC.md).
+Synchronization with a local directory is **present** as of commit `87e91d6`: sync pairs
+(download-only, upload-only, or two-way) that run on their own, with the on/off choice persisted
+across restarts. See [PLAN-LOCAL-SYNC.md](PLAN-LOCAL-SYNC.md) for the design.
 
 ---
 

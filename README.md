@@ -18,6 +18,8 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
 - Download files
 - Upload files to the current folder
 - Move files to trash
+- Sync a Proton Drive folder with a local folder — download-only, upload-only, or two-way,
+  running automatically with the on/off choice persisted across restarts
 - Live CLI command console with realtime output
 - Show the installed `proton-drive` CLI version in the settings view
 - Check Proton's published releases for a newer CLI, and install it after verifying its SHA-512

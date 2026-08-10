@@ -20,8 +20,16 @@ public sealed class MainWindowViewModel : ObservableObject
     private CancellationTokenSource? _cts;
     private DriveNodeViewModel? _selectedNode;
     private readonly string _rootPath = "/my-files";
-    private const int MaxCommandLogLines = 200;
-    private readonly List<string> _commandLogLines = new();
+    private readonly CommandLogBuffer _commandLog = new();
+
+    /// <summary>
+    /// Guards <see cref="_pendingCommandLines"/>, which the CLI executor's events fill from whatever
+    /// thread the process I/O happened on — and now from up to eight of them at once, since read-only
+    /// commands run concurrently.
+    /// </summary>
+    private readonly object _commandLogGate = new();
+    private readonly List<string> _pendingCommandLines = new();
+    private bool _commandLogFlushScheduled;
     private string _cliPath;
     private string _currentPath = "/my-files";
     private string _statusMessage = "Select a Proton Drive CLI executable to begin.";
@@ -431,7 +439,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            AppendCommandLine($"[warn] Sync startup recovery failed: {ex.Message}");
+            QueueCommandLine($"[warn] Sync startup recovery failed: {ex.Message}");
         }
 
         if (!string.IsNullOrWhiteSpace(CliPath) && IsAuthenticated)
@@ -457,9 +465,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private bool CanCreateFolder() => !IsLoading && IsAuthenticated;
 
-    private bool CanDownloadActivity() => _commandLogLines.Count > 0;
+    private bool CanDownloadActivity() => _commandLog.Count > 0;
 
-    private bool CanClearActivity() => _commandLogLines.Count > 0;
+    private bool CanClearActivity() => _commandLog.Count > 0;
 
     private async Task AuthenticateAsync()
     {
@@ -1281,7 +1289,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task ClearActivityAsync()
     {
-        _commandLogLines.Clear();
+        lock (_commandLogGate)
+        {
+            _pendingCommandLines.Clear();
+        }
+
+        _commandLog.Clear();
         CommandLogText = "No CLI command running.";
         ActiveCommand = "Idle";
         RaiseCommandStates();
@@ -1289,40 +1302,74 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     private void OnCommandStarted(object? sender, CliCommandStartedEventArgs e)
-        => Dispatcher.UIThread.Post(() =>
-        {
-            ActiveCommand = e.CommandText;
-            AppendCommandLine($"> {e.CommandText}");
-        });
+    {
+        Dispatcher.UIThread.Post(() => ActiveCommand = e.CommandText);
+        QueueCommandLine($"> {e.CommandText}");
+    }
 
     private void OnCommandOutput(object? sender, CliCommandOutputEventArgs e)
-        => Dispatcher.UIThread.Post(() =>
-        {
-            AppendCommandLine(e.IsError ? $"[err] {e.Text}" : e.Text);
-        });
+        => QueueCommandLine(e.IsError ? $"[err] {e.Text}" : e.Text);
 
     private void OnCommandFinished(object? sender, CliCommandFinishedEventArgs e)
-        => Dispatcher.UIThread.Post(() =>
-        {
-            AppendCommandLine(e.Succeeded
-                ? $"[done] exit {e.ExitCode}"
-                : $"[fail] exit {e.ExitCode}");
-            ActiveCommand = "Idle";
-        });
+    {
+        QueueCommandLine(e.Succeeded ? $"[done] exit {e.ExitCode}" : $"[fail] exit {e.ExitCode}");
+        Dispatcher.UIThread.Post(() => ActiveCommand = "Idle");
+    }
 
     private void OnListingParseWarning(object? sender, string message)
-        => Dispatcher.UIThread.Post(() => AppendCommandLine($"[warn] {message}"));
+        => QueueCommandLine($"[warn] {message}");
 
-    private void AppendCommandLine(string line)
+    /// <summary>
+    /// Buffers a console line and makes sure exactly one flush is pending.
+    ///
+    /// The old version posted to the UI thread per line and rebuilt the whole console text there,
+    /// which re-shaped ~300 KB of text through HarfBuzz on every single line (see
+    /// <see cref="CommandLogBuffer"/> for the captured stack). Now the lines accumulate and one
+    /// flush drains them, at <see cref="DispatcherPriority.Background"/> so it runs *after* input and
+    /// layout — a burst of CLI output can no longer outrun the user's clicks.
+    /// </summary>
+    private void QueueCommandLine(string line)
     {
-        _commandLogLines.Add(line);
-        if (_commandLogLines.Count > MaxCommandLogLines)
+        lock (_commandLogGate)
         {
-            _commandLogLines.RemoveAt(0);
+            _pendingCommandLines.Add(line);
+            if (_commandLogFlushScheduled)
+            {
+                return;
+            }
+
+            _commandLogFlushScheduled = true;
         }
 
-        CommandLogText = string.Join(Environment.NewLine, _commandLogLines);
-        RaiseCommandStates();
+        Dispatcher.UIThread.Post(FlushCommandLog, DispatcherPriority.Background);
+    }
+
+    private void FlushCommandLog()
+    {
+        List<string> batch;
+        lock (_commandLogGate)
+        {
+            _commandLogFlushScheduled = false;
+            if (_pendingCommandLines.Count == 0)
+            {
+                return;
+            }
+
+            batch = [.. _pendingCommandLines];
+            _pendingCommandLines.Clear();
+        }
+
+        var countBefore = _commandLog.Count;
+        _commandLog.AddRange(batch);
+        CommandLogText = _commandLog.Render();
+
+        // Only the two activity commands depend on the line count, and only on the empty/non-empty
+        // transition. Re-raising all thirteen on every line was pure waste on the UI thread.
+        if (countBefore == 0 && _commandLog.Count > 0)
+        {
+            DownloadActivityCommand.RaiseCanExecuteChanged();
+            ClearActivityCommand.RaiseCanExecuteChanged();
+        }
     }
 
     /// <summary>
@@ -1337,7 +1384,7 @@ public sealed class MainWindowViewModel : ObservableObject
             CrashLog.Write(ex);
             StatusMessage = $"Unexpected error: {ex.Message}";
             IsWarning = true;
-            AppendCommandLine($"[err] Unexpected error: {ex}");
+            QueueCommandLine($"[err] Unexpected error: {ex}");
             IsLoading = false;
         });
     }

@@ -274,8 +274,13 @@
                 <DoubleTransition Property="Opacity" Duration="0:0:0.35" />
               </Transitions>
             </Border.Transitions>
-            <ScrollViewer Height="140">
-              <TextBlock TextWrapping="Wrap" Text="{Binding CommandLogText}" />
+            <!-- NoWrap, with horizontal scrolling, is a deliberate performance choice as much as a
+                 stylistic one. Wrapping forced Avalonia to shape and wrap the console's entire text
+                 on every update: a captured stack during a 30-second UI hang was TextBlock.Measure
+                 -> TextLayout.CreateTextLines -> HarfBuzzTextShaper.ShapeText. Long lines are also
+                 easier to read unwrapped in a console, and CommandLogBuffer now caps their length. -->
+            <ScrollViewer Height="140" HorizontalScrollBarVisibility="Auto">
+              <TextBlock TextWrapping="NoWrap" Text="{Binding CommandLogText}" />
             </ScrollViewer>
           </Border>
         </StackPanel>

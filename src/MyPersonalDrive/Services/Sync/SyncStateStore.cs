@@ -20,7 +20,7 @@ public sealed class SyncStateStore
     public SyncStateStore(string dbPath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
-        _connectionString = $"Data Source={dbPath}";
+        _connectionString = SqliteOffThread.ConnectionStringFor(dbPath);
 
         using var connection = OpenConnection();
         SqliteMigrationRunner.Apply(connection, DriveDatabaseMigrations.All);
@@ -53,16 +53,18 @@ public sealed class SyncStateStore
     public async Task SetAutomaticSyncEnabledAsync(bool isEnabled, CancellationToken ct = default)
         => await SetSettingAsync(AutomaticSyncEnabledKey, isEnabled ? "1" : "0", ct);
 
-    private async Task<string?> GetSettingAsync(string key, CancellationToken ct)
+    private Task<string?> GetSettingAsync(string key, CancellationToken ct)
+        => SqliteOffThread.RunAsync<string?>(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
         command.CommandText = "SELECT Value FROM AppSettings WHERE Key = @Key";
         command.Parameters.AddWithValue("@Key", key);
         return await command.ExecuteScalarAsync(ct) as string;
-    }
+    });
 
-    private async Task SetSettingAsync(string key, string value, CancellationToken ct)
+    private Task SetSettingAsync(string key, string value, CancellationToken ct)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -73,13 +75,14 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@Key", key);
         command.Parameters.AddWithValue("@Value", value);
         await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
     // ---------------------------------------------------------------- SyncPairs
 
-    public async Task<SyncPair> CreatePairAsync(
+    public Task<SyncPair> CreatePairAsync(
         string remotePath, string localPath, SyncDirection direction, ConflictPolicy conflictPolicy,
         IReadOnlyList<string>? excludeGlobs = null, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<SyncPair>(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -97,9 +100,10 @@ public sealed class SyncStateStore
 
         return new SyncPair(id, remotePath, localPath, direction, conflictPolicy, IsEnabled: true, IsPaused: false,
             excludeGlobs ?? [], LastSyncAt: null, SyncPairStatus.Never, LastError: null);
-    }
+    });
 
-    public async Task<IReadOnlyList<SyncPair>> GetPairsAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<SyncPair>> GetPairsAsync(CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<IReadOnlyList<SyncPair>>(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -112,9 +116,10 @@ public sealed class SyncStateStore
         }
 
         return pairs;
-    }
+    });
 
-    public async Task<SyncPair?> GetPairAsync(int id, CancellationToken ct = default)
+    public Task<SyncPair?> GetPairAsync(int id, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<SyncPair?>(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -122,9 +127,10 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@Id", id);
         using var reader = await command.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? ReadPair(reader) : null;
-    }
+    });
 
-    public async Task UpdatePairStatusAsync(int id, DateTimeOffset syncedAt, SyncPairStatus status, string? error, CancellationToken ct = default)
+    public Task UpdatePairStatusAsync(int id, DateTimeOffset syncedAt, SyncPairStatus status, string? error, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -134,7 +140,7 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@Error", (object?)error ?? DBNull.Value);
         command.Parameters.AddWithValue("@Id", id);
         await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
     public async Task SetPairEnabledAsync(int id, bool isEnabled, CancellationToken ct = default)
         => await SetPairFlagAsync(id, "IsEnabled", isEnabled, ct);
@@ -142,7 +148,8 @@ public sealed class SyncStateStore
     public async Task SetPairPausedAsync(int id, bool isPaused, CancellationToken ct = default)
         => await SetPairFlagAsync(id, "IsPaused", isPaused, ct);
 
-    private async Task SetPairFlagAsync(int id, string column, bool value, CancellationToken ct)
+    private Task SetPairFlagAsync(int id, string column, bool value, CancellationToken ct)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -151,9 +158,10 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@Value", value ? 1 : 0);
         command.Parameters.AddWithValue("@Id", id);
         await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
-    public async Task DeletePairAsync(int id, CancellationToken ct = default)
+    public Task DeletePairAsync(int id, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -162,7 +170,7 @@ public sealed class SyncStateStore
         command.CommandText = "DELETE FROM SyncPairs WHERE Id = @Id";
         command.Parameters.AddWithValue("@Id", id);
         await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
     private static SyncPair ReadPair(SqliteDataReader reader)
         => new(
@@ -186,7 +194,8 @@ public sealed class SyncStateStore
 
     // ---------------------------------------------------------------- SyncState (baseline)
 
-    public async Task<IReadOnlyDictionary<string, SyncBaselineEntry>> GetBaselineAsync(int pairId, CancellationToken ct = default)
+    public Task<IReadOnlyDictionary<string, SyncBaselineEntry>> GetBaselineAsync(int pairId, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<IReadOnlyDictionary<string, SyncBaselineEntry>>(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -224,9 +233,10 @@ public sealed class SyncStateStore
         }
 
         return result;
-    }
+    });
 
-    public async Task UpsertBaselineAsync(int pairId, SyncBaselineEntry entry, DateTimeOffset syncedAt, CancellationToken ct = default)
+    public Task UpsertBaselineAsync(int pairId, SyncBaselineEntry entry, DateTimeOffset syncedAt, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -260,9 +270,10 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@ContentHash", (object?)entry.LocalAtSync?.ContentHash ?? DBNull.Value);
         command.Parameters.AddWithValue("@SyncedAt", FormatTimestamp(syncedAt));
         await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
-    public async Task RemoveBaselineAsync(int pairId, string relativePath, CancellationToken ct = default)
+    public Task RemoveBaselineAsync(int pairId, string relativePath, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -270,7 +281,7 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@PairId", pairId);
         command.Parameters.AddWithValue("@RelativePath", relativePath);
         await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
     // ---------------------------------------------------------------- SyncQueue
 
@@ -296,7 +307,8 @@ public sealed class SyncStateStore
     /// <see cref="PruneCompletedAsync"/>.</item>
     /// </list>
     /// </summary>
-    public async Task EnqueueActionsAsync(int pairId, IReadOnlyList<SyncAction> actions, DateTimeOffset enqueuedAt, CancellationToken ct = default)
+    public Task EnqueueActionsAsync(int pairId, IReadOnlyList<SyncAction> actions, DateTimeOffset enqueuedAt, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync(async () =>
     {
         if (actions.Count == 0)
         {
@@ -345,7 +357,7 @@ public sealed class SyncStateStore
             await transaction.RollbackAsync(ct);
             throw;
         }
-    }
+    });
 
     private static void AddActionParameters(SqliteCommand command, int pairId, SyncAction action, DateTimeOffset enqueuedAt)
     {
@@ -363,14 +375,15 @@ public sealed class SyncStateStore
     /// <c>SyncLog</c> keeps the narrative. Without this they accumulate for every file of every
     /// automatic cycle, forever.
     /// </summary>
-    public async Task<int> PruneCompletedAsync(DateTimeOffset completedBefore, CancellationToken ct = default)
+    public Task<int> PruneCompletedAsync(DateTimeOffset completedBefore, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<int>(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM SyncQueue WHERE State = 'Done' AND (CompletedAt IS NULL OR CompletedAt < @Before)";
         command.Parameters.AddWithValue("@Before", FormatTimestamp(completedBefore));
         return await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
     /// <summary>
     /// Pending rows in execution order. Pass <paramref name="now"/> to honour the backoff set by
@@ -378,7 +391,8 @@ public sealed class SyncStateStore
     /// 'Pending' but must not be picked up yet. Omitting it returns every pending row regardless
     /// of backoff, which is what a "run everything now" caller wants.
     /// </summary>
-    public async Task<IReadOnlyList<QueuedSyncAction>> GetPendingActionsAsync(int pairId, DateTimeOffset? now = null, CancellationToken ct = default)
+    public Task<IReadOnlyList<QueuedSyncAction>> GetPendingActionsAsync(int pairId, DateTimeOffset? now = null, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<IReadOnlyList<QueuedSyncAction>>(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -408,7 +422,7 @@ public sealed class SyncStateStore
         }
 
         return actions;
-    }
+    });
 
     /// <summary>
     /// Parks unresolved conflicts as 'Conflict' rows — docs/PLAN-LOCAL-SYNC.md §5.6's `Ask`
@@ -416,7 +430,8 @@ public sealed class SyncStateStore
     /// They are never picked up by <see cref="GetPendingActionsAsync"/>; the conflicts panel
     /// (F4) reads them back via <see cref="GetConflictActionsAsync"/>.
     /// </summary>
-    public async Task EnqueueConflictsAsync(int pairId, IReadOnlyList<SyncConflict> conflicts, DateTimeOffset enqueuedAt, CancellationToken ct = default)
+    public Task EnqueueConflictsAsync(int pairId, IReadOnlyList<SyncConflict> conflicts, DateTimeOffset enqueuedAt, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync(async () =>
     {
         if (conflicts.Count == 0)
         {
@@ -457,7 +472,7 @@ public sealed class SyncStateStore
             await transaction.RollbackAsync(ct);
             throw;
         }
-    }
+    });
 
     /// <summary>
     /// Deletes parked conflicts that are no longer conflicts. Called with the paths the *current*
@@ -468,7 +483,8 @@ public sealed class SyncStateStore
     /// ever clears one, so the conflict count would only ever grow and would eventually be pure
     /// fiction.
     /// </summary>
-    public async Task<int> ClearStaleConflictsAsync(int pairId, IReadOnlyCollection<string> stillConflicting, CancellationToken ct = default)
+    public Task<int> ClearStaleConflictsAsync(int pairId, IReadOnlyCollection<string> stillConflicting, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<int>(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -491,10 +507,11 @@ public sealed class SyncStateStore
         }
 
         return await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
     /// <summary>Marks a parked conflict as dealt with, once its resolution has actually been carried out.</summary>
-    public async Task MarkConflictResolvedAsync(long queueId, ConflictResolution resolution, DateTimeOffset resolvedAt, CancellationToken ct = default)
+    public Task MarkConflictResolvedAsync(long queueId, ConflictResolution resolution, DateTimeOffset resolvedAt, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -507,13 +524,14 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@Resolution", $"Resolved: {resolution}");
         command.Parameters.AddWithValue("@Id", queueId);
         await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
     /// <summary>
     /// Puts every permanently-failed row for a pair back in the queue with a clean slate — the
     /// "try that again" the UI needs for rows whose retries ran out. Returns how many were revived.
     /// </summary>
-    public async Task<int> RetryFailedAsync(int pairId, DateTimeOffset now, CancellationToken ct = default)
+    public Task<int> RetryFailedAsync(int pairId, DateTimeOffset now, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<int>(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -525,9 +543,51 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@PairId", pairId);
         command.Parameters.AddWithValue("@Now", FormatTimestamp(now));
         return await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
-    public async Task<IReadOnlyList<QueuedSyncAction>> GetFailedActionsAsync(int pairId, CancellationToken ct = default)
+    /// <summary>
+    /// Deletes <c>Failed</c> rows the current plan no longer proposes. Mirrors
+    /// <see cref="ClearStaleConflictsAsync"/>: <see cref="EnqueueActionsAsync"/> only revives a
+    /// <c>Failed</c> row when the fresh plan re-proposes the exact same (path, operation) pair, so a
+    /// failure whose difference disappeared by any other means — a manual fix, another client, the
+    /// file simply being deleted — was never being cleared. It just sat in <c>SyncQueue</c> forever,
+    /// which is what let the "Retry failed actions" badge disagree with a fresh preview that finds
+    /// nothing to do.
+    /// </summary>
+    public Task<int> ClearStaleFailedActionsAsync(int pairId, IReadOnlyList<SyncAction> currentPlan, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<int>(async () =>
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+
+        if (currentPlan.Count == 0)
+        {
+            command.CommandText = "DELETE FROM SyncQueue WHERE PairId = @PairId AND State = 'Failed'";
+            command.Parameters.AddWithValue("@PairId", pairId);
+            return await command.ExecuteNonQueryAsync(ct);
+        }
+
+        // Parameterized (path, operation) pairs — never string-concatenated, since these are file names.
+        var clauses = new List<string>();
+        for (var i = 0; i < currentPlan.Count; i++)
+        {
+            clauses.Add($"(RelativePath = @path{i} AND Operation = @op{i})");
+        }
+
+        command.CommandText =
+            $"DELETE FROM SyncQueue WHERE PairId = @PairId AND State = 'Failed' AND NOT ({string.Join(" OR ", clauses)})";
+        command.Parameters.AddWithValue("@PairId", pairId);
+        for (var i = 0; i < currentPlan.Count; i++)
+        {
+            command.Parameters.AddWithValue($"@path{i}", currentPlan[i].RelativePath);
+            command.Parameters.AddWithValue($"@op{i}", currentPlan[i].Operation.ToString());
+        }
+
+        return await command.ExecuteNonQueryAsync(ct);
+    });
+
+    public Task<IReadOnlyList<QueuedSyncAction>> GetFailedActionsAsync(int pairId, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<IReadOnlyList<QueuedSyncAction>>(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -546,9 +606,10 @@ public sealed class SyncStateStore
         }
 
         return actions;
-    }
+    });
 
-    public async Task<IReadOnlyList<QueuedSyncAction>> GetConflictActionsAsync(int pairId, CancellationToken ct = default)
+    public Task<IReadOnlyList<QueuedSyncAction>> GetConflictActionsAsync(int pairId, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<IReadOnlyList<QueuedSyncAction>>(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -567,12 +628,13 @@ public sealed class SyncStateStore
         }
 
         return actions;
-    }
+    });
 
     public async Task MarkRunningAsync(long queueId, CancellationToken ct = default)
         => await UpdateQueueStateAsync(queueId, SyncQueueState.Running, ct);
 
-    public async Task MarkDoneAsync(long queueId, DateTimeOffset completedAt, CancellationToken ct = default)
+    public Task MarkDoneAsync(long queueId, DateTimeOffset completedAt, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -580,9 +642,10 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@CompletedAt", FormatTimestamp(completedAt));
         command.Parameters.AddWithValue("@Id", queueId);
         await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
-    public async Task MarkFailedAsync(long queueId, string error, DateTimeOffset? nextAttemptAt, CancellationToken ct = default)
+    public Task MarkFailedAsync(long queueId, string error, DateTimeOffset? nextAttemptAt, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -598,22 +661,24 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@NextAttemptAt", (object?)FormatTimestamp(nextAttemptAt) ?? DBNull.Value);
         command.Parameters.AddWithValue("@Id", queueId);
         await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
     /// <summary>
     /// Crash safety per docs/PLAN-LOCAL-SYNC.md §7: a row left 'Running' means the app was
     /// killed mid-transfer, not that the transfer is stuck — call this once at startup, before
     /// anything else touches the queue.
     /// </summary>
-    public async Task ResetRunningToPendingAsync(CancellationToken ct = default)
+    public Task ResetRunningToPendingAsync(CancellationToken ct = default)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
         command.CommandText = "UPDATE SyncQueue SET State = 'Pending' WHERE State = 'Running'";
         await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
-    private async Task UpdateQueueStateAsync(long queueId, SyncQueueState state, CancellationToken ct)
+    private Task UpdateQueueStateAsync(long queueId, SyncQueueState state, CancellationToken ct)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -621,7 +686,7 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@State", state.ToString());
         command.Parameters.AddWithValue("@Id", queueId);
         await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
     private static QueuedSyncAction ReadQueuedAction(SqliteDataReader reader)
     {
@@ -655,7 +720,8 @@ public sealed class SyncStateStore
 
     // ---------------------------------------------------------------- SyncLog
 
-    public async Task LogAsync(int? pairId, SyncLogLevel level, string? relativePath, string message, DateTimeOffset timestamp, CancellationToken ct = default)
+    public Task LogAsync(int? pairId, SyncLogLevel level, string? relativePath, string message, DateTimeOffset timestamp, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -669,7 +735,7 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@RelativePath", (object?)relativePath ?? DBNull.Value);
         command.Parameters.AddWithValue("@Message", message);
         await command.ExecuteNonQueryAsync(ct);
-    }
+    });
 
     /// <summary>
     /// Bounds the log. Two limits, because either alone leaves a hole: an age limit doesn't stop a
@@ -683,7 +749,8 @@ public sealed class SyncStateStore
     /// The count limit is per pair, so one busy pair can't push another's history out — including
     /// the scheduler's own rows, which carry a null <c>PairId</c> and form their own group.
     /// </summary>
-    public async Task<int> PruneLogsAsync(DateTimeOffset olderThan, int maxPerPair, CancellationToken ct = default)
+    public Task<int> PruneLogsAsync(DateTimeOffset olderThan, int maxPerPair, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<int>(async () =>
     {
         using var connection = OpenConnection();
 
@@ -706,9 +773,10 @@ public sealed class SyncStateStore
         removed += await byCount.ExecuteNonQueryAsync(ct);
 
         return removed;
-    }
+    });
 
-    public async Task<IReadOnlyList<SyncLogEntry>> GetRecentLogsAsync(int? pairId, int limit, CancellationToken ct = default)
+    public Task<IReadOnlyList<SyncLogEntry>> GetRecentLogsAsync(int? pairId, int limit, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<IReadOnlyList<SyncLogEntry>>(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
@@ -736,7 +804,7 @@ public sealed class SyncStateStore
         }
 
         return entries;
-    }
+    });
 
     // ---------------------------------------------------------------- Timestamp helpers
 

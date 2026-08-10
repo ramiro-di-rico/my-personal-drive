@@ -22,6 +22,14 @@ public sealed class ProtonDriveService
     public event EventHandler<CliCommandFinishedEventArgs>? CommandFinished;
 
     /// <summary>
+    /// See <see cref="IProtonDriveCliExecutor.ResetRemoteCacheAsync"/>. Exposed here because the
+    /// scanner holds a service, not an executor, and it is the scanner that knows when a fresh view
+    /// of the remote tree is required.
+    /// </summary>
+    public Task ResetRemoteCacheAsync(CancellationToken cancellationToken = default)
+        => _executor.ResetRemoteCacheAsync(cancellationToken);
+
+    /// <summary>
     /// Raised when the JSON listing parser fell back to the best-effort text parser, or when
     /// an unrecognized-but-valid JSON shape was encountered. Surfaced to the UI so silent
     /// mis-parses are visible instead of just producing a wrong-looking listing.
@@ -32,6 +40,35 @@ public sealed class ProtonDriveService
     {
         var output = await _executor.ExecuteAsync(["filesystem", "list", "--json", path], cancellationToken);
         return ParseListing(output, path);
+    }
+
+    /// <summary>
+    /// The version string the CLI reports for itself. Captured from a real binary:
+    ///
+    /// <code>
+    /// $ proton-drive --version
+    /// Proton Drive CLI cli-drive@0.6.0+f8e16aac
+    /// Proton Drive SDK js@0.19.2+f8e16aac
+    /// </code>
+    ///
+    /// Only the first non-empty line is returned — the second is the bundled SDK's version, which
+    /// is not what "which CLI am I running" means. The line is left unparsed on purpose: the app
+    /// only displays it, and splitting `cli-drive@0.6.0+f8e16aac` into fields would invent a
+    /// format contract the CLI has not promised. Returns null when the CLI printed nothing.
+    /// </summary>
+    public async Task<string?> GetCliVersionAsync(CancellationToken cancellationToken = default)
+    {
+        var output = await _executor.ExecuteAsync(["--version"], cancellationToken);
+        foreach (var line in output.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length > 0)
+            {
+                return trimmed;
+            }
+        }
+
+        return null;
     }
 
     public Task AuthenticateAsync(CancellationToken cancellationToken = default)

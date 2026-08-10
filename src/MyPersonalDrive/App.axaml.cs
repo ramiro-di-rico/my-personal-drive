@@ -39,14 +39,32 @@ public partial class App : Application
                 GetRemoteFolderChildren = service.GetChildrenAsync,
             };
 
+            var mainWindowViewModel = new MainWindowViewModel(
+                service, cacheService, settings, syncPanelViewModel, releaseFeed: new CliReleaseFeed());
+
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(service, cacheService, settings, syncPanelViewModel)
+                DataContext = mainWindowViewModel
             };
+
+            // Fire and forget on purpose: the window must not wait on a network round-trip to
+            // appear, and a failed check only ever writes text into the settings view.
+            _ = mainWindowViewModel.CheckForCliUpdateInBackgroundAsync();
 
             // Stop the loop before the process exits, so a cycle isn't killed mid-transfer when it
             // could just as easily finish — and so the next start has nothing to recover.
-            desktop.ShutdownRequested += (_, _) => syncScheduler.StopAsync().GetAwaiter().GetResult();
+            // Bounded on purpose. This blocks the UI thread, which is acceptable while the window is
+            // closing but not indefinitely: a cycle mid-transfer would otherwise hold the app open
+            // with a frozen window and no way out. Ten seconds is enough for the loop to observe
+            // cancellation and for the executor to kill an in-flight CLI process; past that, exiting
+            // anyway is safe because `SyncCrashRecovery` reclaims interrupted queue rows on startup.
+            desktop.ShutdownRequested += (_, _) =>
+            {
+                if (!syncScheduler.StopAsync().Wait(TimeSpan.FromSeconds(10)))
+                {
+                    CrashLog.Write("Sync scheduler did not stop within 10s of shutdown; exiting anyway.");
+                }
+            };
         }
 
         base.OnFrameworkInitializationCompleted();

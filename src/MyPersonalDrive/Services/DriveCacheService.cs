@@ -14,7 +14,7 @@ public class DriveCacheService
     public DriveCacheService(string dbPath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
-        _connectionString = $"Data Source={dbPath}";
+        _connectionString = SqliteOffThread.ConnectionStringFor(dbPath);
         InitializeDatabase();
     }
 
@@ -34,7 +34,8 @@ public class DriveCacheService
         SqliteMigrationRunner.Apply(connection, DriveDatabaseMigrations.All);
     }
 
-    public async Task<List<DriveItem>> GetCachedItemsAsync(string parentPath)
+    public Task<List<DriveItem>> GetCachedItemsAsync(string parentPath)
+        => SqliteOffThread.RunAsync<List<DriveItem>>(async () =>
     {
         var items = new List<DriveItem>();
         using var connection = new SqliteConnection(_connectionString);
@@ -60,9 +61,10 @@ public class DriveCacheService
             ));
         }
         return items;
-    }
+    });
 
-    public async Task SyncItemsAsync(string parentPath, IReadOnlyList<DriveItem> remoteItems)
+    public Task SyncItemsAsync(string parentPath, IReadOnlyList<DriveItem> remoteItems)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync();
@@ -117,9 +119,10 @@ public class DriveCacheService
             await transaction.RollbackAsync();
             throw;
         }
-    }
+    });
 
-    public async Task RemoveItemAsync(string path)
+    public Task RemoveItemAsync(string path)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync();
@@ -128,9 +131,10 @@ public class DriveCacheService
         command.Parameters.AddWithValue("@Path", path);
         command.Parameters.AddWithValue("@PathPrefix", path + "/%");
         await command.ExecuteNonQueryAsync();
-    }
+    });
 
-    public async Task AddOrUpdateItemAsync(string parentPath, DriveItem item)
+    public Task AddOrUpdateItemAsync(string parentPath, DriveItem item)
+        => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync();
@@ -138,7 +142,7 @@ public class DriveCacheService
         command.CommandText = UpsertSql;
         BindUpsertParameters(command, parentPath, item);
         await command.ExecuteNonQueryAsync();
-    }
+    });
 
     private const string UpsertSql = """
         INSERT INTO DriveItems (Path, ParentPath, Name, IsFolder, Size, ModifiedAt, Owner, IsShared, NodeId, ContentHash)

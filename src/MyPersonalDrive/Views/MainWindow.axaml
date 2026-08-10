@@ -274,8 +274,13 @@
                 <DoubleTransition Property="Opacity" Duration="0:0:0.35" />
               </Transitions>
             </Border.Transitions>
-            <ScrollViewer Height="140">
-              <TextBlock TextWrapping="Wrap" Text="{Binding CommandLogText}" />
+            <!-- NoWrap, with horizontal scrolling, is a deliberate performance choice as much as a
+                 stylistic one. Wrapping forced Avalonia to shape and wrap the console's entire text
+                 on every update: a captured stack during a 30-second UI hang was TextBlock.Measure
+                 -> TextLayout.CreateTextLines -> HarfBuzzTextShaper.ShapeText. Long lines are also
+                 easier to read unwrapped in a console, and CommandLogBuffer now caps their length. -->
+            <ScrollViewer Height="140" HorizontalScrollBarVisibility="Auto">
+              <TextBlock TextWrapping="NoWrap" Text="{Binding CommandLogText}" />
             </ScrollViewer>
           </Border>
         </StackPanel>
@@ -306,6 +311,36 @@
                 <Button ToolTip.Tip="Refresh folder content" Command="{Binding RefreshCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
+              </StackPanel>
+
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock VerticalAlignment="Center" Text="Versión del CLI:" />
+                <TextBlock VerticalAlignment="Center"
+                           MaxWidth="420"
+                           TextWrapping="Wrap"
+                           Opacity="0.8"
+                           Text="{Binding CliVersion}" />
+                <Button ToolTip.Tip="Re-read the CLI version" Command="{Binding CheckCliVersionCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+                </Button>
+              </StackPanel>
+
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock VerticalAlignment="Center" Text="Actualización:" />
+                <TextBlock VerticalAlignment="Center"
+                           MaxWidth="420"
+                           TextWrapping="Wrap"
+                           Opacity="0.8"
+                           Text="{Binding CliUpdateStatus}" />
+                <Button ToolTip.Tip="Check Proton's published releases"
+                        Command="{Binding CheckForCliUpdateCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+                </Button>
+                <Button Classes="primary"
+                        Content="Actualizar el CLI"
+                        IsVisible="{Binding IsCliUpdateAvailable}"
+                        ToolTip.Tip="Download, verify the published SHA-512, and replace the executable"
+                        Command="{Binding InstallCliUpdateCommand}" />
               </StackPanel>
             </StackPanel>
           </Border>

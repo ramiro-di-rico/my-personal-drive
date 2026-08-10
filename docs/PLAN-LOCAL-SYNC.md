@@ -1527,6 +1527,82 @@ produce an empty plan. The ~2-in-3 staleness rate above is the separately measur
 
 ---
 
+### #16 — The cache is the whole story: it makes `list` stale, and it is why parallelism crashed ⚠️ new finding (2026-08-09)
+
+Re-tested against **cli-drive@0.6.0** (Appendix A's earlier numbers are 0.4.2), on the real
+account, with read-only `filesystem list` calls over eight distinct folders.
+
+**Part 1 — `SQLITE_BUSY` is unchanged, and it is purely a shared-file problem.** Eight concurrent
+processes sharing one `XDG_CACHE_HOME`: **15 failures in 64 calls (23%)**, same
+`SQLITE_BUSY / database is locked`, matching #11's "about one in three" at three-way concurrency.
+Giving each process its **own** `XDG_CACHE_HOME`: **0 failures in 64 calls**, same load, same
+folders. At four-way the pattern holds (1/20 shared, 0/20 isolated). Auth survives isolation — the
+session lives under the config directory, not the cache — and a worker's cache was ~200-300 KB.
+
+Throughput, on 8 cores: **3.54 s/call serialized → 0.76 s/call at eight-way isolated, ~4.7×**.
+Eight-way is where it flattens, which is expected: #11a established the cost is Node.js startup,
+so the ceiling is cores rather than network.
+
+**Part 2 — and the unwelcome half. `filesystem list` is cache-authoritative and never
+revalidates.** Found while sanity-checking the parallel results against the serial ones:
+`/my-files/Development` returned **17 children from the warm cache and 21 from a cold one**. The
+four extra nodes are real (`filesystem info` resolves them on a cold cache) and were created in
+2024, and the warm answer never healed across repeated calls. Confirmed structurally: the cache
+holds a `node-children-<uid>` entry per folder, and deleting just that folder's child labels from a
+*copy* of the cache made `list` return **0 items** rather than re-fetching — so the API is not
+consulted at all once a folder is marked as listed. Freshness rides entirely on the SDK's event
+subscription (`subscribeToTreeEvents`, visible in #11's crash trace), which a ~3.5s process is in
+no position to receive. Cold-cache cost is roughly double: ~6.7s vs ~3.5s per call.
+
+**Consequence, and it is a data-safety one.** A remote scan starting from a warm cache can silently
+omit nodes that exist. In a `RemoteToLocal` pair that means files that never arrive; in a `TwoWay`
+pair the omission reads as `L=present, R=absent, B=present` — a *remote deletion* — and the engine
+answers by removing the local copy. The trash-not-delete rule (§7) means nothing is destroyed, but
+the mechanism points at loss, and no amount of engine correctness helps when the input is wrong.
+
+**Product consequences, implemented:**
+- `ProtonDriveCliExecutor` is now a reader/writer gate, not a mutex. `filesystem list`/`info` run
+  N-wide (N = cores, capped at 8), each process with a private `XDG_CACHE_HOME` under the app's own
+  cache root; everything else stays exclusive. The read set is an **allow-list**, so an
+  unrecognised command falls through to the exclusive path — wrong in the direction that only costs
+  time.
+- `IProtonDriveCliExecutor.ResetRemoteCacheAsync`, called by `RemoteScanner` **once per scan** —
+  never per folder, since within a scan the cache is what avoids a cold start per listing. A
+  mutation also marks the read caches dirty, discarded lazily at the next read, so a run of uploads
+  costs one discard rather than one each.
+- `RemoteScanner`'s concurrency default goes 1 → cores (capped at 8). Its bound is now just how
+  wide the BFS wave may get; the executor is what makes it safe.
+
+**Verified end-to-end through the app's own code**, not only at the CLI level, by
+`RealCliRemoteScanThroughputTests` — a read-only test that runs a real `RemoteScanner` over a real
+tree twice, serial and eight-way, and requires the concurrent run to be both faster *and*
+node-for-node identical (speed that loses nodes would be worse than no speedup). Two runs on live
+data:
+
+| Tree | Serial | 8-way | Speedup | Nodes |
+|---|---|---|---|---|
+| `/my-files/Documentos` | 2316.9s | 427.7s | **5.42×** | 2307 = 2307 |
+| `/my-files/Documentos/Estudios Medicos` | 483.9s | 94.2s | **5.14×** | 628 = 628 |
+
+Both legs agreed exactly on the node set, which is the assertion that matters. The speedup exceeds
+the 4.7× measured at the CLI level in Part 1 because a BFS wave keeps the slots busier than the
+fixed-width harness did.
+
+The **file browser** asks for a fresh view too, since a stale listing there is just as wrong and
+never heals on its own: always on the user's own Refresh, and at most once every two minutes while
+navigating. The two-minute window is the compromise — per-click discards would pay a cold start each
+time and, being global, would repeatedly strip the cache from a concurrent sync scan. The decision
+lives in a pure `RemoteViewFreshnessPolicy` rather than in `MainWindowViewModel`, which has no test
+harness (it depends on Avalonia's dispatcher). The cost is largely invisible in the UI because the
+browser already renders its own SQLite cache immediately and fetches from the CLI in the background.
+
+**Still open:** #15's post-mutation staleness is now partly explained by this — a cache that doesn't
+invalidate on `trash` — though this isn't proven to be its only cause; Proton's backend being
+eventually consistent remains the other candidate, and the two are not distinguishable from
+listings alone.
+
+---
+
 ### Net effect on the design
 
 - §3.2 `NodeFingerprint` gains a real, verified meaning for `ContentHash` (SHA-1, not a vague

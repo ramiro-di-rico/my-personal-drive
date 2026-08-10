@@ -144,6 +144,20 @@ operation to a command line. **This is the catalog of what's currently known abo
 | `CreateFolderAsync` | `filesystem create-folder "<parent>" "<name>"` |
 | `CopyItemAsync` | `filesystem copy [-n "<newName>"] "<src>" "<targetParent>"` |
 | `UploadFilesAsync` | `filesystem upload [-c keep-both\|replace\|skip] "<f1>" "<f2>"… "<parent>"` |
+| `GetCliVersionAsync` | `--version` |
+
+`--version` is the one command here that is not a subcommand. Captured from `cli-drive@0.6.0`:
+
+```
+Proton Drive CLI cli-drive@0.6.0+f8e16aac
+Proton Drive SDK js@0.19.2+f8e16aac
+```
+
+The service returns the first line verbatim and parses nothing — the app only displays it, and
+splitting `cli-drive@0.6.0+f8e16aac` into fields would assume a format the CLI hasn't promised.
+The second line is the bundled SDK, not the CLI, so it is dropped. `--help` on that build lists
+**no `update`/`self-update` subcommand**, so checking for a newer release needs an external source —
+Proton's published release manifest. See §10.
 
 Forwards all three executor events upward.
 
@@ -339,12 +353,63 @@ compose into three reachable crashes documented there.
 
 ---
 
-## 10. Glossary of invariants
+## 10. CLI self-update (the one outbound network call)
+
+Everything else in this app reaches Proton by launching `proton-drive`. **This is the single
+exception**, and it is deliberately narrow: it reads one public static file and never touches the
+Drive API.
+
+| Piece | Role |
+|---|---|
+| [`CliReleaseFeed`](../src/MyPersonalDrive/Services/CliReleaseFeed.cs) | GETs `https://proton.me/download/drive/cli/version.json`, picks the `Stable` release and the file for this platform |
+| [`CliPlatformKey`](../src/MyPersonalDrive/Services/CliPlatformKey.cs) | Maps the running machine to the manifest's platform key, **including the glibc/musl split** |
+| [`CliVersionComparer`](../src/MyPersonalDrive/Services/CliVersionComparer.cs) | Lifts `0.6.0` out of `cli-drive@0.6.0+f8e16aac` and compares it with the manifest's bare `0.7.0` |
+| [`CliUpdateInstaller`](../src/MyPersonalDrive/Services/CliUpdateInstaller.cs) | Downloads, verifies SHA-512, then atomically replaces the executable |
+
+The manifest is the same source of truth as the human download page — the SHA-512 values match.
+`CliReleaseManifest`'s PascalCase property names are the manifest's own and are registered in
+`AppJsonContext`, so this stays AOT-safe.
+
+**Why a self-update exists at all**: `proton-drive --help` on `cli-drive@0.6.0` lists no `update`
+or `self-update` subcommand, so there is nothing to delegate to.
+
+### The install invariant
+
+After any outcome the binary on disk is **either the old working one or the verified new one** —
+never a partial write, never an unverified download. The order is what buys that:
+
+```
+stream download → temp file in the target's own directory   (same filesystem → rename, not copy)
+      │           hashing as it streams (~115 MB, one pass)
+      ▼
+SHA-512 == manifest?  ── no ──▶ delete temp, throw CliUpdateException, original untouched
+      │ yes
+      ▼
+chmod 0755 → File.Move(temp, target, overwrite: true)       (atomic on POSIX)
+```
+
+A process already running the old binary keeps its own inode, so an in-flight CLI call is not
+corrupted by a swap underneath it. The install is still refused while a sync is mid-cycle
+(`SyncPanelViewModel.IsSyncInProgress`), because the *next* call in that cycle would otherwise land
+on a different version mid-operation.
+
+Two refusals are load-bearing and covered by tests: a checksum mismatch, and an installed version
+that could not be parsed — the app does not offer to overwrite a working CLI on a guess.
+
+The check runs once in the background at startup (fired from the composition root, never from a
+constructor) and on demand from the settings view.
+
+## 11. Glossary of invariants
 
 - Every remote path starts with `/` and hangs off `/my-files`.
 - `DriveItem.Path` is the primary key in the cache and the unique identifier in the UI.
   **There is no stable ID from Proton's side**: renaming = changing identity.
   This is the most important design constraint for synchronization.
 - A CLI failure always surfaces upward as `InvalidOperationException`.
+- The app makes **exactly one** outbound network call of its own: `CliReleaseFeed` reading the
+  published CLI release manifest. Everything else goes through a `proton-drive` process. Adding a
+  second one is an architectural decision, not a detail.
+- The `proton-drive` binary is only ever replaced after its SHA-512 matches the published one, and
+  only by an atomic rename.
 - Anything touching `RootItems` / bound properties must run on the UI thread
   (`Dispatcher.UIThread.InvokeAsync` / `.Post`).

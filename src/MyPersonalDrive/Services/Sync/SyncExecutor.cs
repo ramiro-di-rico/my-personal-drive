@@ -52,15 +52,22 @@ public sealed class SyncExecutor
     }
 
     /// <summary>
-    /// Scans and reconciles without touching anything — the dry-run preview from
-    /// docs/PLAN-LOCAL-SYNC.md §12, meant to be shown to the user before the first sync of a
+    /// Scans and reconciles without touching the filesystem or Proton Drive — the dry-run preview
+    /// from docs/PLAN-LOCAL-SYNC.md §12, meant to be shown to the user before the first sync of a
     /// pair (and on request afterward).
+    ///
+    /// Does clear stale <c>Failed</c> rows (see <see cref="SyncStateStore.ClearStaleFailedActionsAsync"/>),
+    /// even though nothing else here is a write: a preview that finds nothing to do is exactly the
+    /// moment a user checks after fixing a failure by hand, and the "Retry failed actions" badge
+    /// must not keep reporting a failure this same scan just proved is gone.
     /// </summary>
     public async Task<SyncPlan> PreviewAsync(SyncPair pair, CancellationToken cancellationToken = default)
     {
         var (local, remote, _) = await ScanBothSidesAsync(pair, cancellationToken);
-        return SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote,
+        var plan = SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote,
             await LoadBaselineAsync(pair, cancellationToken), _timeProvider.GetUtcNow());
+        await _stateStore.ClearStaleFailedActionsAsync(pair.Id, plan.Actions, cancellationToken);
+        return plan;
     }
 
     /// <summary>
@@ -93,6 +100,12 @@ public sealed class SyncExecutor
             await LoadBaselineAsync(pair, cancellationToken), now);
 
         await _stateStore.EnqueueActionsAsync(pair.Id, plan.Actions, now, cancellationToken);
+
+        // A Failed row is only revived above when the plan re-proposes the exact same action; one
+        // whose difference disappeared some other way (fixed by hand, another client, the file just
+        // vanishing) is neither revived nor removed. Left alone it would keep inflating
+        // GetFailedActionsAsync forever, disagreeing with a fresh preview that finds nothing to do.
+        await _stateStore.ClearStaleFailedActionsAsync(pair.Id, plan.Actions, cancellationToken);
 
         // Conflicts the reconciler left unresolved (the `Ask` policy) become durable 'Conflict'
         // rows rather than being dropped on the floor — §5.6. Stale ones are cleared first: a

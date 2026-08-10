@@ -421,6 +421,66 @@ public class SyncStateStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task FailedActions_StaleOnes_AreClearedWhenThePlanStopsProposingThem()
+    {
+        // EnqueueActionsAsync only revives a Failed row when the plan re-proposes the exact same
+        // (path, operation) pair; this covers the rest, so a failure whose difference disappeared
+        // some other way doesn't sit in the queue forever.
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        var stillFailing = new SyncAction(SyncOperation.DownloadFile, "still.txt", null, 1, 1000);
+        var resolved = new SyncAction(SyncOperation.DownloadFile, "sorted-out.txt", null, 1, 1000);
+        await sut.EnqueueActionsAsync(pair.Id, [stillFailing, resolved], T0);
+        foreach (var queued in await sut.GetPendingActionsAsync(pair.Id))
+        {
+            await sut.MarkFailedAsync(queued.Id, "gave up", nextAttemptAt: null);
+        }
+
+        var cleared = await sut.ClearStaleFailedActionsAsync(pair.Id, [stillFailing]);
+
+        Assert.Equal(1, cleared);
+        Assert.Equal("still.txt", Assert.Single(await sut.GetFailedActionsAsync(pair.Id)).RelativePath);
+    }
+
+    [Fact]
+    public async Task FailedActions_AllCleared_WhenTheCurrentPlanHasNoActions()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        var action = new SyncAction(SyncOperation.DownloadFile, "a.txt", null, 1, 1000);
+        await sut.EnqueueActionsAsync(pair.Id, [action], T0);
+        var queued = Assert.Single(await sut.GetPendingActionsAsync(pair.Id));
+        await sut.MarkFailedAsync(queued.Id, "gave up", nextAttemptAt: null);
+
+        Assert.Equal(1, await sut.ClearStaleFailedActionsAsync(pair.Id, []));
+        Assert.Empty(await sut.GetFailedActionsAsync(pair.Id));
+    }
+
+    [Fact]
+    public async Task FailedActions_ClearingStaleOnes_LeavesOtherPairsAndOtherStatesAlone()
+    {
+        var sut = CreateSut();
+        var pairA = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        var pairB = await sut.CreatePairAsync("/my-files/B", "/home/user/B", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        var actionA = new SyncAction(SyncOperation.DownloadFile, "a.txt", null, 1, 1000);
+        var actionB = new SyncAction(SyncOperation.DownloadFile, "a.txt", null, 1, 1000);
+        var pendingA = new SyncAction(SyncOperation.DownloadFile, "b.txt", null, 1, 1000);
+        await sut.EnqueueActionsAsync(pairA.Id, [actionA], T0);
+        await sut.EnqueueActionsAsync(pairB.Id, [actionB], T0);
+        var queuedA = Assert.Single(await sut.GetPendingActionsAsync(pairA.Id));
+        await sut.MarkFailedAsync(queuedA.Id, "gave up", nextAttemptAt: null);
+        var queuedB = Assert.Single(await sut.GetPendingActionsAsync(pairB.Id));
+        await sut.MarkFailedAsync(queuedB.Id, "gave up", nextAttemptAt: null);
+        await sut.EnqueueActionsAsync(pairA.Id, [pendingA], T0);
+
+        await sut.ClearStaleFailedActionsAsync(pairA.Id, []);
+
+        Assert.Empty(await sut.GetFailedActionsAsync(pairA.Id));
+        Assert.Single(await sut.GetFailedActionsAsync(pairB.Id));        // other pair untouched
+        Assert.Single(await sut.GetPendingActionsAsync(pairA.Id));       // pending work untouched
+    }
+
+    [Fact]
     public async Task Conflicts_MarkResolved_TakesTheRowOutOfTheConflictList()
     {
         var sut = CreateSut();

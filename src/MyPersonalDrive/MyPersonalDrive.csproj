@@ -15,6 +15,13 @@
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.4" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.4" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <!-- Direct pin only to lift a transitive dependency: Microsoft.Data.Sqlite 10.0.10 (the
+         latest stable of the 10.x line) still resolves SQLitePCLRaw 2.1.11, whose bundled
+         SQLite is affected by CVE-2025-6965 (NU1903, CVSS 7.2). 2.1.12 is the maintenance
+         release that moves the native library to SQLite 3.53.3, past the 3.50.2 fix — verified
+         by reading the version string out of the shipped libe_sqlite3.so, not from the notes.
+         Remove this line once Microsoft.Data.Sqlite resolves 2.1.12 or later on its own. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.4" />
   </ItemGroup>
   <ItemGroup>

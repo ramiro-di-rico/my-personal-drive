@@ -144,6 +144,8 @@ public class RemoteScannerTests
 
         public void RespondForPath(string path, string stdout) => _responses[path] = stdout;
 
+        public Task ResetRemoteCacheAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
         public async Task<string> ExecuteAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken = default, TimeSpan? timeout = null)
         {
             var current = Interlocked.Increment(ref _current);

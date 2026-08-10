@@ -1573,10 +1573,33 @@ the mechanism points at loss, and no amount of engine correctness helps when the
 - `RemoteScanner`'s concurrency default goes 1 → cores (capped at 8). Its bound is now just how
   wide the BFS wave may get; the executor is what makes it safe.
 
-**Still open:** the app's *browsing* path benefits from the same freshness fix but doesn't yet ask
-for it — only scans reset the cache, so a folder listing in the file browser can still be stale.
-And #15's post-mutation staleness is now partly explained by this (a cache that doesn't invalidate
-on `trash`), though not proven to be its only cause.
+**Verified end-to-end through the app's own code**, not only at the CLI level, by
+`RealCliRemoteScanThroughputTests` — a read-only test that runs a real `RemoteScanner` over a real
+tree twice, serial and eight-way, and requires the concurrent run to be both faster *and*
+node-for-node identical (speed that loses nodes would be worse than no speedup). Two runs on live
+data:
+
+| Tree | Serial | 8-way | Speedup | Nodes |
+|---|---|---|---|---|
+| `/my-files/Documentos` | 2316.9s | 427.7s | **5.42×** | 2307 = 2307 |
+| `/my-files/Documentos/Estudios Medicos` | 483.9s | 94.2s | **5.14×** | 628 = 628 |
+
+Both legs agreed exactly on the node set, which is the assertion that matters. The speedup exceeds
+the 4.7× measured at the CLI level in Part 1 because a BFS wave keeps the slots busier than the
+fixed-width harness did.
+
+The **file browser** asks for a fresh view too, since a stale listing there is just as wrong and
+never heals on its own: always on the user's own Refresh, and at most once every two minutes while
+navigating. The two-minute window is the compromise — per-click discards would pay a cold start each
+time and, being global, would repeatedly strip the cache from a concurrent sync scan. The decision
+lives in a pure `RemoteViewFreshnessPolicy` rather than in `MainWindowViewModel`, which has no test
+harness (it depends on Avalonia's dispatcher). The cost is largely invisible in the UI because the
+browser already renders its own SQLite cache immediately and fetches from the CLI in the background.
+
+**Still open:** #15's post-mutation staleness is now partly explained by this — a cache that doesn't
+invalidate on `trash` — though this isn't proven to be its only cause; Proton's backend being
+eventually consistent remains the other candidate, and the two are not distinguishable from
+listings alone.
 
 ---
 

@@ -1,5 +1,6 @@
 using MyPersonalDrive.Services;
 using Xunit;
+using MyPersonalDrive.Tests;
 
 namespace MyPersonalDrive.Tests.Services;
 
@@ -8,6 +9,7 @@ namespace MyPersonalDrive.Tests.Services;
 /// JsonException out of Load(), and since ProtonDriveCliLocator.Locate() calls Load() on every
 /// CLI command, that turned every button in the app into a crash.
 /// </summary>
+[Collection(AppDataCollection.Name)]
 public class AppSettingsServiceTests : IDisposable
 {
     private readonly string _tempAppData = Directory.CreateTempSubdirectory("MyPersonalDrive.Tests.AppData").FullName;

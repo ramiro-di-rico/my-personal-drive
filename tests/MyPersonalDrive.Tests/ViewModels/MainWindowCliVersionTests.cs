@@ -5,6 +5,7 @@ using MyPersonalDrive.Tests.Fakes;
 using MyPersonalDrive.ViewModels;
 using MyPersonalDrive.ViewModels.Sync;
 using Xunit;
+using MyPersonalDrive.Tests;
 
 namespace MyPersonalDrive.Tests.ViewModels;
 
@@ -17,6 +18,7 @@ namespace MyPersonalDrive.Tests.ViewModels;
 /// <see cref="MainWindowViewModel"/> persists on every CliPath change, and that must not land in
 /// the developer's real settings.json.
 /// </summary>
+[Collection(AppDataCollection.Name)]
 public class MainWindowCliVersionTests : IDisposable
 {
     private readonly string _tempAppData = Directory.CreateTempSubdirectory("MyPersonalDrive.Tests.CliVersion").FullName;
@@ -43,7 +45,10 @@ public class MainWindowCliVersionTests : IDisposable
         }
     }
 
-    private (MainWindowViewModel ViewModel, FakeCliExecutor Executor) Build()
+    private (MainWindowViewModel ViewModel, FakeCliExecutor Executor) Build(
+        ICliReleaseFeed? releaseFeed = null,
+        CliUpdateInstaller? installer = null,
+        string cliPath = "/usr/bin/proton-drive")
     {
         var executor = new FakeCliExecutor();
         var service = new ProtonDriveService(executor);
@@ -54,9 +59,11 @@ public class MainWindowCliVersionTests : IDisposable
             service,
             new DriveCacheService(Path.Combine(_tempAppData, "cache.db")),
             new AppSettingsService(),
-            panel)
+            panel,
+            releaseFeed: releaseFeed,
+            updateInstaller: installer)
         {
-            CliPath = "/usr/bin/proton-drive"
+            CliPath = cliPath
         };
 
         return (viewModel, executor);

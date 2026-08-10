@@ -4,6 +4,11 @@ Avalonia UI 12 (.NET 10) desktop front-end for the official Proton Drive CLI (`p
 The app **never talks to Proton's API directly**: every remote operation launches a CLI process
 and parses its stdout.
 
+The one exception is `CliReleaseFeed`, which GETs the published CLI release manifest
+(`https://proton.me/download/drive/cli/version.json`) so the app can offer to update the CLI —
+a public static file, not the Drive API. It is the app's **only** outbound network call; adding a
+second one is an architectural decision, not a detail. See `docs/ARCHITECTURE.md` §10.
+
 Read `docs/ARCHITECTURE.md` for the current state, and the `docs/PLAN-*.md` files for planned work
 and verified CLI behavior (`PLAN-LOCAL-SYNC.md` Appendix A).
 

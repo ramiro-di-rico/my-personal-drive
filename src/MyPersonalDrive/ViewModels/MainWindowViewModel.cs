@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Data.Common;
 using System.IO;
+using System.Net.Http;
+using System.Text.Json;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
 using Avalonia.Threading;
@@ -46,10 +48,31 @@ public sealed class MainWindowViewModel : ObservableObject
     private const string UnknownCliVersion = "Unknown";
     private string _cliVersion = UnknownCliVersion;
     private bool _isCheckingCliVersion;
+    private readonly ICliReleaseFeed? _releaseFeed;
+    private readonly CliUpdateInstaller _updateInstaller;
+    private readonly Func<bool> _isSyncInProgress;
+    private CliReleaseCandidate? _availableRelease;
+    private string _cliUpdateStatus = "Not checked yet.";
+    private bool _isCliUpdateAvailable;
+    private bool _isCliUpdateBusy;
 
-    public MainWindowViewModel(ProtonDriveService service, DriveCacheService cacheService, AppSettingsService settings, Sync.SyncPanelViewModel syncPanel, TimeProvider? timeProvider = null)
+    public MainWindowViewModel(
+        ProtonDriveService service,
+        DriveCacheService cacheService,
+        AppSettingsService settings,
+        Sync.SyncPanelViewModel syncPanel,
+        TimeProvider? timeProvider = null,
+        ICliReleaseFeed? releaseFeed = null,
+        CliUpdateInstaller? updateInstaller = null,
+        Func<bool>? isSyncInProgress = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _releaseFeed = releaseFeed;
+        _updateInstaller = updateInstaller ?? new CliUpdateInstaller();
+        // Injected rather than read off SyncPanel directly so the refusal-while-syncing path is
+        // reachable in a test without driving a real sync cycle to a chosen moment.
+        // Capturing the parameter, not the SyncPanel property, which is only assigned below.
+        _isSyncInProgress = isSyncInProgress ?? (() => syncPanel.IsSyncInProgress);
         _service = service;
         _cacheService = cacheService;
         _settings = settings;
@@ -79,6 +102,8 @@ public sealed class MainWindowViewModel : ObservableObject
         ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
         ShowSettingsCommand = new AsyncCommand(ShowSettingsAsync, onError: HandleUnexpectedError);
         CheckCliVersionCommand = new AsyncCommand(CheckCliVersionAsync, CanCheckCliVersion, HandleUnexpectedError);
+        CheckForCliUpdateCommand = new AsyncCommand(CheckForCliUpdateAsync, CanCheckForCliUpdate, HandleUnexpectedError);
+        InstallCliUpdateCommand = new AsyncCommand(InstallCliUpdateAsync, CanInstallCliUpdate, HandleUnexpectedError);
     }
 
     public ObservableCollection<DriveNodeViewModel> RootItems { get; }
@@ -133,6 +158,46 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public AsyncCommand CheckForCliUpdateCommand { get; }
+
+    public AsyncCommand InstallCliUpdateCommand { get; }
+
+    /// <summary>Human-readable result of the last update check, or the progress of a running install.</summary>
+    public string CliUpdateStatus
+    {
+        get => _cliUpdateStatus;
+        private set => SetProperty(ref _cliUpdateStatus, value);
+    }
+
+    /// <summary>
+    /// True only when a newer Stable release was positively identified for this platform. An
+    /// unreadable installed version leaves this false — see <see cref="CliUpdateAvailability"/>.
+    /// </summary>
+    public bool IsCliUpdateAvailable
+    {
+        get => _isCliUpdateAvailable;
+        private set
+        {
+            if (SetProperty(ref _isCliUpdateAvailable, value))
+            {
+                InstallCliUpdateCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool IsCliUpdateBusy
+    {
+        get => _isCliUpdateBusy;
+        private set
+        {
+            if (SetProperty(ref _isCliUpdateBusy, value))
+            {
+                CheckForCliUpdateCommand.RaiseCanExecuteChanged();
+                InstallCliUpdateCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
     /// <summary>
     /// Which of the two top-level views is on screen. The explorer (folder browser) and the
     /// settings view (CLI connection + sync pairs) share one window instead of stacking dialogs,
@@ -142,6 +207,24 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _isSettingsView;
         private set => SetProperty(ref _isSettingsView, value);
+    }
+
+    /// <summary>
+    /// The startup update check, for the composition root to fire and forget. Kept off the
+    /// constructor so building a view model never reaches the network, and swallowing here rather
+    /// than in <see cref="CheckForCliUpdateAsync"/> because a background check nobody asked for must
+    /// not be able to raise a dialog or take down the process.
+    /// </summary>
+    public async Task CheckForCliUpdateInBackgroundAsync()
+    {
+        try
+        {
+            await CheckForCliUpdateCommand.ExecuteAsync();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ex);
+        }
     }
 
     public Func<Task<IReadOnlyList<string>>>? RequestUploadFilesAsync { get; set; }
@@ -165,8 +248,12 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _cliPath, value))
             {
-                // A different executable is a different version; what was read no longer applies.
+                // A different executable is a different version; what was read no longer applies,
+                // and neither does an update offer that was computed against the old one.
                 CliVersion = UnknownCliVersion;
+                _availableRelease = null;
+                IsCliUpdateAvailable = false;
+                CliUpdateStatus = "Not checked yet.";
                 PersistSettings();
                 RaiseCommandStates();
             }
@@ -986,6 +1073,8 @@ public sealed class MainWindowViewModel : ObservableObject
         DownloadActivityCommand.RaiseCanExecuteChanged();
         ClearActivityCommand.RaiseCanExecuteChanged();
         CheckCliVersionCommand.RaiseCanExecuteChanged();
+        CheckForCliUpdateCommand.RaiseCanExecuteChanged();
+        InstallCliUpdateCommand.RaiseCanExecuteChanged();
     }
 
     private async Task ToggleCommandConsoleAsync()
@@ -1037,6 +1126,129 @@ public sealed class MainWindowViewModel : ObservableObject
         finally
         {
             IsCheckingCliVersion = false;
+        }
+    }
+
+    private bool CanCheckForCliUpdate() => _releaseFeed is not null && !IsCliUpdateBusy;
+
+    /// <summary>
+    /// Compares the installed CLI against Proton's published Stable release. This is the app's only
+    /// outbound network call; everything else goes through the CLI process.
+    /// </summary>
+    private async Task CheckForCliUpdateAsync()
+    {
+        if (_releaseFeed is null)
+        {
+            CliUpdateStatus = "Update checking is not available.";
+            return;
+        }
+
+        IsCliUpdateBusy = true;
+        try
+        {
+            // The comparison needs a version to compare against, and the user may never have
+            // opened the settings view this session.
+            if (CliVersion == UnknownCliVersion && !string.IsNullOrWhiteSpace(CliPath))
+            {
+                await CheckCliVersionAsync();
+            }
+
+            var release = await _releaseFeed.GetLatestStableAsync();
+            if (release is null)
+            {
+                _availableRelease = null;
+                IsCliUpdateAvailable = false;
+                CliUpdateStatus = "Proton publishes no Stable build for this platform.";
+                return;
+            }
+
+            switch (CliVersionComparer.Compare(CliVersion, release.Version))
+            {
+                case CliUpdateAvailability.UpdateAvailable:
+                    _availableRelease = release;
+                    IsCliUpdateAvailable = true;
+                    CliUpdateStatus = $"Version {release.Version} is available ({release.ReleaseDate}).";
+                    break;
+
+                case CliUpdateAvailability.UpToDate:
+                    _availableRelease = null;
+                    IsCliUpdateAvailable = false;
+                    CliUpdateStatus = $"Up to date — {release.Version} is the current Stable release.";
+                    break;
+
+                default:
+                    // Refusing to offer an install here is the point: overwriting a working CLI on
+                    // the strength of a version string we couldn't read is the one outcome worse
+                    // than not updating.
+                    _availableRelease = null;
+                    IsCliUpdateAvailable = false;
+                    CliUpdateStatus = $"Stable is {release.Version}, but the installed version could not be read — not offering an update.";
+                    break;
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _availableRelease = null;
+            IsCliUpdateAvailable = false;
+            CliUpdateStatus = $"Could not reach Proton's release manifest: {ex.Message}";
+        }
+        finally
+        {
+            IsCliUpdateBusy = false;
+        }
+    }
+
+    private bool CanInstallCliUpdate()
+        => IsCliUpdateAvailable && _availableRelease is not null && !IsCliUpdateBusy && !string.IsNullOrWhiteSpace(CliPath);
+
+    private async Task InstallCliUpdateAsync()
+    {
+        var release = _availableRelease;
+        if (release is null)
+        {
+            return;
+        }
+
+        // A scan or transfer in flight is holding the CLI. The rename itself is atomic and an
+        // already-running process keeps its own inode, so this is not about corrupting the swap —
+        // it is that the next call in that same cycle would land on a different binary version
+        // mid-operation, which is not a state worth reasoning about.
+        if (_isSyncInProgress())
+        {
+            CliUpdateStatus = "A sync is running. Wait for it to finish, then update.";
+            return;
+        }
+
+        IsCliUpdateBusy = true;
+        try
+        {
+            CliUpdateStatus = $"Downloading {release.Version}…";
+            await _updateInstaller.InstallAsync(
+                release,
+                CliPath,
+                onProgress: bytes => Dispatcher.UIThread.Post(
+                    () => CliUpdateStatus = $"Downloading {release.Version}… {bytes / (1024 * 1024)} MB"));
+
+            _availableRelease = null;
+            IsCliUpdateAvailable = false;
+            CliVersion = UnknownCliVersion;
+            await CheckCliVersionAsync();
+            CliUpdateStatus = $"Updated to {release.Version}. Verified against the published SHA-512.";
+        }
+        catch (CliUpdateException ex)
+        {
+            // Includes the checksum mismatch, which leaves the old binary in place by design.
+            CliUpdateStatus = ex.Message;
+            IsWarning = true;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or TaskCanceledException)
+        {
+            CliUpdateStatus = $"Update failed, the existing CLI was kept: {ex.Message}";
+            IsWarning = true;
+        }
+        finally
+        {
+            IsCliUpdateBusy = false;
         }
     }
 

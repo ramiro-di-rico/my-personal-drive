@@ -52,6 +52,14 @@ public sealed class SyncPanelViewModel : ObservableObject
 
     public bool IsAutomaticSyncRunning => _scheduler?.IsRunning ?? false;
 
+    /// <summary>
+    /// Whether a pair is mid-scan or mid-transfer right now. Distinct from
+    /// <see cref="IsAutomaticSyncRunning"/>, which only says the scheduler loop is enabled —
+    /// consulted before replacing the `proton-drive` binary, where "a transfer is in flight" and
+    /// "automatic sync is switched on" are very different risks.
+    /// </summary>
+    public bool IsSyncInProgress => IsBusy || Pairs.Any(pair => pair.IsBusy);
+
     public string AutomaticSyncLabel => IsAutomaticSyncRunning ? "⏸ Automatic sync: on" : "▶ Automatic sync: off";
 
     public string StatusMessage

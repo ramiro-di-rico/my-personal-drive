@@ -39,10 +39,17 @@ public partial class App : Application
                 GetRemoteFolderChildren = service.GetChildrenAsync,
             };
 
+            var mainWindowViewModel = new MainWindowViewModel(
+                service, cacheService, settings, syncPanelViewModel, releaseFeed: new CliReleaseFeed());
+
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(service, cacheService, settings, syncPanelViewModel)
+                DataContext = mainWindowViewModel
             };
+
+            // Fire and forget on purpose: the window must not wait on a network round-trip to
+            // appear, and a failed check only ever writes text into the settings view.
+            _ = mainWindowViewModel.CheckForCliUpdateInBackgroundAsync();
 
             // Stop the loop before the process exits, so a cycle isn't killed mid-transfer when it
             // could just as easily finish — and so the next start has nothing to recover.

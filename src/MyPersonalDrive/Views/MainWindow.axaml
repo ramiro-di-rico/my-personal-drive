@@ -319,6 +319,24 @@
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
               </StackPanel>
+
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock VerticalAlignment="Center" Text="Actualización:" />
+                <TextBlock VerticalAlignment="Center"
+                           MaxWidth="420"
+                           TextWrapping="Wrap"
+                           Opacity="0.8"
+                           Text="{Binding CliUpdateStatus}" />
+                <Button ToolTip.Tip="Check Proton's published releases"
+                        Command="{Binding CheckForCliUpdateCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+                </Button>
+                <Button Classes="primary"
+                        Content="Actualizar el CLI"
+                        IsVisible="{Binding IsCliUpdateAvailable}"
+                        ToolTip.Tip="Download, verify the published SHA-512, and replace the executable"
+                        Command="{Binding InstallCliUpdateCommand}" />
+              </StackPanel>
             </StackPanel>
           </Border>
         </StackPanel>

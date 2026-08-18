@@ -520,6 +520,31 @@ public class SyncStateStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Queue_RetryFailed_RevivesBackedOffPendingRowsWithACleanSlate()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        await sut.EnqueueActionsAsync(pair.Id, [
+            new SyncAction(SyncOperation.DownloadFile, "a.txt", null, 1, 1000),
+            new SyncAction(SyncOperation.DownloadFile, "b.txt", null, 1, 1000),
+        ], T0);
+
+        var pending = await sut.GetPendingActionsAsync(pair.Id);
+        await sut.MarkFailedAsync(pending[0].Id, "transient error", nextAttemptAt: T0.AddMinutes(5));
+        await sut.MarkFailedAsync(pending[1].Id, "gave up", nextAttemptAt: null);
+
+        Assert.Equal(2, (await sut.GetFailedActionsAsync(pair.Id)).Count);
+
+        Assert.Equal(2, await sut.RetryFailedAsync(pair.Id, T0.AddHours(1)));
+
+        Assert.Empty(await sut.GetFailedActionsAsync(pair.Id));
+        var revived = await sut.GetPendingActionsAsync(pair.Id, T0.AddHours(1));
+        Assert.Equal(2, revived.Count);
+        Assert.All(revived, r => Assert.Equal(0, r.AttemptCount));
+        Assert.All(revived, r => Assert.Null(r.LastError));
+    }
+
+    [Fact]
     public async Task Queue_RowAwaitingItsBackoff_IsNotHandedOutUntilTheTimePasses()
     {
         var sut = CreateSut();

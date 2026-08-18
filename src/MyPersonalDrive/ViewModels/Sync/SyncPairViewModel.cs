@@ -66,6 +66,9 @@ public sealed class SyncPairViewModel : ObservableObject
                 PreviewCommand.RaiseCanExecuteChanged();
                 SyncNowCommand.RaiseCanExecuteChanged();
                 RemoveCommand.RaiseCanExecuteChanged();
+                ResolveConflictsCommand.RaiseCanExecuteChanged();
+                RetryFailedCommand.RaiseCanExecuteChanged();
+                TogglePauseCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -103,8 +106,10 @@ public sealed class SyncPairViewModel : ObservableObject
             if (SetProperty(ref _conflictCount, value))
             {
                 OnPropertyChanged(nameof(HasConflicts));
+                OnPropertyChanged(nameof(HasFailures));
                 OnPropertyChanged(nameof(ConflictText));
                 ResolveConflictsCommand.RaiseCanExecuteChanged();
+                RetryFailedCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -124,7 +129,33 @@ public sealed class SyncPairViewModel : ObservableObject
 
     public bool HasConflicts => ConflictCount > 0;
 
-    public bool HasFailures => FailedCount > 0;
+    public bool HasFailures
+    {
+        get
+        {
+            if (FailedCount > 0)
+            {
+                return true;
+            }
+
+            if (_pair.LastStatus == SyncPairStatus.Error)
+            {
+                return true;
+            }
+
+            if (_pair.LastStatus == SyncPairStatus.PartialFailure)
+            {
+                if (HasConflicts && _pair.LastError is not null && !_pair.LastError.Contains("failed") && !_pair.LastError.Contains("aborted"))
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+    }
 
     public string ConflictText => ConflictCount == 1 ? "⚠ 1 conflict" : $"⚠ {ConflictCount} conflicts";
 
@@ -192,6 +223,7 @@ public sealed class SyncPairViewModel : ObservableObject
         _executor.Progress += OnProgress;
         try
         {
+            await _stateStore.RetryFailedAsync(_pair.Id, DateTimeOffset.UtcNow);
             await _executor.RunAsync(_pair);
             _pair = await _stateStore.GetPairAsync(_pair.Id) ?? _pair;
         }
@@ -207,8 +239,11 @@ public sealed class SyncPairViewModel : ObservableObject
     /// <summary>Re-reads the parked conflicts and dead rows, so the row's badges tell the truth.</summary>
     public async Task RefreshOutstandingAsync()
     {
+        _pair = await _stateStore.GetPairAsync(_pair.Id) ?? _pair;
         ConflictCount = (await _stateStore.GetConflictActionsAsync(_pair.Id)).Count;
         FailedCount = (await _stateStore.GetFailedActionsAsync(_pair.Id)).Count;
+        OnPropertyChanged(nameof(HasFailures));
+        RetryFailedCommand.RaiseCanExecuteChanged();
     }
 
     private async Task ResolveConflictsAsync()
@@ -269,9 +304,16 @@ public sealed class SyncPairViewModel : ObservableObject
         try
         {
             var revived = await _stateStore.RetryFailedAsync(_pair.Id, DateTimeOffset.UtcNow);
-            StatusText = revived == 0
-                ? "Nothing to retry."
+            if (_pair.LastStatus is SyncPairStatus.PartialFailure or SyncPairStatus.Error)
+            {
+                await _stateStore.UpdatePairStatusAsync(_pair.Id, _pair.LastSyncAt ?? DateTimeOffset.UtcNow, SyncPairStatus.Ok, null);
+                _pair = await _stateStore.GetPairAsync(_pair.Id) ?? _pair;
+            }
+
+            var msg = revived == 0
+                ? "Failed state reset — sync now or resume to sync."
                 : $"{revived} failed action(s) queued again — they'll run on the next sync.";
+            StatusText = _pair.IsPaused ? $"Paused — {msg}" : msg;
         }
         finally
         {
@@ -318,6 +360,8 @@ public sealed class SyncPairViewModel : ObservableObject
         // A paused pair saying only "Up to date" would be a lie the moment anything changes, so the
         // pause is stated first — it's the fact that decides whether the rest is still being kept true.
         StatusText = _pair.IsPaused ? $"Paused — {status}" : status;
+        OnPropertyChanged(nameof(HasFailures));
+        RetryFailedCommand.RaiseCanExecuteChanged();
     }
 
     private static string FormatTime(DateTimeOffset? timestamp)

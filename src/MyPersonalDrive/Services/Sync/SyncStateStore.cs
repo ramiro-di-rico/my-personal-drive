@@ -527,8 +527,8 @@ public sealed class SyncStateStore
     });
 
     /// <summary>
-    /// Puts every permanently-failed row for a pair back in the queue with a clean slate — the
-    /// "try that again" the UI needs for rows whose retries ran out. Returns how many were revived.
+    /// Puts every failed or backed-off row for a pair back in the queue with a clean slate — the
+    /// "try that again" the UI needs for rows whose retries ran out or are awaiting backoff. Returns how many were revived.
     /// </summary>
     public Task<int> RetryFailedAsync(int pairId, DateTimeOffset now, CancellationToken ct = default)
         => SqliteOffThread.RunAsync<int>(async () =>
@@ -538,7 +538,7 @@ public sealed class SyncStateStore
         command.CommandText = """
             UPDATE SyncQueue
             SET State = 'Pending', AttemptCount = 0, NextAttemptAt = NULL, LastError = NULL, EnqueuedAt = @Now
-            WHERE PairId = @PairId AND State = 'Failed'
+            WHERE PairId = @PairId AND (State = 'Failed' OR (State = 'Pending' AND (NextAttemptAt IS NOT NULL OR AttemptCount > 0 OR LastError IS NOT NULL)))
             """;
         command.Parameters.AddWithValue("@PairId", pairId);
         command.Parameters.AddWithValue("@Now", FormatTimestamp(now));
@@ -593,7 +593,8 @@ public sealed class SyncStateStore
         var command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id, PairId, RelativePath, Operation, Payload, Priority, AttemptCount, State, LastError, EnqueuedAt
-            FROM SyncQueue WHERE PairId = @PairId AND State = 'Failed'
+            FROM SyncQueue
+            WHERE PairId = @PairId AND (State = 'Failed' OR (State = 'Pending' AND (NextAttemptAt IS NOT NULL OR AttemptCount > 0 OR LastError IS NOT NULL)))
             ORDER BY RelativePath
             """;
         command.Parameters.AddWithValue("@PairId", pairId);

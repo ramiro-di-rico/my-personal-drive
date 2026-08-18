@@ -120,13 +120,15 @@ public sealed class SyncExecutor
         context.Baseline?.SeedFromScan(remote);
 
         var (failureCount, aborted) = await DrainQueueAsync(context, cancellationToken);
+        var failedActions = await _stateStore.GetFailedActionsAsync(pair.Id, cancellationToken);
+        var totalFailures = Math.Max(failureCount, failedActions.Count);
 
-        var status = (failureCount, unresolved.Count) switch
+        var status = (totalFailures, unresolved.Count) switch
         {
             (0, 0) => SyncPairStatus.Ok,
             _ => SyncPairStatus.PartialFailure,
         };
-        var error = BuildStatusMessage(failureCount, unresolved.Count, aborted);
+        var error = BuildStatusMessage(totalFailures, unresolved.Count, aborted);
         await _stateStore.UpdatePairStatusAsync(pair.Id, _timeProvider.GetUtcNow(), status, error, cancellationToken);
 
         return plan;

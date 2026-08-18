@@ -170,4 +170,70 @@ public class SyncConflictFlowTests : IDisposable
         Assert.False(row.HasFailures);
         Assert.Single(await store.GetPendingActionsAsync(1));
     }
+
+    [Fact]
+    public async Task PartialFailure_WithTransientBackoff_AdvertisesFailures_AndRecoversViaRetry()
+    {
+        var (_, row, _, store) = await BuildWithTwoConflictsAsync();
+        Assert.False(row.HasFailures);
+
+        await store.EnqueueActionsAsync(1, [new SyncAction(SyncOperation.DownloadFile, "retryable.txt", null, 1, 1000)], DateTimeOffset.UtcNow);
+        var queued = Assert.Single(await store.GetPendingActionsAsync(1));
+        await store.MarkFailedAsync(queued.Id, "connection timeout", nextAttemptAt: DateTimeOffset.UtcNow.AddMinutes(5));
+        await store.UpdatePairStatusAsync(1, DateTimeOffset.UtcNow, SyncPairStatus.PartialFailure, "1 action(s) failed");
+        var pair = await store.GetPairAsync(1);
+        await row.RefreshOutstandingAsync();
+
+        // Should advertise failure even when nextAttemptAt is in the future
+        Assert.True(row.HasFailures);
+        Assert.True(row.RetryFailedCommand.CanExecute(null));
+
+        await row.RetryFailedCommand.ExecuteAsync();
+
+        Assert.False(row.HasFailures);
+        var revived = Assert.Single(await store.GetPendingActionsAsync(1));
+        Assert.Null(revived.LastError);
+        Assert.Equal(0, revived.AttemptCount);
+    }
+
+    [Fact]
+    public async Task PausedPair_WithPartialFailure_CanRecover()
+    {
+        var (_, row, _, store) = await BuildWithTwoConflictsAsync();
+        await row.TogglePauseCommand.ExecuteAsync();
+        Assert.True(row.IsPaused);
+
+        await store.UpdatePairStatusAsync(1, DateTimeOffset.UtcNow, SyncPairStatus.PartialFailure, "1 action(s) failed");
+        await store.EnqueueActionsAsync(1, [new SyncAction(SyncOperation.DownloadFile, "doc.txt", null, 1, 1000)], DateTimeOffset.UtcNow);
+        var queued = Assert.Single(await store.GetPendingActionsAsync(1));
+        await store.MarkFailedAsync(queued.Id, "busy", nextAttemptAt: DateTimeOffset.UtcNow.AddMinutes(2));
+        await row.RefreshOutstandingAsync();
+
+        Assert.True(row.HasFailures);
+        Assert.Contains("Partial failure", row.StatusText);
+        Assert.StartsWith("Paused —", row.StatusText);
+
+        await row.RetryFailedCommand.ExecuteAsync();
+
+        Assert.False(row.HasFailures);
+        Assert.StartsWith("Paused —", row.StatusText);
+        var pending = Assert.Single(await store.GetPendingActionsAsync(1));
+        Assert.Equal(0, pending.AttemptCount);
+    }
+
+    [Fact]
+    public async Task PairInErrorStatus_AdvertisesFailures_AndCanRecover()
+    {
+        var (_, row, _, store) = await BuildWithTwoConflictsAsync();
+
+        await store.UpdatePairStatusAsync(1, DateTimeOffset.UtcNow, SyncPairStatus.Error, "Proton Drive CLI connection lost");
+        await row.RefreshOutstandingAsync();
+
+        Assert.True(row.HasFailures);
+        Assert.True(row.RetryFailedCommand.CanExecute(null));
+
+        await row.RetryFailedCommand.ExecuteAsync();
+
+        Assert.False(row.HasFailures);
+    }
 }

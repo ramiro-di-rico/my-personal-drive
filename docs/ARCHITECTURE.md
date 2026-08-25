@@ -244,7 +244,15 @@ instead of using `Quote`).
 
 ### 6.2 SQLite cache
 
-`<BaseFolder>/cache.db`, single schema in [`DriveCacheService.cs:242`](../src/MyPersonalDrive/Services/DriveCacheService.cs):
+`<BaseFolder>/cache.db`. The schema below is migration 1's; six migrations have landed since
+(see [`DriveDatabaseMigrations.cs`](../src/MyPersonalDrive/Services/DriveDatabaseMigrations.cs)
+for the current, authoritative shape). Notably, migration 6
+(docs/PLAN-CLOUD-PROVIDERS.md P4) added an `AccountKey` column to `DriveItems`, `FolderMetrics`
+and `SyncPairs` — `"<providerId>:<accountId>"`, defaulted to `'proton:default'` — and
+`DriveCacheService`/`FolderMetricsStore`/`SyncStateStore` all take the active account key in
+their constructor now, scoping every query to it.
+
+Original migration 1, for the shape/reasoning it started from:
 
 ```sql
 CREATE TABLE IF NOT EXISTS DriveItems (

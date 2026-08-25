@@ -16,11 +16,19 @@ namespace MyPersonalDrive.Services.Sync;
 public sealed class SyncStateStore
 {
     private readonly string _connectionString;
+    private readonly string _accountKey;
 
-    public SyncStateStore(string dbPath)
+    /// <param name="accountKey">
+    /// See <see cref="DriveCacheService"/>'s constructor doc. Scopes <c>SyncPairs</c> only —
+    /// <c>SyncState</c>/<c>SyncQueue</c>/<c>SyncLog</c> are keyed by <c>PairId</c>, a value only
+    /// ever obtained from an already-scoped <see cref="GetPairsAsync"/> call, so they inherit the
+    /// scoping transitively rather than needing their own column (docs/PLAN-CLOUD-PROVIDERS.md P4).
+    /// </param>
+    public SyncStateStore(string dbPath, string accountKey = "proton:default")
     {
         Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
         _connectionString = SqliteOffThread.ConnectionStringFor(dbPath);
+        _accountKey = accountKey;
 
         using var connection = OpenConnection();
         SqliteMigrationRunner.Apply(connection, DriveDatabaseMigrations.All);
@@ -87,10 +95,11 @@ public sealed class SyncStateStore
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO SyncPairs (RemotePath, LocalPath, Direction, ConflictPolicy, ExcludeGlobs, LastSyncStatus)
-            VALUES (@RemotePath, @LocalPath, @Direction, @ConflictPolicy, @ExcludeGlobs, 'Never');
+            INSERT INTO SyncPairs (AccountKey, RemotePath, LocalPath, Direction, ConflictPolicy, ExcludeGlobs, LastSyncStatus)
+            VALUES (@AccountKey, @RemotePath, @LocalPath, @Direction, @ConflictPolicy, @ExcludeGlobs, 'Never');
             SELECT last_insert_rowid();
             """;
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@RemotePath", remotePath);
         command.Parameters.AddWithValue("@LocalPath", localPath);
         command.Parameters.AddWithValue("@Direction", direction.ToString());
@@ -107,7 +116,8 @@ public sealed class SyncStateStore
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, RemotePath, LocalPath, Direction, ConflictPolicy, IsEnabled, IsPaused, ExcludeGlobs, LastSyncAt, LastSyncStatus, LastError FROM SyncPairs ORDER BY Id";
+        command.CommandText = "SELECT Id, RemotePath, LocalPath, Direction, ConflictPolicy, IsEnabled, IsPaused, ExcludeGlobs, LastSyncAt, LastSyncStatus, LastError FROM SyncPairs WHERE AccountKey = @AccountKey ORDER BY Id";
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         var pairs = new List<SyncPair>();
         using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -123,7 +133,8 @@ public sealed class SyncStateStore
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, RemotePath, LocalPath, Direction, ConflictPolicy, IsEnabled, IsPaused, ExcludeGlobs, LastSyncAt, LastSyncStatus, LastError FROM SyncPairs WHERE Id = @Id";
+        command.CommandText = "SELECT Id, RemotePath, LocalPath, Direction, ConflictPolicy, IsEnabled, IsPaused, ExcludeGlobs, LastSyncAt, LastSyncStatus, LastError FROM SyncPairs WHERE AccountKey = @AccountKey AND Id = @Id";
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@Id", id);
         using var reader = await command.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? ReadPair(reader) : null;
@@ -134,10 +145,11 @@ public sealed class SyncStateStore
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
-        command.CommandText = "UPDATE SyncPairs SET LastSyncAt = @LastSyncAt, LastSyncStatus = @Status, LastError = @Error WHERE Id = @Id";
+        command.CommandText = "UPDATE SyncPairs SET LastSyncAt = @LastSyncAt, LastSyncStatus = @Status, LastError = @Error WHERE AccountKey = @AccountKey AND Id = @Id";
         command.Parameters.AddWithValue("@LastSyncAt", FormatTimestamp(syncedAt));
         command.Parameters.AddWithValue("@Status", status.ToString());
         command.Parameters.AddWithValue("@Error", (object?)error ?? DBNull.Value);
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@Id", id);
         await command.ExecuteNonQueryAsync(ct);
     });
@@ -154,8 +166,9 @@ public sealed class SyncStateStore
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
         // `column` is one of two hardcoded literals above, never user input.
-        command.CommandText = $"UPDATE SyncPairs SET {column} = @Value WHERE Id = @Id";
+        command.CommandText = $"UPDATE SyncPairs SET {column} = @Value WHERE AccountKey = @AccountKey AND Id = @Id";
         command.Parameters.AddWithValue("@Value", value ? 1 : 0);
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@Id", id);
         await command.ExecuteNonQueryAsync(ct);
     });
@@ -167,7 +180,8 @@ public sealed class SyncStateStore
         var command = connection.CreateCommand();
         // SyncState/SyncQueue rows cascade via the FK declared in DriveDatabaseMigrations,
         // now that OpenConnection() turns PRAGMA foreign_keys on.
-        command.CommandText = "DELETE FROM SyncPairs WHERE Id = @Id";
+        command.CommandText = "DELETE FROM SyncPairs WHERE AccountKey = @AccountKey AND Id = @Id";
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@Id", id);
         await command.ExecuteNonQueryAsync(ct);
     });
@@ -201,7 +215,7 @@ public sealed class SyncStateStore
         var command = connection.CreateCommand();
         command.CommandText = """
             SELECT RelativePath, IsFolder, RemoteSize, RemoteModifiedAt, RemoteNodeId, RemoteHash,
-                   LocalSize, LocalModifiedAt, LocalInode, ContentHash
+                   LocalSize, LocalModifiedAt, LocalInode, ContentHash, HashAlgorithm
             FROM SyncState WHERE PairId = @PairId
             """;
         command.Parameters.AddWithValue("@PairId", pairId);
@@ -212,6 +226,11 @@ public sealed class SyncStateStore
         {
             var relativePath = reader.GetString(0);
             var isFolder = reader.GetInt32(1) != 0;
+            // One algorithm per row, not per side: both sides' hashes (when present) were
+            // produced by whichever provider was active the moment this baseline was written
+            // (docs/PLAN-CLOUD-PROVIDERS.md P3/P4). Null on every row written before this column
+            // existed — the guard in SyncReconciler treats that as "unknown", not a mismatch.
+            var hashAlgorithm = reader.IsDBNull(10) ? (RemoteHashAlgorithm?)null : Enum.Parse<RemoteHashAlgorithm>(reader.GetString(10));
 
             NodeFingerprint? remoteAtSync = reader.IsDBNull(4) && reader.IsDBNull(2) && reader.IsDBNull(3) && reader.IsDBNull(5)
                 ? null
@@ -219,7 +238,8 @@ public sealed class SyncStateStore
                     reader.IsDBNull(2) ? null : reader.GetInt64(2),
                     reader.IsDBNull(3) ? null : ParseTimestamp(reader.GetString(3)),
                     reader.IsDBNull(4) ? null : reader.GetString(4),
-                    reader.IsDBNull(5) ? null : reader.GetString(5));
+                    reader.IsDBNull(5) ? null : reader.GetString(5),
+                    reader.IsDBNull(5) ? null : hashAlgorithm);
 
             NodeFingerprint? localAtSync = reader.IsDBNull(6) && reader.IsDBNull(7) && reader.IsDBNull(8) && reader.IsDBNull(9)
                 ? null
@@ -227,7 +247,8 @@ public sealed class SyncStateStore
                     reader.IsDBNull(6) ? null : reader.GetInt64(6),
                     reader.IsDBNull(7) ? null : ParseTimestamp(reader.GetString(7)),
                     reader.IsDBNull(8) ? null : reader.GetString(8),
-                    reader.IsDBNull(9) ? null : reader.GetString(9));
+                    reader.IsDBNull(9) ? null : reader.GetString(9),
+                    reader.IsDBNull(9) ? null : hashAlgorithm);
 
             result[relativePath] = new SyncBaselineEntry(relativePath, isFolder, localAtSync, remoteAtSync);
         }
@@ -242,9 +263,9 @@ public sealed class SyncStateStore
         var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO SyncState (PairId, RelativePath, IsFolder, RemoteSize, RemoteModifiedAt, RemoteNodeId, RemoteHash,
-                                    LocalSize, LocalModifiedAt, LocalInode, ContentHash, SyncedAt)
+                                    LocalSize, LocalModifiedAt, LocalInode, ContentHash, HashAlgorithm, SyncedAt)
             VALUES (@PairId, @RelativePath, @IsFolder, @RemoteSize, @RemoteModifiedAt, @RemoteNodeId, @RemoteHash,
-                    @LocalSize, @LocalModifiedAt, @LocalInode, @ContentHash, @SyncedAt)
+                    @LocalSize, @LocalModifiedAt, @LocalInode, @ContentHash, @HashAlgorithm, @SyncedAt)
             ON CONFLICT(PairId, RelativePath) DO UPDATE SET
                 IsFolder = excluded.IsFolder,
                 RemoteSize = excluded.RemoteSize,
@@ -255,6 +276,7 @@ public sealed class SyncStateStore
                 LocalModifiedAt = excluded.LocalModifiedAt,
                 LocalInode = excluded.LocalInode,
                 ContentHash = excluded.ContentHash,
+                HashAlgorithm = excluded.HashAlgorithm,
                 SyncedAt = excluded.SyncedAt;
             """;
         command.Parameters.AddWithValue("@PairId", pairId);
@@ -268,6 +290,9 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@LocalModifiedAt", (object?)FormatTimestamp(entry.LocalAtSync?.ModifiedAt) ?? DBNull.Value);
         command.Parameters.AddWithValue("@LocalInode", (object?)entry.LocalAtSync?.NodeId ?? DBNull.Value);
         command.Parameters.AddWithValue("@ContentHash", (object?)entry.LocalAtSync?.ContentHash ?? DBNull.Value);
+        // Whichever side has a hash tells us the algorithm that was active for this row; when
+        // both do, P3's guard already requires SyncBaselineWriter to have tagged them the same.
+        command.Parameters.AddWithValue("@HashAlgorithm", (object?)(entry.LocalAtSync?.HashAlgorithm ?? entry.RemoteAtSync?.HashAlgorithm)?.ToString() ?? DBNull.Value);
         command.Parameters.AddWithValue("@SyncedAt", FormatTimestamp(syncedAt));
         await command.ExecuteNonQueryAsync(ct);
     });

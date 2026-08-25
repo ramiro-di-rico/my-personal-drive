@@ -91,7 +91,49 @@
       SyncReconciler algorithm-mismatch test — confirmed load-bearing by temporarily removing the
       guard and watching the test fail with a spurious upload), AOT publish clean, published
       binary runs against a stub CLI.
-- [ ] **P4** — account-scope the persisted state (`cache.db` migration 6). Not started.
+- [x] **P4 — account-scope the persisted state (`cache.db` migration 6).**
+      Migration 6 adds `AccountKey` (default `'proton:default'`) to `DriveItems`, `FolderMetrics`
+      and `SyncPairs`, rebuilding each table's primary key/unique constraint, plus
+      `SyncState.HashAlgorithm` (a plain `ALTER TABLE ADD COLUMN`, no rebuild needed).
+      `DriveCacheService`, `FolderMetricsStore` and `SyncStateStore` take an `accountKey`
+      constructor parameter (default `'proton:default'`, so every existing call site — including
+      `App.axaml.cs`, unchanged until P5 gives it something else to pass — keeps working) and add
+      it to every `CommandText` touching `DriveItems`/`FolderMetrics`/`SyncPairs` (`SyncState`,
+      `SyncQueue`, `SyncLog` are keyed by `PairId`, which is only ever obtained from an
+      already-scoped `GetPairsAsync`, so they inherit the scoping rather than needing their own
+      column). `SyncStateStore` also now reads/writes `SyncState.HashAlgorithm` for P3's guard.
+      `NodeFingerprint` reconstructed from a pre-migration-6 row gets `HashAlgorithm: null`
+      ("unknown"), which the P3 guard already treats as "not a mismatch."
+      **Two real bugs found and fixed while verifying this against a copy of a real, warm
+      `cache.db`** (not a synthetic one — the R1 risk this plan calls out by name):
+      1. The original migration SQL renamed `SyncPairs`/`DriveItems`/`FolderMetrics` out of the
+         way before recreating them under the same name. SQLite's `ALTER TABLE … RENAME` silently
+         rewrites *every other table's* schema that references the renamed one in a foreign key —
+         `SyncQueue`/`SyncState` declare `PairId … REFERENCES SyncPairs(Id)` — so their FK clause
+         got rewritten to point at the throwaway `SyncPairs_pre6` name, and the subsequent
+         `DROP TABLE SyncPairs_pre6` left them referencing a table that no longer existed. First
+         symptom: a `SyncQueue` insert failing with "no such table: main.SyncPairs_pre6" — a name
+         that appears nowhere in that statement. Fixed by never renaming the original table at
+         all: create the replacement under a temp name, copy data in, drop the original, rename
+         the *replacement* into the final name — nothing references the temp name, so nothing
+         gets rewritten.
+      2. Even with that reordering, `DROP TABLE SyncPairs` (now dropping only the never-renamed
+         original) with `PRAGMA foreign_keys=ON` — which `SyncStateStore.OpenConnection` always
+         sets — is treated by SQLite as deleting every row of the parent table first, which
+         **cascades**: it silently deleted all 568 `SyncState` rows and both `SyncQueue` rows in
+         the test copy before the migration even finished. Fixed at the root, in
+         `SqliteMigrationRunner.Apply` itself (not per-migration): foreign key enforcement is now
+         switched off for the duration of *any* migration run and restored to whatever the caller
+         had before returning, since any future migration that rebuilds an FK target would hit the
+         exact same footgun.
+      Verified end to end: 565 tests pass; a copy of this machine's real `cache.db` (171
+      `DriveItems`, 4 `SyncPairs`, 568 `SyncState`, 2 `SyncQueue` rows) migrated with zero FK
+      violations and byte-for-byte-equal row counts before/after, and a write through the
+      migrated schema (`EnqueueActionsAsync`) succeeded; AOT publish clean; **the migration was
+      then run for real** against this machine's actual `~/.config/MyPersonalDrive/cache.db` via
+      the published binary (full directory backed up first to
+      `~/.config/MyPersonalDrive.pre-p4-backup`) — same result, `user_version` now 6, all rows
+      intact, app stayed running.
 - [ ] **P5** — provider selection in settings; provider-specific settings sections. Not started.
 - [ ] **P6** — `OneDriveProvider` over Microsoft Graph. Not started.
 - [ ] **P7** — *optional* multiple active accounts. Not started, deliberately last.
@@ -685,8 +727,11 @@ should not imitate it.
 ## 6. Risks
 
 - **R1 — P4's rebuilt primary keys** touch a database holding real sync baselines. A wrong
-  migration turns into phantom deletes on the next cycle. Mitigation: back `cache.db` up to
-  `cache.db.pre6` before applying, and test the migration against a copy of a real warm database.
+  migration turns into phantom deletes on the next cycle. Mitigation (executed, not just
+  planned): tested against a copy of this machine's real warm `cache.db` first, which is exactly
+  what caught two real cascade-delete/dangling-FK bugs in the original migration SQL (see P4's
+  status entry) before they ever touched real data; backed up to
+  `~/.config/MyPersonalDrive.pre-p4-backup` before running the fixed migration for real.
 - **R2 — hash-algorithm mismatch** is silent and destructive (§0.1 #3). Mitigation: P3's
   different-algorithm guard lands *before* any OneDrive code, with the test named in P3's "done when".
 - **R3 — plaintext refresh token** (§4.2). Accepted with a documented limitation, revisit if the

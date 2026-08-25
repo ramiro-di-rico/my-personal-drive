@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
@@ -88,13 +89,13 @@ public class MainWindowCliVersionTests : IDisposable
     public async Task CheckCliVersion_WhenTheCliRejectsTheFlag_SurfacesTheErrorInsteadOfThrowing()
     {
         var (viewModel, executor) = Build();
-        executor.EnqueueFailure(new CliException(
+        executor.EnqueueFailure(new DriveException(
             "--version",
             exitCode: 1,
             stdout: string.Empty,
             stderr: "unknown flag: --version",
             message: "unknown flag: --version",
-            kind: CliErrorKind.InvalidArgument));
+            kind: DriveErrorKind.InvalidArgument));
 
         await viewModel.CheckCliVersionCommand.ExecuteAsync();
 

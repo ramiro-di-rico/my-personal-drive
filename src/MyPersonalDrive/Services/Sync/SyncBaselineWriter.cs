@@ -149,7 +149,7 @@ public sealed class SyncBaselineWriter
                     bucket[item.Name] = item;
                 }
             }
-            catch (CliException)
+            catch (DriveException)
             {
                 // The parent folder is gone or unreadable — treat the remote side as absent
                 // rather than failing an action that already succeeded.

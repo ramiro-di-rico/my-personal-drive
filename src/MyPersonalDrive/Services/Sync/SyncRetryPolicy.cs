@@ -1,3 +1,5 @@
+using MyPersonalDrive.Services.Providers;
+
 namespace MyPersonalDrive.Services.Sync;
 
 /// <summary>
@@ -47,21 +49,21 @@ public static class SyncRetryPolicy
     /// </summary>
     public static bool IsRetryable(Exception exception) => exception switch
     {
-        CliException cli => cli.Kind switch
+        DriveException cli => cli.Kind switch
         {
             // Busy is the textbook retry case: the CLI lost a race on its own SQLite cache and
             // the same command will simply work next time (Appendix A #11).
-            CliErrorKind.Network or CliErrorKind.Timeout or CliErrorKind.Busy or CliErrorKind.Unknown => true,
+            DriveErrorKind.Network or DriveErrorKind.Timeout or DriveErrorKind.Busy or DriveErrorKind.Unknown => true,
 
             // Auth and quota are real conditions that a retry cannot fix — they need the user.
             // §7 wants the whole pair paused for these; that's the scheduler's job in F3, so for
             // now they simply fail fast instead of burning five attempts.
-            CliErrorKind.NotAuthenticated or CliErrorKind.Quota => false,
+            DriveErrorKind.NotAuthenticated or DriveErrorKind.Quota => false,
 
             // NotFound is genuinely ambiguous: the node moved or was trashed between the scan and
             // the transfer. Retrying the same path won't help — the next full scan will see the
             // new reality and plan correctly.
-            CliErrorKind.NotFound => false,
+            DriveErrorKind.NotFound => false,
 
             _ => false,
         },
@@ -76,5 +78,5 @@ public static class SyncRetryPolicy
     /// working through a 400-item queue to produce 400 identical auth errors.
     /// </summary>
     public static bool ShouldAbortRun(Exception exception)
-        => exception is CliException { Kind: CliErrorKind.NotAuthenticated or CliErrorKind.Quota };
+        => exception is DriveException { Kind: DriveErrorKind.NotAuthenticated or DriveErrorKind.Quota };
 }

@@ -52,9 +52,9 @@ follow it, don't invent a parallel path.
    - The CLI has no per-failure exit codes, so this is substring matching against both streams
      concatenated (stderr then stdout — a crash writes the banner to stderr and the diagnosis to
      stdout). Keep it that way.
-   - If the command can fail in a way no existing `CliErrorKind` covers, add a kind rather than
+   - If the command can fail in a way no existing `DriveErrorKind` covers, add a kind rather than
      letting it fall to `Unknown` and get surfaced as a generic error.
-   - Callers switch on `CliException.Kind`. Never re-introduce message substring checks upstream.
+   - Callers switch on `DriveException.Kind`. Never re-introduce message substring checks upstream.
 
 4. **AOT safety.** The app project is `PublishAot=true`. Any new type you serialize must be
    registered in `AppJsonContext` (`[JsonSerializable(typeof(T))]`). No reflection-based
@@ -84,7 +84,7 @@ follow it, don't invent a parallel path.
 - [ ] Real CLI output captured, not guessed
 - [ ] Arguments as a list, cancellation token forwarded, timeout justified
 - [ ] Empty result distinguished from unparseable result
-- [ ] New failure text added to `CliErrorClassifier` (+ new `CliErrorKind` if needed)
+- [ ] New failure text added to `CliErrorClassifier` (+ new `DriveErrorKind` if needed)
 - [ ] New serialized types registered in `AppJsonContext`
 - [ ] Argument, parsing, and error tests added; `scripts/run-tests.sh` green
 - [ ] `docs/ARCHITECTURE.md` updated if the service's public surface changed

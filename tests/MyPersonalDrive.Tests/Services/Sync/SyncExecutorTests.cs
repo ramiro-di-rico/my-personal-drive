@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
@@ -479,7 +480,7 @@ public class SyncExecutorTests : IDisposable
             // reason rather than running out of canned responses.
             for (var i = 0; i < 10; i++)
             {
-                executor.EnqueueOutput(_ => throw new CliException("download", 1, "", "net down", "net down", CliErrorKind.Network));
+                executor.EnqueueOutput(_ => throw new DriveException("download", 1, "", "net down", "net down", DriveErrorKind.Network));
             }
 
             await sut.RunAsync(pair);
@@ -603,7 +604,7 @@ public class SyncExecutorTests : IDisposable
     {
         var executor = new FakeCliExecutor();
         executor.RespondForPath(RemoteRoot, $"[{FileEntry("a.txt", "aaa")}, {FileEntry("b.txt", "bbb")}]");
-        executor.EnqueueOutput(_ => throw new CliException("download", 1, "", "boom", "boom", CliErrorKind.Network));
+        executor.EnqueueOutput(_ => throw new DriveException("download", 1, "", "boom", "boom", DriveErrorKind.Network));
         executor.EnqueueOutput(args =>
         {
             File.WriteAllText(Path.Combine(args[3], "b.txt"), "bbb");
@@ -956,9 +957,9 @@ public class SyncExecutorTests : IDisposable
 
         await stateStore.LogAsync(pair.Id, SyncLogLevel.Info, null, "ancient history", clock.GetUtcNow());
         clock.Advance(TimeSpan.FromDays(40));
-        executor.EnqueueOutput(_ => throw new CliException("list", 1, "", "net down", "net down", CliErrorKind.Network));
+        executor.EnqueueOutput(_ => throw new DriveException("list", 1, "", "net down", "net down", DriveErrorKind.Network));
 
-        await Assert.ThrowsAsync<CliException>(() => sut.RunAsync(pair));
+        await Assert.ThrowsAsync<DriveException>(() => sut.RunAsync(pair));
 
         Assert.Empty(await stateStore.GetRecentLogsAsync(pair.Id, 100));
     }
@@ -1091,7 +1092,7 @@ public class SyncExecutorTests : IDisposable
         var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-03-01T12:00:00Z"));
         var executor = new FakeCliExecutor();
         executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}]");
-        executor.EnqueueOutput(_ => throw new CliException("download", 1, "", "connection reset", "connection reset", CliErrorKind.Network));
+        executor.EnqueueOutput(_ => throw new DriveException("download", 1, "", "connection reset", "connection reset", DriveErrorKind.Network));
 
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
@@ -1114,7 +1115,7 @@ public class SyncExecutorTests : IDisposable
         var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-03-01T12:00:00Z"));
         var executor = new FakeCliExecutor();
         executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}, {FileEntry("b.txt", "world")}]");
-        executor.EnqueueOutput(_ => throw new CliException("download", 1, "", "You need to login first", "You need to login first", CliErrorKind.NotAuthenticated));
+        executor.EnqueueOutput(_ => throw new DriveException("download", 1, "", "You need to login first", "You need to login first", DriveErrorKind.NotAuthenticated));
 
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
@@ -1179,7 +1180,7 @@ public class SyncExecutorTests : IDisposable
     {
         var executor = new FakeCliExecutor();
         executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}, {FileEntry("b.txt", "world")}]");
-        executor.EnqueueOutput(_ => throw new CliException("download", 1, "", "disk full", "disk full")); // a.txt fails
+        executor.EnqueueOutput(_ => throw new DriveException("download", 1, "", "disk full", "disk full")); // a.txt fails
         executor.EnqueueOutput(args =>
         {
             File.WriteAllText(Path.Combine(args[3], "b.txt"), "world");

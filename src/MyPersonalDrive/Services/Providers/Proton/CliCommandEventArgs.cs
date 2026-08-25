@@ -1,4 +1,4 @@
-namespace MyPersonalDrive.Services;
+namespace MyPersonalDrive.Services.Providers.Proton;
 
 public sealed class CliCommandStartedEventArgs(string commandText) : EventArgs
 {

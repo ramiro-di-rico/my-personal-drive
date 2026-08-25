@@ -68,17 +68,19 @@ src/MyPersonalDrive/
     DriveItem.cs                   # immutable record of a drive node
     UploadConflictStrategy.cs      # enum None|KeepBoth|Replace|Skip
   Services/
-    CliCommandEventArgs.cs         # Started / Output / Finished (Proton-shaped; see §5)
-    CliException.cs / CliErrorKind.cs
     Providers/
       ICloudDriveProvider.cs       # the facade every consumer talks to (see §5)
       IDriveOperations.cs / IDriveAuthenticator.cs / IRemoteViewInvalidator.cs / IProviderDiagnostics.cs
       ProviderCapabilities.cs / ProviderId.cs
+      ProviderActivity.cs          # provider-neutral activity feed (Started/Output/Finished)
+      DriveException.cs / DriveErrorKind.cs
       Proton/
-        ProtonDriveProvider.cs     # adapts ProtonDriveService to ICloudDriveProvider
+        ProtonDriveProvider.cs     # adapts ProtonDriveService to ICloudDriveProvider; maps its
+                                    # three Cli*EventArgs events onto one ProviderActivity feed
         ProtonDriveService.cs      # translates domain operations -> CLI args + parsing
         ProtonDriveCliLocator.cs / IProtonDriveCliLocator.cs
         ProtonDriveCliExecutor.cs / IProtonDriveCliExecutor.cs
+        CliCommandEventArgs.cs     # Started / Output / Finished — Proton-internal, CLI-shaped
         CliErrorClassifier.cs, CliReleaseFeed.cs, CliUpdateInstaller.cs, CliPlatformKey.cs, CliVersionComparer.cs
     DriveCacheService.cs           # SQLite cache of listings
     AppSettings.cs / AppSettingsService.cs / AppJsonContext.cs

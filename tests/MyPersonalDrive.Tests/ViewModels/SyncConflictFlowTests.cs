@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
@@ -134,7 +135,7 @@ public class SyncConflictFlowTests : IDisposable
         var conflicts = await store.GetConflictActionsAsync(1);
 
         // 'a.txt' resolves via download; make that download fail, and leave 'b.txt' to upload fine.
-        cli.EnqueueOutput(_ => throw new CliException("download", 1, "", "net down", "net down", CliErrorKind.Network));
+        cli.EnqueueOutput(_ => throw new DriveException("download", 1, "", "net down", "net down", DriveErrorKind.Network));
 
         var errors = new List<string>();
         row.OnError = errors.Add;

@@ -267,7 +267,7 @@ public sealed class SyncExecutor
                 remote[relativePath] = new NodeFingerprint(relativePath, item.IsFolder, item.Size, item.ModifiedAt, item.NodeId, item.ContentHash);
             }
         }
-        catch (CliException) when (resolution == ConflictResolution.KeepLocal)
+        catch (DriveException) when (resolution == ConflictResolution.KeepLocal)
         {
             // Keeping the local version doesn't need to know anything about the remote one.
         }
@@ -547,7 +547,7 @@ public sealed class SyncExecutor
         {
             await _operations.CreateFolderAsync(context.Mapper.ToRemoteAbsolute(parent), name, cancellationToken);
         }
-        catch (CliException ex) when (ex.Kind == CliErrorKind.AlreadyExists)
+        catch (DriveException ex) when (ex.Kind == DriveErrorKind.AlreadyExists)
         {
             // Idempotent by design: a retried run, or a folder created by another client between
             // the scan and now, is a success for our purposes, not a failure.

@@ -44,7 +44,23 @@
       same reason. Verified: `./scripts/run-tests.sh` green (561 passed, 5 skipped-integration),
       `dotnet publish -r linux-x64` AOT-clean (no IL2xxx/IL3xxx), and the published binary runs
       against a stub CLI with no crash.log. Landed on branch `feature/cloud-providers-seam`.
-- [ ] **P2** — generalize the error and activity (console) contract off the CLI. Not started.
+- [x] **P2 — generalize the error and activity (console) contract off the CLI.**
+      `CliException`/`CliErrorKind` renamed to `DriveException`/`DriveErrorKind` and moved to
+      `Services/Providers/` (member names/values kept, plus two new kinds: `RateLimited`,
+      `Conflict`). Added `Services/Providers/ProviderActivity.cs`
+      (`ActivityKind` + `ProviderActivity`); `ICloudDriveProvider`'s three
+      `CommandStarted`/`CommandOutput`/`CommandFinished` events collapsed into one
+      `event EventHandler<ProviderActivity>? Activity`, with `ProtonDriveProvider` doing the
+      translation from the CLI-shaped events it still gets from `ProtonDriveService`.
+      `MainWindowViewModel`'s three `OnCommand*` handlers became one `OnActivity`;
+      `FormatCliError` renamed to `FormatDriveError`. `CliCommandEventArgs.cs` moved to
+      `Services/Providers/Proton/` (it is now purely that provider's internal executor-event
+      shape). Added `ProtonDriveProviderTests` covering the Started→Finished translation.
+      Deviation: **`StrictListingParsing` was left on the flat `AppSettings`**, not moved into a
+      Proton settings section — P5 already owns building the real per-provider settings
+      structure (`ProviderSettings` keyed by provider id, migrating `CliPath`/`IsAuthenticated`);
+      building a one-off nested section for this single flag now would just be redone there.
+      Verified: 562 tests pass (561 + the new provider test), app and AOT builds clean.
 - [ ] **P3** — per-provider path syntax and content-hash algorithm. Not started.
 - [ ] **P4** — account-scope the persisted state (`cache.db` migration 6). Not started.
 - [ ] **P5** — provider selection in settings; provider-specific settings sections. Not started.

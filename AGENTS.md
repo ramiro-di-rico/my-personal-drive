@@ -39,8 +39,9 @@ one-line description.
 - **CLI arguments are lists.** `IProtonDriveCliExecutor.ExecuteAsync` takes
   `IReadOnlyList<string>` and passes it to `ProcessStartInfo.ArgumentList`. Never build a
   pre-quoted argument string.
-- **Errors are typed.** Callers switch on `CliException.Kind` (`CliErrorKind`). Substring
-  matching on error messages lives in `CliErrorClassifier` and nowhere else.
+- **Errors are typed.** Callers switch on `DriveException.Kind` (`DriveErrorKind`). Substring
+  matching on error messages lives in `CliErrorClassifier` — one place per provider, not
+  reintroduced upstream (docs/PLAN-CLOUD-PROVIDERS.md §2.6).
 - **The app project is Native AOT.** `PublishAot=true`, `TrimMode=partial`. Serialized types go
   in `AppJsonContext`; no reflection-based `JsonSerializer` overloads. Tests run on the JIT host,
   so passing tests do not prove AOT safety.

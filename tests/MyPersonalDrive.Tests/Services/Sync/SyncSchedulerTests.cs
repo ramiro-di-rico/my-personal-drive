@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
@@ -164,7 +165,7 @@ public class SyncSchedulerTests : IDisposable
     {
         for (var i = 1; i <= times; i++)
         {
-            h.Cli.EnqueueOutput(_ => throw new CliException("list", 1, "", "boom", "boom", CliErrorKind.Network));
+            h.Cli.EnqueueOutput(_ => throw new DriveException("list", 1, "", "boom", "boom", DriveErrorKind.Network));
             var due = SyncSchedulePolicy.ErrorBackoff(i - 1);
             h.Clock.Advance(due > SyncSchedulePolicy.MinInterval ? due : SyncSchedulePolicy.MinInterval);
             Assert.True(await h.Scheduler.PumpOnceAsync(CancellationToken.None), $"failure {i} did not run");

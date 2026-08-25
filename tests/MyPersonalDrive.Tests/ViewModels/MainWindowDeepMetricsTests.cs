@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
@@ -184,9 +185,9 @@ public class MainWindowDeepMetricsTests : IDisposable
     public async Task AFailedScan_ReportsTheCliError_AndClearsTheScanningState()
     {
         var (viewModel, executor, _) = Build();
-        executor.EnqueueFailure(new CliException(
+        executor.EnqueueFailure(new DriveException(
             "filesystem list --json /my-files", exitCode: 1, stdout: string.Empty,
-            stderr: "boom", message: "The CLI failed.", CliErrorKind.Unknown));
+            stderr: "boom", message: "The CLI failed.", DriveErrorKind.Unknown));
 
         await viewModel.ScanFolderDeeplyCommand.ExecuteAsync();
 

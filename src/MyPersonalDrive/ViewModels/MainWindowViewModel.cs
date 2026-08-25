@@ -119,9 +119,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _viewMode = appSettings.ViewModeOrDefault();
         _sortKey = appSettings.SortKeyOrDefault();
         _sortDescending = appSettings.SortDescending;
-        _provider.CommandStarted += OnCommandStarted;
-        _provider.CommandOutput += OnCommandOutput;
-        _provider.CommandFinished += OnCommandFinished;
+        _provider.Activity += OnActivity;
         _provider.ListingParseWarning += OnListingParseWarning;
 
         RootItems = new ObservableCollection<DriveNodeViewModel>();
@@ -683,7 +681,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(path, ex);
+            StatusMessage = FormatDriveError(path, ex);
             IsWarning = true;
         }
         catch (DbException ex)
@@ -751,7 +749,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError("auth login", ex);
+            StatusMessage = FormatDriveError("auth login", ex);
         }
         finally
         {
@@ -772,7 +770,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError("auth logout", ex);
+            StatusMessage = FormatDriveError("auth logout", ex);
         }
         finally
         {
@@ -805,7 +803,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             _navigationHistory.Push(previousPath);
             RaiseCommandStates();
-            StatusMessage = FormatCliError(previousPath, ex);
+            StatusMessage = FormatDriveError(previousPath, ex);
         }
     }
 
@@ -838,7 +836,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 RaiseCommandStates();
             }
 
-            StatusMessage = FormatCliError(path, ex);
+            StatusMessage = FormatDriveError(path, ex);
         }
     }
 
@@ -850,7 +848,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(CurrentPath, ex);
+            StatusMessage = FormatDriveError(CurrentPath, ex);
         }
     }
 
@@ -901,7 +899,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(CurrentPath, ex);
+            StatusMessage = FormatDriveError(CurrentPath, ex);
         }
         finally
         {
@@ -940,7 +938,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(CurrentPath, ex);
+            StatusMessage = FormatDriveError(CurrentPath, ex);
         }
         finally
         {
@@ -972,7 +970,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(item.Path, ex);
+            StatusMessage = FormatDriveError(item.Path, ex);
         }
         finally
         {
@@ -1016,7 +1014,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(item.Path, ex);
+            StatusMessage = FormatDriveError(item.Path, ex);
         }
         finally
         {
@@ -1053,7 +1051,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(item.Path, ex);
+            StatusMessage = FormatDriveError(item.Path, ex);
         }
         finally
         {
@@ -1083,7 +1081,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(item.Path, ex);
+            StatusMessage = FormatDriveError(item.Path, ex);
         }
         finally
         {
@@ -1247,21 +1245,21 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void HandleLoadError(string path, InvalidOperationException ex)
     {
-        var kind = (ex as CliException)?.Kind ?? CliErrorKind.Unknown;
+        var kind = (ex as DriveException)?.Kind ?? DriveErrorKind.Unknown;
 
-        if (kind == CliErrorKind.NotFound)
+        if (kind == DriveErrorKind.NotFound)
         {
             StatusMessage = $"Warning: The path '{path}' no longer exists.";
             IsWarning = true;
             return;
         }
 
-        if (kind == CliErrorKind.NotAuthenticated)
+        if (kind == DriveErrorKind.NotAuthenticated)
         {
             IsAuthenticated = false;
         }
 
-        StatusMessage = FormatCliError(path, ex);
+        StatusMessage = FormatDriveError(path, ex);
         IsWarning = true;
     }
 
@@ -1572,7 +1570,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            // Includes CliException. The CLI's own text is the most useful thing on screen here:
+            // Includes DriveException. The CLI's own text is the most useful thing on screen here:
             // if `--version` is not the flag this build understands, the user sees exactly that.
             CliVersion = $"Unavailable: {ex.Message}";
         }
@@ -1750,19 +1748,24 @@ public sealed class MainWindowViewModel : ObservableObject
         await Task.CompletedTask;
     }
 
-    private void OnCommandStarted(object? sender, CliCommandStartedEventArgs e)
+    private void OnActivity(object? sender, ProviderActivity activity)
     {
-        Dispatcher.UIThread.Post(() => ActiveCommand = e.CommandText);
-        QueueCommandLine($"> {e.CommandText}");
-    }
+        switch (activity.Kind)
+        {
+            case ActivityKind.Started:
+                Dispatcher.UIThread.Post(() => ActiveCommand = activity.Label ?? string.Empty);
+                QueueCommandLine($"> {activity.Label}");
+                break;
 
-    private void OnCommandOutput(object? sender, CliCommandOutputEventArgs e)
-        => QueueCommandLine(e.IsError ? $"[err] {e.Text}" : e.Text);
+            case ActivityKind.Output:
+                QueueCommandLine(activity.IsError ? $"[err] {activity.Text}" : activity.Text ?? string.Empty);
+                break;
 
-    private void OnCommandFinished(object? sender, CliCommandFinishedEventArgs e)
-    {
-        QueueCommandLine(e.Succeeded ? $"[done] exit {e.ExitCode}" : $"[fail] exit {e.ExitCode}");
-        Dispatcher.UIThread.Post(() => ActiveCommand = "Idle");
+            case ActivityKind.Finished:
+                QueueCommandLine(activity.IsError ? $"[fail] exit {activity.ExitCode}" : $"[done] exit {activity.ExitCode}");
+                Dispatcher.UIThread.Post(() => ActiveCommand = "Idle");
+                break;
+        }
     }
 
     private void OnListingParseWarning(object? sender, string message)
@@ -1838,11 +1841,11 @@ public sealed class MainWindowViewModel : ObservableObject
         });
     }
 
-    private static string FormatCliError(string path, Exception ex)
+    private static string FormatDriveError(string path, Exception ex)
     {
-        var kind = (ex as CliException)?.Kind ?? CliErrorKind.Unknown;
+        var kind = (ex as DriveException)?.Kind ?? DriveErrorKind.Unknown;
 
-        if (kind == CliErrorKind.NotAuthenticated)
+        if (kind == DriveErrorKind.NotAuthenticated)
         {
             return path == "auth login"
                 ? "Authentication required. Use Authenticate to sign in."

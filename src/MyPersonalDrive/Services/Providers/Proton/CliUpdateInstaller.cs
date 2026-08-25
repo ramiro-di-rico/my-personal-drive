@@ -186,7 +186,7 @@ public sealed class CliUpdateInstaller
 }
 
 /// <summary>
-/// A refused or failed CLI update. Separate from <see cref="CliException"/>, which means "a
+/// A refused or failed CLI update. Separate from <see cref="DriveException"/>, which means "a
 /// `proton-drive` process failed" — nothing here involves running the CLI.
 /// </summary>
 public sealed class CliUpdateException(string message) : InvalidOperationException(message);

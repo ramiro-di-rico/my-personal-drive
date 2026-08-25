@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
@@ -116,7 +117,7 @@ public class MainWindowCliUpdateTests : IDisposable
     public async Task WhenTheInstalledVersionCannotBeRead_NoUpdateIsOffered()
     {
         var (viewModel, executor, _) = Build(new FakeCliReleaseFeed(Stable070));
-        executor.EnqueueFailure(new CliException("--version", 1, string.Empty, "unknown flag", "unknown flag: --version"));
+        executor.EnqueueFailure(new DriveException("--version", 1, string.Empty, "unknown flag", "unknown flag: --version"));
 
         await viewModel.CheckForCliUpdateCommand.ExecuteAsync();
 

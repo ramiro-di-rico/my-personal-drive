@@ -1,5 +1,4 @@
 using MyPersonalDrive.Models;
-using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Providers;
 
 namespace MyPersonalDrive.Services.Providers.Proton;
@@ -17,9 +16,12 @@ public sealed class ProtonDriveProvider : ICloudDriveProvider, IDriveOperations,
     public ProtonDriveProvider(ProtonDriveService service)
     {
         _service = service;
-        _service.CommandStarted += (_, args) => CommandStarted?.Invoke(this, args);
-        _service.CommandOutput += (_, args) => CommandOutput?.Invoke(this, args);
-        _service.CommandFinished += (_, args) => CommandFinished?.Invoke(this, args);
+        _service.CommandStarted += (_, args) =>
+            Activity?.Invoke(this, new ProviderActivity(ActivityKind.Started, args.CommandText, Text: null, IsError: false, ExitCode: null, Duration: null));
+        _service.CommandOutput += (_, args) =>
+            Activity?.Invoke(this, new ProviderActivity(ActivityKind.Output, Label: null, args.Text, args.IsError, ExitCode: null, Duration: null));
+        _service.CommandFinished += (_, args) =>
+            Activity?.Invoke(this, new ProviderActivity(ActivityKind.Finished, args.CommandText, Text: null, IsError: !args.Succeeded, args.ExitCode, Duration: null));
         _service.ListingParseWarning += (_, warning) => ListingParseWarning?.Invoke(this, warning);
     }
 
@@ -55,9 +57,7 @@ public sealed class ProtonDriveProvider : ICloudDriveProvider, IDriveOperations,
 
     public IProviderDiagnostics? Diagnostics => this;
 
-    public event EventHandler<CliCommandStartedEventArgs>? CommandStarted;
-    public event EventHandler<CliCommandOutputEventArgs>? CommandOutput;
-    public event EventHandler<CliCommandFinishedEventArgs>? CommandFinished;
+    public event EventHandler<ProviderActivity>? Activity;
     public event EventHandler<string>? ListingParseWarning;
 
     Task<IReadOnlyList<DriveItem>> IDriveOperations.ListFolderAsync(string path, CancellationToken cancellationToken)

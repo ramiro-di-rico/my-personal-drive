@@ -346,8 +346,8 @@ public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutCts is { IsCancellationRequested: true })
         {
             CommandFinished?.Invoke(this, new CliCommandFinishedEventArgs(commandText, -1));
-            throw new CliException(commandText, -1, stdout.ToString(), stderr.ToString(),
-                $"Command timed out after {timeout ?? DefaultTimeout}.", CliErrorKind.Timeout);
+            throw new DriveException(commandText, -1, stdout.ToString(), stderr.ToString(),
+                $"Command timed out after {timeout ?? DefaultTimeout}.", DriveErrorKind.Timeout);
         }
 
         if (process.ExitCode != 0)
@@ -360,7 +360,7 @@ public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
             var errorText = HasContent(stderrText) ? stderrText : stdoutText;
             var kind = CliErrorClassifier.Classify(process.ExitCode, stdoutText, stderrText);
             CommandFinished?.Invoke(this, new CliCommandFinishedEventArgs(commandText, process.ExitCode));
-            throw new CliException(
+            throw new DriveException(
                 commandText,
                 process.ExitCode,
                 stdoutText,

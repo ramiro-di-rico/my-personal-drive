@@ -35,6 +35,19 @@ public sealed class AppSettingsService
         }
     }
 
+    /// <summary>
+    /// Read-modify-write of the whole settings file. Callers that only know about one field must
+    /// use this instead of <see cref="Save"/> with a fresh <see cref="AppSettings"/>: constructing
+    /// a new instance silently resets every field the caller doesn't know about, so persisting the
+    /// CLI path used to wipe the view mode.
+    /// </summary>
+    public void Update(Action<AppSettings> mutate)
+    {
+        var settings = Load();
+        mutate(settings);
+        Save(settings);
+    }
+
     public void Save(AppSettings settings)
     {
         try

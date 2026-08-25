@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:MyPersonalDrive.ViewModels"
         xmlns:syncVm="clr-namespace:MyPersonalDrive.ViewModels.Sync"
+        xmlns:conv="clr-namespace:MyPersonalDrive.Views.Converters"
         x:Class="MyPersonalDrive.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="MyPersonalDrive"
@@ -45,6 +46,41 @@
     <Style Selector="Grid.hoverGroup.selected">
       <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
     </Style>
+
+    <!--
+      The listing is hosted in a ListBox for its panel and keyboard focus handling, but the row
+      chrome is entirely ours (.hoverGroup / .selected above, driven by the view model's own
+      selection). Flatten the ListBoxItem so the theme's padding and selection brush don't fight
+      that: without this, a selected row shows two overlapping highlights of different shapes.
+    -->
+    <Style Selector="ListBox.driveListing">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="ListBox.driveListing ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.driveListing ListBoxItem:selected /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <!-- Tile chrome, shared by the icons and gallery modes. -->
+    <Style Selector="Border.tile">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="8" />
+      <Setter Property="Margin" Value="4" />
+    </Style>
+    <Style Selector="Border.tile:pointerover">
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    </Style>
+    <Style Selector="Border.tile.selected">
+      <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+    </Style>
   </Window.Styles>
   <Grid RowDefinitions="Auto,Auto,*">
     <Border Grid.Row="0" Padding="16" Background="{DynamicResource PanelBackgroundBrush}">
@@ -80,7 +116,13 @@
 
     <!-- Explorer view: breadcrumbs, folder browser, status panel and CLI activity log. -->
     <Grid Grid.Row="2" RowDefinitions="Auto,*,Auto" IsVisible="{Binding !IsSettingsView}">
-      <Grid Grid.Row="0" Margin="16" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+      <Grid Grid.Row="0" Margin="16" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+        <Grid.Styles>
+          <Style Selector="Button.viewMode.active">
+            <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+          </Style>
+        </Grid.Styles>
         <Border Grid.Column="0" Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
           <ScrollViewer x:Name="BreadcrumbScroll"
                         HorizontalScrollBarVisibility="Auto"
@@ -112,12 +154,39 @@
         <Button Grid.Column="3" ToolTip.Tip="Upload files" Command="{Binding UploadCommand}">
           <Path Classes="icon" Data="{StaticResource IconUpload}" />
         </Button>
+
+        <!-- View mode: list / icons / gallery. Only the presentation changes; the listing and the
+             current selection are untouched (docs/PLAN-BROWSER-VIEWS.md V1). -->
+        <Button Grid.Column="4"
+                Classes="viewMode"
+                Classes.active="{Binding IsListView}"
+                ToolTip.Tip="Ver como lista"
+                Command="{Binding ShowListViewCommand}">
+          <Path Classes="icon" Data="{StaticResource IconViewList}" />
+        </Button>
+        <Button Grid.Column="5"
+                Classes="viewMode"
+                Classes.active="{Binding IsIconsView}"
+                ToolTip.Tip="Ver como iconos"
+                Command="{Binding ShowIconsViewCommand}">
+          <Path Classes="icon" Data="{StaticResource IconViewGrid}" />
+        </Button>
+        <Button Grid.Column="6"
+                Classes="viewMode"
+                Classes.active="{Binding IsGalleryView}"
+                ToolTip.Tip="Ver como galería"
+                Command="{Binding ShowGalleryViewCommand}">
+          <Path Classes="icon" Data="{StaticResource IconViewGallery}" />
+        </Button>
       </Grid>
 
       <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
         <Grid Grid.Column="0" Margin="16,0,16,16">
-          <TreeView ItemsSource="{Binding RootItems}">
-            <TreeView.ItemTemplate>
+          <!-- List mode: the original row, one per line, with the per-row actions inline. -->
+          <ListBox Classes="driveListing"
+                   ItemsSource="{Binding RootItems}"
+                   IsVisible="{Binding IsListView}">
+            <ListBox.ItemTemplate>
               <DataTemplate x:DataType="vm:DriveNodeViewModel">
                 <Grid Classes="hoverGroup"
                       Classes.selected="{Binding IsSelected}"
@@ -171,8 +240,120 @@
                   </Button>
                 </Grid>
               </DataTemplate>
-            </TreeView.ItemTemplate>
-          </TreeView>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <!-- Icons mode: a dense grid. The five row actions don't fit on a 112px tile, so they
+               move into a context menu bound to the same commands. WrapPanel does not virtualize
+               (docs/PLAN-BROWSER-VIEWS.md §3) - measure before assuming it's fine on huge folders. -->
+          <ListBox Classes="driveListing"
+                   ItemsSource="{Binding RootItems}"
+                   IsVisible="{Binding IsIconsView}">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <WrapPanel ItemWidth="112" ItemHeight="112" />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:DriveNodeViewModel">
+                <Border Classes="tile" Classes.selected="{Binding IsSelected}">
+                  <Border.ContextMenu>
+                    <ContextMenu>
+                      <MenuItem Header="Abrir / seleccionar" Command="{Binding RowCommand}" />
+                      <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
+                      <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
+                      <MenuItem Header="Descargar" Command="{Binding DownloadCommand}" IsVisible="{Binding IsFile}" />
+                      <MenuItem Header="Mover a la papelera" Command="{Binding TrashCommand}" IsVisible="{Binding IsFile}" />
+                    </ContextMenu>
+                  </Border.ContextMenu>
+                  <Button Command="{Binding RowCommand}"
+                          ToolTip.Tip="{Binding DisplayName}"
+                          Background="Transparent"
+                          BorderThickness="0"
+                          Padding="0"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          Focusable="False">
+                    <StackPanel Spacing="6" VerticalAlignment="Center">
+                      <Path Classes="icon"
+                            Width="32"
+                            Height="32"
+                            Stretch="Uniform"
+                            HorizontalAlignment="Center"
+                            Data="{Binding FileKind, Converter={x:Static conv:FileKindIconConverter.Instance}}" />
+                      <TextBlock Text="{Binding DisplayName}"
+                                 TextAlignment="Center"
+                                 TextWrapping="Wrap"
+                                 MaxLines="2"
+                                 TextTrimming="CharacterEllipsis"
+                                 FontSize="12" />
+                    </StackPanel>
+                  </Button>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <!-- Gallery mode: large tiles with a metadata line. Deliberately NOT image previews -
+               the CLI exposes no thumbnails, and generating them would mean downloading every file
+               (docs/PLAN-BROWSER-VIEWS.md §7). -->
+          <ListBox Classes="driveListing"
+                   ItemsSource="{Binding RootItems}"
+                   IsVisible="{Binding IsGalleryView}">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <WrapPanel ItemWidth="176" ItemHeight="200" />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:DriveNodeViewModel">
+                <Border Classes="tile" Classes.selected="{Binding IsSelected}">
+                  <Border.ContextMenu>
+                    <ContextMenu>
+                      <MenuItem Header="Abrir / seleccionar" Command="{Binding RowCommand}" />
+                      <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
+                      <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
+                      <MenuItem Header="Descargar" Command="{Binding DownloadCommand}" IsVisible="{Binding IsFile}" />
+                      <MenuItem Header="Mover a la papelera" Command="{Binding TrashCommand}" IsVisible="{Binding IsFile}" />
+                    </ContextMenu>
+                  </Border.ContextMenu>
+                  <Button Command="{Binding RowCommand}"
+                          ToolTip.Tip="{Binding DisplayName}"
+                          Background="Transparent"
+                          BorderThickness="0"
+                          Padding="0"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          Focusable="False">
+                    <StackPanel Spacing="10" VerticalAlignment="Center">
+                      <Border Background="{DynamicResource CardBackgroundBrush}"
+                              CornerRadius="6"
+                              Height="96"
+                              Padding="12">
+                        <Path Classes="icon"
+                              Width="64"
+                              Height="64"
+                              Stretch="Uniform"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              Data="{Binding FileKind, Converter={x:Static conv:FileKindIconConverter.Instance}}" />
+                      </Border>
+                      <TextBlock Text="{Binding DisplayName}"
+                                 TextAlignment="Center"
+                                 TextWrapping="Wrap"
+                                 MaxLines="2"
+                                 TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding SizeText}"
+                                 TextAlignment="Center"
+                                 Opacity="0.7"
+                                 FontSize="12"
+                                 IsVisible="{Binding SizeText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    </StackPanel>
+                  </Button>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
         </Grid>
 
         <Border Grid.Column="1" Margin="0,0,16,16" Padding="16" Width="340" Background="{DynamicResource CardBackgroundBrush}">

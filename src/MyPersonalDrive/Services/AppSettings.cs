@@ -13,4 +13,17 @@ public sealed class AppSettings
     /// which point the default should flip to true.
     /// </summary>
     public bool StrictListingParsing { get; set; }
+
+    /// <summary>
+    /// The folder listing's presentation, as the name of a <see cref="Models.DriveViewMode"/>.
+    /// Stored as a string on purpose: an enum-typed property changes the set of converters
+    /// <c>AppJsonContext</c> generates, and a value written by a newer version has to degrade to
+    /// the default rather than throw. Read it through <see cref="ViewModeOrDefault"/>.
+    /// </summary>
+    public string ViewMode { get; set; } = nameof(Models.DriveViewMode.List);
+
+    public Models.DriveViewMode ViewModeOrDefault()
+        => Enum.TryParse<Models.DriveViewMode>(ViewMode, ignoreCase: true, out var mode)
+            ? mode
+            : Models.DriveViewMode.List;
 }

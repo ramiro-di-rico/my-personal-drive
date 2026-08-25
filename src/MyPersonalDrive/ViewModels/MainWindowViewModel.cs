@@ -53,6 +53,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _selectedShared = "None";
     private bool _hasSelection;
     private bool _isSettingsView;
+    private DriveViewMode _viewMode = DriveViewMode.List;
     private const string UnknownCliVersion = "Unknown";
     private string _cliVersion = UnknownCliVersion;
     private bool _isCheckingCliVersion;
@@ -89,6 +90,9 @@ public sealed class MainWindowViewModel : ObservableObject
         var appSettings = settings.Load();
         _cliPath = appSettings.CliPath;
         _isAuthenticated = appSettings.IsAuthenticated;
+        // Set through the field, not the property: the property persists, and the constructor has
+        // no business writing settings.json back on every launch.
+        _viewMode = appSettings.ViewModeOrDefault();
         _service.CommandStarted += OnCommandStarted;
         _service.CommandOutput += OnCommandOutput;
         _service.CommandFinished += OnCommandFinished;
@@ -108,6 +112,9 @@ public sealed class MainWindowViewModel : ObservableObject
         DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity, HandleUnexpectedError);
         ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, HandleUnexpectedError);
         ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
+        ShowListViewCommand = new AsyncCommand(() => SetViewModeAsync(DriveViewMode.List), onError: HandleUnexpectedError);
+        ShowIconsViewCommand = new AsyncCommand(() => SetViewModeAsync(DriveViewMode.Icons), onError: HandleUnexpectedError);
+        ShowGalleryViewCommand = new AsyncCommand(() => SetViewModeAsync(DriveViewMode.Gallery), onError: HandleUnexpectedError);
         ShowSettingsCommand = new AsyncCommand(ShowSettingsAsync, onError: HandleUnexpectedError);
         CheckCliVersionCommand = new AsyncCommand(CheckCliVersionAsync, CanCheckCliVersion, HandleUnexpectedError);
         CheckForCliUpdateCommand = new AsyncCommand(CheckForCliUpdateAsync, CanCheckForCliUpdate, HandleUnexpectedError);
@@ -127,6 +134,12 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand RefreshCommand { get; }
 
     public AsyncCommand BackCommand { get; }
+
+    public AsyncCommand ShowListViewCommand { get; }
+
+    public AsyncCommand ShowIconsViewCommand { get; }
+
+    public AsyncCommand ShowGalleryViewCommand { get; }
 
     public AsyncCommand UploadCommand { get; }
 
@@ -205,6 +218,37 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         }
     }
+
+    /// <summary>
+    /// The listing's presentation. Changing it does not touch <see cref="RootItems"/> — the row
+    /// view models are presentation-independent, so only the items control's panel and template
+    /// change, and the current selection survives a mode switch.
+    /// </summary>
+    public DriveViewMode ViewMode
+    {
+        get => _viewMode;
+        private set
+        {
+            if (!SetProperty(ref _viewMode, value))
+            {
+                return;
+            }
+
+            // Spelled out as booleans rather than bound through an enum converter: compiled
+            // bindings need a resolvable type, and the repo keeps derived view state on the
+            // view model (see SelectedKind, CommandConsoleToggleGlyph).
+            OnPropertyChanged(nameof(IsListView));
+            OnPropertyChanged(nameof(IsIconsView));
+            OnPropertyChanged(nameof(IsGalleryView));
+            PersistSettings();
+        }
+    }
+
+    public bool IsListView => ViewMode == DriveViewMode.List;
+
+    public bool IsIconsView => ViewMode == DriveViewMode.Icons;
+
+    public bool IsGalleryView => ViewMode == DriveViewMode.Gallery;
 
     /// <summary>
     /// Which of the two top-level views is on screen. The explorer (folder browser) and the
@@ -1063,10 +1107,11 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void PersistSettings()
     {
-        _settings.Save(new AppSettings
+        _settings.Update(settings =>
         {
-            CliPath = CliPath,
-            IsAuthenticated = IsAuthenticated
+            settings.CliPath = CliPath;
+            settings.IsAuthenticated = IsAuthenticated;
+            settings.ViewMode = ViewMode.ToString();
         });
     }
 
@@ -1088,6 +1133,12 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task ToggleCommandConsoleAsync()
     {
         IsCommandConsoleVisible = !IsCommandConsoleVisible;
+        await Task.CompletedTask;
+    }
+
+    private async Task SetViewModeAsync(DriveViewMode mode)
+    {
+        ViewMode = mode;
         await Task.CompletedTask;
     }
 

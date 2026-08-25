@@ -1,4 +1,5 @@
 using MyPersonalDrive.Models;
+using MyPersonalDrive.Services;
 
 namespace MyPersonalDrive.ViewModels;
 
@@ -14,6 +15,7 @@ public sealed class DriveNodeViewModel : ObservableObject
     public DriveNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Func<DriveItem, Task> downloadItemAsync, Func<DriveItem, Task> trashItemAsync, Func<DriveItem, Task> renameItemAsync, Func<DriveItem, Task> copyItemAsync, Action<Exception>? onError = null)
     {
         Item = item;
+        FileKind = FileKindClassifier.Classify(item.Name, item.IsFolder);
         _handleRowClickAsync = handleRowClickAsync;
         _downloadItemAsync = downloadItemAsync;
         _trashItemAsync = trashItemAsync;
@@ -43,6 +45,13 @@ public sealed class DriveNodeViewModel : ObservableObject
     public string Path => Item.Path;
 
     public string Kind => Item.IsFolder ? "Folder" : "File";
+
+    /// <summary>
+    /// What the row is, for the icon the item templates draw (via
+    /// <c>Views.Converters.FileKindIconConverter</c>) and for the metrics histogram. Computed once
+    /// per row: the classifier is pure, but the listing rebuilds every row on each refresh.
+    /// </summary>
+    public FileKind FileKind { get; }
 
     public string? SizeText => Item.Size is null ? null : $"{Item.Size:n0} bytes";
 

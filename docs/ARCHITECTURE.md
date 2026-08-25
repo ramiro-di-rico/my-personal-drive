@@ -27,6 +27,11 @@ Synchronization with a local directory is **present** as of commit `87e91d6`: sy
 (download-only, upload-only, or two-way) that run on their own, with the on/off choice persisted
 across restarts. See [PLAN-LOCAL-SYNC.md](PLAN-LOCAL-SYNC.md) for the design.
 
+Proton is currently the only supported provider, but the app no longer talks to
+`ProtonDriveService` directly anywhere outside `Services/Providers/Proton/` — every consumer goes
+through `ICloudDriveProvider` (§4, §5). See [PLAN-CLOUD-PROVIDERS.md](PLAN-CLOUD-PROVIDERS.md) for
+the seam and the plan to add Microsoft OneDrive as a second provider.
+
 ---
 
 ## 2. Stack and dependencies
@@ -62,12 +67,18 @@ src/MyPersonalDrive/
     DriveItem.cs                   # immutable record of a drive node
     UploadConflictStrategy.cs      # enum None|KeepBoth|Replace|Skip
   Services/
-    IProtonDriveCliLocator.cs      # resolves the executable path
-    ProtonDriveCliLocator.cs
-    IProtonDriveCliExecutor.cs     # launches the process and emits events
-    ProtonDriveCliExecutor.cs
-    CliCommandEventArgs.cs         # Started / Output / Finished
-    ProtonDriveService.cs          # translates domain operations -> CLI args + parsing
+    CliCommandEventArgs.cs         # Started / Output / Finished (Proton-shaped; see §5)
+    CliException.cs / CliErrorKind.cs
+    Providers/
+      ICloudDriveProvider.cs       # the facade every consumer talks to (see §5)
+      IDriveOperations.cs / IDriveAuthenticator.cs / IRemoteViewInvalidator.cs / IProviderDiagnostics.cs
+      ProviderCapabilities.cs / ProviderId.cs
+      Proton/
+        ProtonDriveProvider.cs     # adapts ProtonDriveService to ICloudDriveProvider
+        ProtonDriveService.cs      # translates domain operations -> CLI args + parsing
+        ProtonDriveCliLocator.cs / IProtonDriveCliLocator.cs
+        ProtonDriveCliExecutor.cs / IProtonDriveCliExecutor.cs
+        CliErrorClassifier.cs, CliReleaseFeed.cs, CliUpdateInstaller.cs, CliPlatformKey.cs, CliVersionComparer.cs
     DriveCacheService.cs           # SQLite cache of listings
     AppSettings.cs / AppSettingsService.cs / AppJsonContext.cs
   ViewModels/
@@ -89,24 +100,41 @@ There is no test project. There is no DI container: the object graph is wired by
 
 ## 4. Composition root
 
-[`App.axaml.cs:107`](../src/MyPersonalDrive/App.axaml.cs) — all the wiring in a single method:
+[`App.axaml.cs`](../src/MyPersonalDrive/App.axaml.cs) — all the wiring in a single method. As of
+the provider seam (docs/PLAN-CLOUD-PROVIDERS.md P1), the CLI chain is wrapped in a
+`ProtonDriveProvider` and everything below the composition root depends on `ICloudDriveProvider`,
+never on `ProtonDriveService` directly:
 
 ```
-AppSettingsService  ──► ProtonDriveCliLocator ──► ProtonDriveCliExecutor ──► ProtonDriveService ─┐
-AppSettingsService.BaseFolder/cache.db ──► DriveCacheService ────────────────────────────────────┼─► MainWindowViewModel
-AppSettingsService ──────────────────────────────────────────────────────────────────────────────┘
-                                                                          └─► MainWindow.DataContext
+AppSettingsService  ──► ProtonDriveCliLocator ──► ProtonDriveCliExecutor ──► ProtonDriveService ──► ProtonDriveProvider ─┐
+AppSettingsService.BaseFolder/cache.db ──► DriveCacheService ────────────────────────────────────────────────────────────┼─► MainWindowViewModel
+AppSettingsService ──────────────────────────────────────────────────────────────────────────────────────────────────────┘
+                                                                                                    └─► MainWindow.DataContext
 ```
+
+`SyncExecutor`, `RemoteScanner`, `FolderStatsScanner` and `SyncPanelViewModel`'s
+`GetRemoteFolderChildren` delegate are all built from `provider`/`provider.Operations`, not from
+the Proton-specific types. Only Proton exists today, so `provider` is always a
+`ProtonDriveProvider`; adding a second backend means a second branch in the composition root that
+picks which one to build, not a change to any of those consumers. See
+docs/PLAN-CLOUD-PROVIDERS.md for the full plan (including the still-open work: errors and the
+console are still Proton-shaped, path syntax and content hashing are still hard-coded to Proton's
+rules, and nothing persisted is account-scoped yet).
 
 Nothing is a container singleton; they're single instances created by hand.
 
 ---
 
-## 5. CLI execution layer
+## 5. The Proton provider (CLI execution layer)
+
+Everything in this section lives under `Services/Providers/Proton/` and is reached only through
+`ICloudDriveProvider` (§4) — nothing outside that folder should name these types directly except
+the composition root and the doc-flagged P3 follow-ups in `RemoteScanner`/`MainWindowViewModel`
+(path-syntax calls not yet behind an interface).
 
 ### 5.1 `ProtonDriveCliLocator`
 
-Resolution order ([`ProtonDriveCliLocator.cs:31`](../src/MyPersonalDrive/Services/ProtonDriveCliLocator.cs)):
+Resolution order ([`ProtonDriveCliLocator.cs:31`](../src/MyPersonalDrive/Services/Providers/Proton/ProtonDriveCliLocator.cs)):
 
 1. `settings.CliPath` if the file exists.
 2. Sweep of `$PATH` looking for `proton-drive` (on Windows, cross-referenced with `PATHEXT`).
@@ -118,7 +146,7 @@ effect immediately.
 
 ### 5.2 `ProtonDriveCliExecutor`
 
-[`ProtonDriveCliExecutor.cs:428`](../src/MyPersonalDrive/Services/ProtonDriveCliExecutor.cs) —
+[`ProtonDriveCliExecutor.cs`](../src/MyPersonalDrive/Services/Providers/Proton/ProtonDriveCliExecutor.cs) —
 `ExecuteAsync(arguments, ct)`:
 
 - `ProcessStartInfo` with `UseShellExecute=false`, `CreateNoWindow=true`, stdout+stderr redirected.
@@ -139,7 +167,7 @@ Known limitations of this layer:
 
 ### 5.3 `ProtonDriveService`
 
-[`ProtonDriveService.cs`](../src/MyPersonalDrive/Services/ProtonDriveService.cs) — maps each
+[`ProtonDriveService.cs`](../src/MyPersonalDrive/Services/Providers/Proton/ProtonDriveService.cs) — maps each
 operation to a command line. **This is the catalog of what's currently known about the CLI:**
 
 | Method | Command emitted |
@@ -370,10 +398,10 @@ Drive API.
 
 | Piece | Role |
 |---|---|
-| [`CliReleaseFeed`](../src/MyPersonalDrive/Services/CliReleaseFeed.cs) | GETs `https://proton.me/download/drive/cli/version.json`, picks the `Stable` release and the file for this platform |
-| [`CliPlatformKey`](../src/MyPersonalDrive/Services/CliPlatformKey.cs) | Maps the running machine to the manifest's platform key, **including the glibc/musl split** |
-| [`CliVersionComparer`](../src/MyPersonalDrive/Services/CliVersionComparer.cs) | Lifts `0.6.0` out of `cli-drive@0.6.0+f8e16aac` and compares it with the manifest's bare `0.7.0` |
-| [`CliUpdateInstaller`](../src/MyPersonalDrive/Services/CliUpdateInstaller.cs) | Downloads, verifies SHA-512, then atomically replaces the executable |
+| [`CliReleaseFeed`](../src/MyPersonalDrive/Services/Providers/Proton/CliReleaseFeed.cs) | GETs `https://proton.me/download/drive/cli/version.json`, picks the `Stable` release and the file for this platform |
+| [`CliPlatformKey`](../src/MyPersonalDrive/Services/Providers/Proton/CliPlatformKey.cs) | Maps the running machine to the manifest's platform key, **including the glibc/musl split** |
+| [`CliVersionComparer`](../src/MyPersonalDrive/Services/Providers/Proton/CliVersionComparer.cs) | Lifts `0.6.0` out of `cli-drive@0.6.0+f8e16aac` and compares it with the manifest's bare `0.7.0` |
+| [`CliUpdateInstaller`](../src/MyPersonalDrive/Services/Providers/Proton/CliUpdateInstaller.cs) | Downloads, verifies SHA-512, then atomically replaces the executable |
 
 The manifest is the same source of truth as the human download page — the SHA-512 values match.
 `CliReleaseManifest`'s PascalCase property names are the manifest's own and are registered in

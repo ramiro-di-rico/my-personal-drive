@@ -1,4 +1,5 @@
 using MyPersonalDrive.Models;
+using MyPersonalDrive.Services.Providers;
 
 namespace MyPersonalDrive.Services;
 
@@ -23,9 +24,9 @@ public sealed class FolderStatsScanner
     private readonly RemoteTreeWalker _walker;
     private readonly TimeProvider _timeProvider;
 
-    public FolderStatsScanner(ProtonDriveService service, TimeProvider? timeProvider = null, int maxConcurrency = 0)
+    public FolderStatsScanner(ICloudDriveProvider provider, TimeProvider? timeProvider = null, int maxConcurrency = 0)
     {
-        _walker = new RemoteTreeWalker(service, maxConcurrency);
+        _walker = new RemoteTreeWalker(provider, maxConcurrency);
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 

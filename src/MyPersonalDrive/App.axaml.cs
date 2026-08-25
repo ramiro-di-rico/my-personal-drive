@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.ViewModels;
 using MyPersonalDrive.ViewModels.Sync;
@@ -21,6 +22,9 @@ public partial class App : Application
             var locator = new ProtonDriveCliLocator(settings);
             var executor = new ProtonDriveCliExecutor(locator);
             var service = new ProtonDriveService(executor, settings.Load().StrictListingParsing);
+            // The one active provider (docs/PLAN-CLOUD-PROVIDERS.md P1); everything below talks to
+            // it through ICloudDriveProvider, never to ProtonDriveService directly.
+            var provider = new ProtonDriveProvider(service);
             var cacheService = new DriveCacheService(Path.Combine(settings.BaseFolder, "cache.db"));
 
             // Same underlying cache.db as cacheService above; SyncStateStore applies the same
@@ -30,22 +34,22 @@ public partial class App : Application
             // and the scheduler's watchers (which consult it). Two instances would defeat it —
             // see docs/PLAN-LOCAL-SYNC.md §9.
             var echoSuppressor = new SyncEchoSuppressor();
-            var syncExecutor = new SyncExecutor(service, syncStateStore, new LocalScanner(), new RemoteScanner(service), echoSuppressor: echoSuppressor);
+            var syncExecutor = new SyncExecutor(provider.Operations, syncStateStore, new LocalScanner(), new RemoteScanner(provider), echoSuppressor: echoSuppressor);
             var syncScheduler = new SyncScheduler(
                 syncStateStore, syncExecutor, echoSuppressor,
                 isAuthenticated: () => settings.Load().IsAuthenticated);
             var syncPanelViewModel = new SyncPanelViewModel(syncStateStore, syncExecutor, new SyncCrashRecovery(syncStateStore), syncScheduler)
             {
-                GetRemoteFolderChildren = service.GetChildrenAsync,
+                GetRemoteFolderChildren = provider.Operations.ListFolderAsync,
             };
 
             // Same cache.db again, same shared migrations - see the note above.
             var metricsStore = new FolderMetricsStore(Path.Combine(settings.BaseFolder, "cache.db"));
 
             var mainWindowViewModel = new MainWindowViewModel(
-                service, cacheService, settings, syncPanelViewModel, releaseFeed: new CliReleaseFeed(),
+                provider, cacheService, settings, syncPanelViewModel, releaseFeed: new CliReleaseFeed(),
                 metricsStore: metricsStore,
-                statsScanner: new FolderStatsScanner(service));
+                statsScanner: new FolderStatsScanner(provider));
 
             desktop.MainWindow = new MainWindow
             {

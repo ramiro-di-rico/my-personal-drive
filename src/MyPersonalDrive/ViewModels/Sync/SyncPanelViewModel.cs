@@ -86,7 +86,7 @@ public sealed class SyncPanelViewModel : ObservableObject
 
     /// <summary>
     /// Lists a remote folder's children, for the "Add pair" dialog's remote folder picker.
-    /// Wired to <see cref="Services.ProtonDriveService.GetChildrenAsync"/>; left null disables
+    /// Wired to <see cref="Services.Providers.IDriveOperations.ListFolderAsync"/>; left null disables
     /// the picker button (the dialog falls back to typing the path by hand).
     /// </summary>
     public Func<string, CancellationToken, Task<IReadOnlyList<DriveItem>>>? GetRemoteFolderChildren { get; set; }

@@ -1,4 +1,6 @@
-namespace MyPersonalDrive.Services;
+using MyPersonalDrive.Services;
+
+namespace MyPersonalDrive.Services.Providers.Proton;
 
 public interface IProtonDriveCliExecutor
 {

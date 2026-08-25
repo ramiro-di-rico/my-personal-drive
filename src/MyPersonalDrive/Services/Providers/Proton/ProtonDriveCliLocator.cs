@@ -1,4 +1,6 @@
-namespace MyPersonalDrive.Services;
+using MyPersonalDrive.Services;
+
+namespace MyPersonalDrive.Services.Providers.Proton;
 
 public sealed class ProtonDriveCliLocator : IProtonDriveCliLocator
 {

@@ -1,4 +1,5 @@
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using Xunit;
 
 namespace MyPersonalDrive.Tests.Integration;

@@ -24,7 +24,26 @@
 
 ## Status
 
-- [ ] **P1** — provider interfaces + `ProtonDriveProvider` adapter, mechanical call-site swap. Not started.
+- [x] **P1 — provider interfaces + `ProtonDriveProvider` adapter, mechanical call-site swap.**
+      `Services/Providers/{ICloudDriveProvider,IDriveOperations,IDriveAuthenticator,IRemoteViewInvalidator,IProviderDiagnostics,ProviderCapabilities,ProviderId}.cs`
+      added; `ProtonDriveService`, `ProtonDriveCliExecutor`, `ProtonDriveCliLocator`,
+      `CliErrorClassifier`, `CliReleaseFeed`, `CliUpdateInstaller`, `CliPlatformKey`,
+      `CliVersionComparer` (+ their interfaces) moved to `Services/Providers/Proton/` with a
+      `ProtonDriveProvider` adapter alongside them. `App.axaml.cs`, `SyncExecutor`,
+      `SyncBaselineWriter`, `RemoteScanner`, `RemoteTreeWalker`, `FolderStatsScanner` and
+      `MainWindowViewModel` now depend on `ICloudDriveProvider`/`IDriveOperations` instead of
+      `ProtonDriveService`. Two deliberate deviations from §2 as originally written, kept minimal
+      on purpose: `IDriveAuthenticator` ships as `AuthenticateAsync`/`LogoutAsync` only (the
+      richer `AuthStatus`/`IAuthPrompt` shape is deferred to P6, when OneDrive's OAuth flow
+      actually needs it); `IProviderPathSyntax` and the `ProviderActivity`/`DriveException`
+      rename were **not** done — `HasUnmappableName`/`CombinePath` are still called as
+      `Providers.Proton.ProtonDriveService` statics (flagged inline in `RemoteScanner` and
+      `MainWindowViewModel`, and in Appendix B), and the console events keep today's
+      `Cli*EventArgs` shape on `ICloudDriveProvider` — both are explicitly P2/P3's job, not P1's.
+      `CliException`/`CliErrorKind`/`CliCommandEventArgs` were left in `Services/` unmoved for the
+      same reason. Verified: `./scripts/run-tests.sh` green (561 passed, 5 skipped-integration),
+      `dotnet publish -r linux-x64` AOT-clean (no IL2xxx/IL3xxx), and the published binary runs
+      against a stub CLI with no crash.log. Landed on branch `feature/cloud-providers-seam`.
 - [ ] **P2** — generalize the error and activity (console) contract off the CLI. Not started.
 - [ ] **P3** — per-provider path syntax and content-hash algorithm. Not started.
 - [ ] **P4** — account-scope the persisted state (`cache.db` migration 6). Not started.

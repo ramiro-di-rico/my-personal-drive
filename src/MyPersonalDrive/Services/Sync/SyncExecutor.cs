@@ -1,4 +1,5 @@
 using MyPersonalDrive.Models;
+using MyPersonalDrive.Services.Providers;
 
 namespace MyPersonalDrive.Services.Sync;
 
@@ -25,7 +26,7 @@ public sealed class SyncExecutor
     private static readonly TimeSpan LogRetention = TimeSpan.FromDays(30);
     private const int MaxLogEntriesPerPair = 1000;
 
-    private readonly ProtonDriveService _protonDriveService;
+    private readonly IDriveOperations _operations;
     private readonly SyncStateStore _stateStore;
     private readonly ILocalScanner _localScanner;
     private readonly IRemoteScanner _remoteScanner;
@@ -33,14 +34,14 @@ public sealed class SyncExecutor
     private readonly SyncEchoSuppressor _echoSuppressor;
 
     public SyncExecutor(
-        ProtonDriveService protonDriveService,
+        IDriveOperations operations,
         SyncStateStore stateStore,
         ILocalScanner localScanner,
         IRemoteScanner remoteScanner,
         TimeProvider? timeProvider = null,
         SyncEchoSuppressor? echoSuppressor = null)
     {
-        _protonDriveService = protonDriveService;
+        _operations = operations;
         _stateStore = stateStore;
         _localScanner = localScanner;
         _remoteScanner = remoteScanner;
@@ -116,7 +117,7 @@ public sealed class SyncExecutor
         await _stateStore.EnqueueConflictsAsync(pair.Id, unresolved, now, cancellationToken);
 
         var context = new RunContext(pair, mapper, local, remote,
-            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_protonDriveService, _stateStore, mapper, pair.Id) : null);
+            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_operations, _stateStore, mapper, pair.Id) : null);
         context.Baseline?.SeedFromScan(remote);
 
         var (failureCount, aborted) = await DrainQueueAsync(context, cancellationToken);
@@ -260,7 +261,7 @@ public sealed class SyncExecutor
 
         try
         {
-            foreach (var item in await _protonDriveService.LoadFolderAsync(mapper.ToRemoteAbsolute(parent), cancellationToken))
+            foreach (var item in await _operations.ListFolderAsync(mapper.ToRemoteAbsolute(parent), cancellationToken))
             {
                 var relativePath = parent.Length == 0 ? item.Name : $"{parent}/{item.Name}";
                 remote[relativePath] = new NodeFingerprint(relativePath, item.IsFolder, item.Size, item.ModifiedAt, item.NodeId, item.ContentHash);
@@ -272,7 +273,7 @@ public sealed class SyncExecutor
         }
 
         var context = new RunContext(pair, mapper, new Dictionary<string, NodeFingerprint>(), remote,
-            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_protonDriveService, _stateStore, mapper, pair.Id) : null);
+            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_operations, _stateStore, mapper, pair.Id) : null);
         context.Baseline?.SeedFromScan(remote);
 
         var now = _timeProvider.GetUtcNow();
@@ -468,7 +469,7 @@ public sealed class SyncExecutor
                 return;
 
             case SyncOperation.TrashRemote:
-                await _protonDriveService.TrashItemAsync(context.Mapper.ToRemoteAbsolute(action.RelativePath), cancellationToken);
+                await _operations.TrashItemAsync(context.Mapper.ToRemoteAbsolute(action.RelativePath), cancellationToken);
                 context.Baseline?.InvalidateRemoteFolder(ParentOf(action.RelativePath));
                 _echoSuppressor.SuppressDeletion(context.Pair.Id, SyncSide.Remote, action.RelativePath);
                 await ClearBaselineAsync(context, action.RelativePath, cancellationToken);
@@ -544,7 +545,7 @@ public sealed class SyncExecutor
 
         try
         {
-            await _protonDriveService.CreateFolderAsync(context.Mapper.ToRemoteAbsolute(parent), name, cancellationToken);
+            await _operations.CreateFolderAsync(context.Mapper.ToRemoteAbsolute(parent), name, cancellationToken);
         }
         catch (CliException ex) when (ex.Kind == CliErrorKind.AlreadyExists)
         {
@@ -571,7 +572,7 @@ public sealed class SyncExecutor
             throw new FileNotFoundException($"'{relativePath}' disappeared locally before it could be uploaded.", localAbsolutePath);
         }
 
-        await _protonDriveService.UploadFilesAsync([localAbsolutePath], context.Mapper.ToRemoteAbsolute(parent),
+        await _operations.UploadFilesAsync([localAbsolutePath], context.Mapper.ToRemoteAbsolute(parent),
             UploadConflictStrategy.Replace, cancellationToken);
         context.Baseline?.InvalidateRemoteFolder(parent);
     }
@@ -686,7 +687,7 @@ public sealed class SyncExecutor
 
         if (!string.Equals(oldParent, newParent, StringComparison.Ordinal))
         {
-            await _protonDriveService.MoveItemAsync(currentRemotePath, context.Mapper.ToRemoteAbsolute(newParent), cancellationToken);
+            await _operations.MoveItemAsync(currentRemotePath, context.Mapper.ToRemoteAbsolute(newParent), cancellationToken);
             // It now lives in the new folder, still under the old name.
             currentRemotePath = context.Mapper.ToRemoteAbsolute(newParent.Length == 0 ? oldName : $"{newParent}/{oldName}");
             context.Baseline?.InvalidateRemoteFolder(oldParent);
@@ -695,7 +696,7 @@ public sealed class SyncExecutor
 
         if (!string.Equals(oldName, newName, StringComparison.Ordinal))
         {
-            await _protonDriveService.RenameItemAsync(currentRemotePath, newName, cancellationToken);
+            await _operations.RenameItemAsync(currentRemotePath, newName, cancellationToken);
             context.Baseline?.InvalidateRemoteFolder(newParent);
         }
 
@@ -734,7 +735,7 @@ public sealed class SyncExecutor
         Directory.CreateDirectory(tempDirectory);
         try
         {
-            await _protonDriveService.DownloadFileAsync(context.Mapper.ToRemoteAbsolute(relativePath), tempDirectory, cancellationToken);
+            await _operations.DownloadFileAsync(context.Mapper.ToRemoteAbsolute(relativePath), tempDirectory, cancellationToken);
 
             var fileName = Path.GetFileName(localAbsolutePath);
             var downloadedPath = Path.Combine(tempDirectory, fileName);

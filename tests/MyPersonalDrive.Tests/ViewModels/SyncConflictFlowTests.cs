@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
 using MyPersonalDrive.ViewModels.Sync;
@@ -61,7 +62,8 @@ public class SyncConflictFlowTests : IDisposable
 
         var store = new SyncStateStore(_dbPath);
         var service = new ProtonDriveService(cli);
-        var executor = new SyncExecutor(service, store, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var executor = new SyncExecutor(provider.Operations, store, new LocalScanner(), new RemoteScanner(provider));
         await store.CreatePairAsync(RemoteRoot, _localRoot, SyncDirection.TwoWay, ConflictPolicy.Ask);
 
         var panel = new SyncPanelViewModel(store, executor, new SyncCrashRecovery(store));

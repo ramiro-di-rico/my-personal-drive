@@ -1,4 +1,5 @@
 using MyPersonalDrive.Models;
+using MyPersonalDrive.Services.Providers;
 
 namespace MyPersonalDrive.Services.Sync;
 
@@ -16,16 +17,16 @@ namespace MyPersonalDrive.Services.Sync;
 /// </summary>
 public sealed class SyncBaselineWriter
 {
-    private readonly ProtonDriveService _protonDriveService;
+    private readonly IDriveOperations _operations;
     private readonly SyncStateStore _stateStore;
     private readonly PathMapper _mapper;
     private readonly int _pairId;
     private readonly Dictionary<string, Dictionary<string, DriveItem>> _remoteFolderCache = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Dictionary<string, NodeFingerprint>> _seededRemote = new(StringComparer.Ordinal);
 
-    public SyncBaselineWriter(ProtonDriveService protonDriveService, SyncStateStore stateStore, PathMapper mapper, int pairId)
+    public SyncBaselineWriter(IDriveOperations operations, SyncStateStore stateStore, PathMapper mapper, int pairId)
     {
-        _protonDriveService = protonDriveService;
+        _operations = operations;
         _stateStore = stateStore;
         _mapper = mapper;
         _pairId = pairId;
@@ -143,7 +144,7 @@ public sealed class SyncBaselineWriter
             bucket = new Dictionary<string, DriveItem>(StringComparer.Ordinal);
             try
             {
-                foreach (var item in await _protonDriveService.LoadFolderAsync(parentRemoteAbsolute, cancellationToken))
+                foreach (var item in await _operations.ListFolderAsync(parentRemoteAbsolute, cancellationToken))
                 {
                     bucket[item.Name] = item;
                 }

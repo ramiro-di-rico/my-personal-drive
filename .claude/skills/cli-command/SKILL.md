@@ -6,7 +6,7 @@ description: Add or change a Proton Drive CLI command end-to-end (ProtonDriveSer
 # Add a Proton Drive CLI command
 
 The app never talks to Proton's API. Every remote operation is a `proton-drive` process whose
-stdout is parsed. That boundary is `src/MyPersonalDrive/Services/` and it has a fixed shape —
+stdout is parsed. That boundary is `src/MyPersonalDrive/Services/Providers/Proton/` (behind `ICloudDriveProvider`, see docs/PLAN-CLOUD-PROVIDERS.md) and it has a fixed shape —
 follow it, don't invent a parallel path.
 
 ## Before writing code
@@ -24,7 +24,7 @@ follow it, don't invent a parallel path.
 
 ## Steps
 
-1. **Add the method to `ProtonDriveService`** (`src/MyPersonalDrive/Services/ProtonDriveService.cs`).
+1. **Add the method to `ProtonDriveService`** (`src/MyPersonalDrive/Services/Providers/Proton/ProtonDriveService.cs`).
    - Build `IReadOnlyList<string>` arguments and pass them to `_executor.ExecuteAsync`.
      One element per process argument — `ProcessStartInfo.ArgumentList` handles escaping.
      **Never** concatenate into a pre-quoted string; it cannot round-trip names with quotes
@@ -48,7 +48,7 @@ follow it, don't invent a parallel path.
      no alias guessing.
 
 3. **Classify new failure modes** in `CliErrorClassifier`
-   (`src/MyPersonalDrive/Services/CliErrorClassifier.cs`).
+   (`src/MyPersonalDrive/Services/Providers/Proton/CliErrorClassifier.cs`).
    - The CLI has no per-failure exit codes, so this is substring matching against both streams
      concatenated (stderr then stdout — a crash writes the banner to stderr and the diagnosis to
      stdout). Keep it that way.

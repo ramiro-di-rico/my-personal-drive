@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using Xunit;
 using Xunit.Abstractions;
@@ -30,6 +31,7 @@ public sealed class RealCliTwoWaySyncTests : IDisposable
     private readonly string _localRoot = Directory.CreateTempSubdirectory("mypersonaldrive-f2-integration").FullName;
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"mypersonaldrive-f2-integration-{Guid.NewGuid():N}.db");
     private readonly ProtonDriveService _service;
+    private readonly ProtonDriveProvider _provider;
     private readonly bool _enabled = Environment.GetEnvironmentVariable(IntegrationFactAttribute.EnvironmentVariable) == "1";
 
     public RealCliTwoWaySyncTests(ITestOutputHelper output)
@@ -38,6 +40,7 @@ public sealed class RealCliTwoWaySyncTests : IDisposable
         var cliPath = Environment.GetEnvironmentVariable("MYPERSONALDRIVE_CLI")
                       ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Apps", "proton-drive");
         _service = new ProtonDriveService(new ProtonDriveCliExecutor(new FixedPathLocator(cliPath)));
+        _provider = new ProtonDriveProvider(_service);
         _service.CommandStarted += (_, e) =>
         {
             _output.WriteLine($"$ {e.CommandText}");
@@ -95,7 +98,7 @@ public sealed class RealCliTwoWaySyncTests : IDisposable
     public async Task TwoWay_FullLifecycle_AgainstTheRealAccount()
     {
         var stateStore = new SyncStateStore(_dbPath);
-        var sut = new SyncExecutor(_service, stateStore, new LocalScanner(), new RemoteScanner(_service));
+        var sut = new SyncExecutor(_provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(_provider));
 
         // ---------- arrange: a remote-only file, a local-only file, and a local-only folder
         var rootName = _remoteRoot[("/my-files/".Length)..];

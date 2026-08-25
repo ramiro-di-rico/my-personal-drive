@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
 using Xunit;
@@ -85,7 +86,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         var plan = await sut.RunAsync(pair);
 
@@ -111,7 +113,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
 
@@ -131,7 +134,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
 
@@ -156,7 +160,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         var plan = await sut.RunAsync(pair);
 
@@ -178,7 +183,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
 
@@ -200,7 +206,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         var first = await sut.RunAsync(pair);
         Assert.Equal(1, first.Stats.FilesToDownload);
@@ -234,7 +241,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair); // establishes the baseline
         File.Delete(Path.Combine(_localRoot, "a.txt"));
@@ -270,7 +278,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair); // baseline established
         File.Delete(Path.Combine(_localRoot, "a.txt"));
@@ -307,7 +316,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
         File.Delete(Path.Combine(_localRoot, "a.txt"));
@@ -343,7 +353,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
         File.Delete(Path.Combine(_localRoot, "a.txt"));
@@ -373,7 +384,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
         File.Delete(Path.Combine(_localRoot, "a.txt"));
@@ -399,7 +411,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
         Assert.NotEmpty(await stateStore.GetBaselineAsync(pair.Id));
@@ -429,7 +442,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
 
@@ -454,7 +468,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service), clock);
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider), clock);
 
         var attemptsPerRun = new List<int>();
         var attemptsBefore = 0;
@@ -499,7 +514,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         var plan = await sut.RunAsync(pair);
 
@@ -535,7 +551,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         var reports = new List<SyncExecutor.SyncProgress>();
         sut.Progress += (_, p) => reports.Add(p);
@@ -570,7 +587,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         var reports = new List<SyncExecutor.SyncProgress>();
         sut.Progress += (_, p) => reports.Add(p);
@@ -595,7 +613,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         var reports = new List<SyncExecutor.SyncProgress>();
         sut.Progress += (_, p) => reports.Add(p);
@@ -628,7 +647,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
         Assert.True(File.Exists(Path.Combine(_localRoot, "x.pdf")));
@@ -673,7 +693,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
         await sut.RunAsync(pair); // performs the move
@@ -705,7 +726,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
         var plan = await sut.RunAsync(pair);
@@ -736,7 +758,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
         return (pair, sut, executor, stateStore);
@@ -842,7 +865,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         var plan = await sut.PreviewAsync(pair);
 
@@ -869,7 +893,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay, ConflictPolicy.KeepBoth);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         var plan = await sut.RunAsync(pair);
 
@@ -895,7 +920,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay, ConflictPolicy.Ask);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         var plan = await sut.RunAsync(pair);
 
@@ -925,7 +951,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service), clock);
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider), clock);
 
         await stateStore.LogAsync(pair.Id, SyncLogLevel.Info, null, "ancient history", clock.GetUtcNow());
         clock.Advance(TimeSpan.FromDays(40));
@@ -949,7 +976,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay, ConflictPolicy.Ask);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
         var conflict = Assert.Single(await stateStore.GetConflictActionsAsync(pair.Id));
@@ -1025,7 +1053,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore, SyncDirection.TwoWay, ConflictPolicy.Ask);
         var service = new ProtonDriveService(cli);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
         var conflict = Assert.Single(await stateStore.GetConflictActionsAsync(pair.Id));
@@ -1067,7 +1096,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service), clock);
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider), clock);
 
         await sut.RunAsync(pair);
 
@@ -1089,7 +1119,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service), clock);
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider), clock);
 
         await sut.RunAsync(pair);
 
@@ -1114,7 +1145,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         var plan = await sut.PreviewAsync(pair);
 
@@ -1132,7 +1164,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
 
@@ -1156,7 +1189,8 @@ public class SyncExecutorTests : IDisposable
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
         var service = new ProtonDriveService(executor);
-        var sut = new SyncExecutor(service, stateStore, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
 
         await sut.RunAsync(pair);
 

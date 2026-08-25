@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
 using MyPersonalDrive.ViewModels.Sync;
@@ -35,7 +36,8 @@ public class SyncPanelPairCreationTests : IDisposable
     {
         var store = new SyncStateStore(_dbPath);
         var service = new ProtonDriveService(new FakeCliExecutor());
-        var executor = new SyncExecutor(service, store, new LocalScanner(), new RemoteScanner(service));
+        var provider = new ProtonDriveProvider(service);
+        var executor = new SyncExecutor(provider.Operations, store, new LocalScanner(), new RemoteScanner(provider));
         return (new SyncPanelViewModel(store, executor, new SyncCrashRecovery(store)), store);
     }
 

@@ -2,7 +2,7 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using MyPersonalDrive.Models;
 
-namespace MyPersonalDrive.Services;
+namespace MyPersonalDrive.Services.Providers.Proton;
 
 /// <summary>
 /// Replaces the installed `proton-drive` binary with a newer one from Proton's release manifest.

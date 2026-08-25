@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
 using MyPersonalDrive.ViewModels;
@@ -89,17 +90,18 @@ public class MainWindowDeepMetricsTests : IDisposable
 
         var executor = new FakeCliExecutor();
         var service = new ProtonDriveService(executor);
+        var provider = new ProtonDriveProvider(service);
         var syncStore = new SyncStateStore(_dbPath);
-        var syncExecutor = new SyncExecutor(service, syncStore, new LocalScanner(), new RemoteScanner(service));
+        var syncExecutor = new SyncExecutor(provider.Operations, syncStore, new LocalScanner(), new RemoteScanner(provider));
         var panel = new SyncPanelViewModel(syncStore, syncExecutor, new SyncCrashRecovery(syncStore));
         var metricsStore = new FolderMetricsStore(_dbPath);
         var viewModel = new MainWindowViewModel(
-            service,
+            provider,
             new DriveCacheService(Path.Combine(_tempAppData, "cache.db")),
             new AppSettingsService(),
             panel,
             metricsStore: metricsStore,
-            statsScanner: withScanner ? new FolderStatsScanner(service) : null);
+            statsScanner: withScanner ? new FolderStatsScanner(provider) : null);
 
         return (viewModel, executor, metricsStore);
     }

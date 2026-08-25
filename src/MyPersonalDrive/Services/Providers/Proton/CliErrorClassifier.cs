@@ -1,4 +1,6 @@
-namespace MyPersonalDrive.Services;
+using MyPersonalDrive.Services;
+
+namespace MyPersonalDrive.Services.Providers.Proton;
 
 /// <summary>
 /// Classifies a failed Proton Drive CLI invocation into a <see cref="CliErrorKind"/>.

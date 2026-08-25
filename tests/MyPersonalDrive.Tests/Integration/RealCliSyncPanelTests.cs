@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.ViewModels.Sync;
 using Xunit;
@@ -32,6 +33,7 @@ public sealed class RealCliSyncPanelTests : IDisposable
     private readonly string _localRoot = Directory.CreateTempSubdirectory("mypersonaldrive-ui-panel").FullName;
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"mypersonaldrive-ui-panel-{Guid.NewGuid():N}.db");
     private readonly ProtonDriveService _service;
+    private readonly ProtonDriveProvider _provider;
     private readonly bool _enabled = Environment.GetEnvironmentVariable(IntegrationFactAttribute.EnvironmentVariable) == "1";
 
     public RealCliSyncPanelTests(ITestOutputHelper output)
@@ -40,6 +42,7 @@ public sealed class RealCliSyncPanelTests : IDisposable
         var cliPath = Environment.GetEnvironmentVariable("MYPERSONALDRIVE_CLI")
                       ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Apps", "proton-drive");
         _service = new ProtonDriveService(new ProtonDriveCliExecutor(new FixedPathLocator(cliPath)));
+        _provider = new ProtonDriveProvider(_service);
         _service.CommandStarted += (_, e) => _output.WriteLine($"$ {e.CommandText}");
     }
 
@@ -81,7 +84,7 @@ public sealed class RealCliSyncPanelTests : IDisposable
         await _service.CreateFolderAsync(_remoteRoot, "nested");
 
         var stateStore = new SyncStateStore(_dbPath);
-        var executor = new SyncExecutor(_service, stateStore, new LocalScanner(), new RemoteScanner(_service));
+        var executor = new SyncExecutor(_provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(_provider));
         var panel = new SyncPanelViewModel(stateStore, executor, new SyncCrashRecovery(stateStore));
 
         // ---------- the empty state the window opens into

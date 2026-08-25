@@ -1,4 +1,5 @@
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using Xunit;
 using Xunit.Abstractions;
@@ -64,7 +65,8 @@ public sealed class RealCliRemoteScanThroughputTests
             new FixedPathLocator(_cliPath),
             maxReadConcurrency: concurrency,
             cacheRoot: Directory.CreateTempSubdirectory("mypersonaldrive-scan-cache").FullName));
-        var scanner = new RemoteScanner(service, concurrency);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider, concurrency);
 
         var started = DateTimeOffset.UtcNow;
         var nodes = await scanner.ScanAsync(_scanRoot, mapper, new ExclusionMatcher());

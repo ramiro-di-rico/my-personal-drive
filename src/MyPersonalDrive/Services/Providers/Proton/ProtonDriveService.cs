@@ -1,7 +1,7 @@
 using System.Text.Json;
 using MyPersonalDrive.Models;
 
-namespace MyPersonalDrive.Services;
+namespace MyPersonalDrive.Services.Providers.Proton;
 
 public sealed class ProtonDriveService
 {

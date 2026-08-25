@@ -9,6 +9,10 @@ The one exception is `CliReleaseFeed`, which GETs the published CLI release mani
 a public static file, not the Drive API. It is the app's **only** outbound network call; adding a
 second one is an architectural decision, not a detail. See `docs/ARCHITECTURE.md` §10.
 
+Proton is the only supported provider today, but everything Proton-specific is reached through
+`ICloudDriveProvider` (`Services/Providers/`), not depended on directly — see
+`docs/PLAN-CLOUD-PROVIDERS.md` for the seam and the plan to add Microsoft OneDrive.
+
 Read `docs/ARCHITECTURE.md` for the current state, and the `docs/PLAN-*.md` files for planned work
 and verified CLI behavior (`PLAN-LOCAL-SYNC.md` Appendix A).
 
@@ -64,6 +68,7 @@ dotnet run --project src/MyPersonalDrive     # run the app
 ```
 src/MyPersonalDrive/
   Services/           CLI boundary: executor, locator, ProtonDriveService, error classifier, cache
+  Services/Providers/ ICloudDriveProvider seam + Proton/ (see docs/PLAN-CLOUD-PROVIDERS.md)
   Services/Sync/      local-sync engine: scanners, reconciler, executor, scheduler, state store
   ViewModels/         MVVM (ObservableObject, AsyncCommand)
   Views/              .axaml + minimal code-behind

@@ -1,5 +1,6 @@
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Tests.Fakes;
 using Xunit;
 
@@ -57,7 +58,7 @@ public class FolderStatsScannerTests
             """;
 
     private static FolderStatsScanner Build(FakeCliExecutor executor)
-        => new(new ProtonDriveService(executor), new FakeTimeProvider(new DateTimeOffset(2026, 8, 25, 12, 0, 0, TimeSpan.Zero)));
+        => new(new ProtonDriveProvider(new ProtonDriveService(executor)), new FakeTimeProvider(new DateTimeOffset(2026, 8, 25, 12, 0, 0, TimeSpan.Zero)));
 
     [Fact]
     public async Task ItAggregatesTheWholeSubtree_NotJustTheDirectChildren()

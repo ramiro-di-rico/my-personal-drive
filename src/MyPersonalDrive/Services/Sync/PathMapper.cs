@@ -12,7 +12,7 @@ namespace MyPersonalDrive.Services.Sync;
 /// A node whose real name contains a literal <c>/</c> never reaches this class. Such a name cannot
 /// exist as a local filename on Linux at all, so <see cref="RemoteScanner"/> skips those nodes and
 /// reports them, which is what keeps every relative path here unambiguously <c>/</c>-separated.
-/// <see cref="ProtonDriveService.CombinePath"/> escapes them as <c>\/</c> for the CLI's benefit so
+/// <c>Providers.Proton.ProtonDriveService.CombinePath</c> escapes them as <c>\/</c> for the CLI's benefit so
 /// the file browser can still address them (verified: the escaped path lists, the unescaped one
 /// fails with "Node not found").
 /// </remarks>

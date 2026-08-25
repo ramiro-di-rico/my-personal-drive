@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
 using MyPersonalDrive.ViewModels;
@@ -63,11 +64,12 @@ public class MainWindowCliUpdateTests : IDisposable
     {
         var executor = new FakeCliExecutor();
         var service = new ProtonDriveService(executor);
+        var provider = new ProtonDriveProvider(service);
         var store = new SyncStateStore(_dbPath);
-        var syncExecutor = new SyncExecutor(service, store, new LocalScanner(), new RemoteScanner(service));
+        var syncExecutor = new SyncExecutor(provider.Operations, store, new LocalScanner(), new RemoteScanner(provider));
         var panel = new SyncPanelViewModel(store, syncExecutor, new SyncCrashRecovery(store));
         var viewModel = new MainWindowViewModel(
-            service,
+            provider,
             new DriveCacheService(Path.Combine(_tempAppData, "cache.db")),
             new AppSettingsService(),
             panel,

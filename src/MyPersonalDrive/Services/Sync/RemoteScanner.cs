@@ -1,4 +1,5 @@
 using MyPersonalDrive.Models;
+using MyPersonalDrive.Services.Providers;
 
 namespace MyPersonalDrive.Services.Sync;
 
@@ -26,15 +27,15 @@ public interface IRemoteScanner
 /// </summary>
 public sealed class RemoteScanner : IRemoteScanner
 {
-    private readonly ProtonDriveService _service;
+    private readonly ICloudDriveProvider _provider;
     private readonly RemoteTreeWalker _walker;
 
     public event EventHandler<string>? NodeSkipped;
 
-    public RemoteScanner(ProtonDriveService service, int maxConcurrency = 0)
+    public RemoteScanner(ICloudDriveProvider provider, int maxConcurrency = 0)
     {
-        _service = service;
-        _walker = new RemoteTreeWalker(service, maxConcurrency);
+        _provider = provider;
+        _walker = new RemoteTreeWalker(provider, maxConcurrency);
     }
 
     public async Task<IReadOnlyDictionary<string, NodeFingerprint>> ScanAsync(
@@ -45,8 +46,12 @@ public sealed class RemoteScanner : IRemoteScanner
         // warm cache can silently omit nodes that exist — which a TwoWay pair would then read as
         // remote deletions. Within the scan the cache is left alone: it is what keeps the walk from
         // paying a cold start per folder, and a few seconds of drift inside one scan is the same
-        // staleness window the engine already tolerates.
-        await _service.ResetRemoteCacheAsync(cancellationToken);
+        // staleness window the engine already tolerates. Null on a provider with nothing to
+        // invalidate (docs/PLAN-CLOUD-PROVIDERS.md §2.4).
+        if (_provider.RemoteView is not null)
+        {
+            await _provider.RemoteView.ResetRemoteCacheAsync(cancellationToken);
+        }
 
         var result = new Dictionary<string, NodeFingerprint>();
 
@@ -57,7 +62,11 @@ public sealed class RemoteScanner : IRemoteScanner
             // identity model intact — relative paths stay unambiguously '/'-separated — where
             // the alternative would be to invent a substitute name, which in a TwoWay pair
             // would then upload back as a second, differently-named copy.
-            if (ProtonDriveService.HasUnmappableName(item.Name))
+            //
+            // Still hard-coded to Proton's rule here: docs/PLAN-CLOUD-PROVIDERS.md P3 is what
+            // moves this behind IProviderPathSyntax so a provider with different unmappable
+            // characters (e.g. OneDrive's `" * : < > ? \ |`) isn't silently held to Proton's.
+            if (Providers.Proton.ProtonDriveService.HasUnmappableName(item.Name))
             {
                 NodeSkipped?.Invoke(this, item.Name);
                 return false;

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using Xunit;
 
 namespace MyPersonalDrive.Tests.Services;

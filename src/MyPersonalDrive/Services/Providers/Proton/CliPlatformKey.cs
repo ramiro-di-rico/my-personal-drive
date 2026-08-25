@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace MyPersonalDrive.Services;
+namespace MyPersonalDrive.Services.Providers.Proton;
 
 /// <summary>
 /// Maps the running machine to the <c>Platform</c> key Proton's release manifest uses

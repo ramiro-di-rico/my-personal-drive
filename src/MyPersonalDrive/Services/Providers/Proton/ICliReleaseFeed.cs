@@ -1,6 +1,6 @@
 using MyPersonalDrive.Models;
 
-namespace MyPersonalDrive.Services;
+namespace MyPersonalDrive.Services.Providers.Proton;
 
 /// <summary>
 /// Reads Proton's published CLI release manifest. Behind an interface because this is the app's

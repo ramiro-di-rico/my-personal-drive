@@ -1,4 +1,4 @@
-namespace MyPersonalDrive.Services;
+namespace MyPersonalDrive.Services.Providers.Proton;
 
 /// <summary>
 /// Compares the version the installed CLI reports with the one the release manifest offers.

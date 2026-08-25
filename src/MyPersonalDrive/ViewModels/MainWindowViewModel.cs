@@ -5,13 +5,15 @@ using System.Net.Http;
 using System.Text.Json;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
+using MyPersonalDrive.Services.Providers.Proton;
 using Avalonia.Threading;
 
 namespace MyPersonalDrive.ViewModels;
 
 public sealed class MainWindowViewModel : ObservableObject
 {
-    private readonly ProtonDriveService _service;
+    private readonly ICloudDriveProvider _provider;
     private readonly DriveCacheService _cacheService;
     private readonly AppSettingsService _settings;
     private readonly FolderMetricsStore? _metricsStore;
@@ -80,7 +82,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isCliUpdateBusy;
 
     public MainWindowViewModel(
-        ProtonDriveService service,
+        ICloudDriveProvider provider,
         DriveCacheService cacheService,
         AppSettingsService settings,
         Sync.SyncPanelViewModel syncPanel,
@@ -104,7 +106,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // reachable in a test without driving a real sync cycle to a chosen moment.
         // Capturing the parameter, not the SyncPanel property, which is only assigned below.
         _isSyncInProgress = isSyncInProgress ?? (() => syncPanel.IsSyncInProgress);
-        _service = service;
+        _provider = provider;
         _cacheService = cacheService;
         _settings = settings;
         SyncPanel = syncPanel;
@@ -117,10 +119,10 @@ public sealed class MainWindowViewModel : ObservableObject
         _viewMode = appSettings.ViewModeOrDefault();
         _sortKey = appSettings.SortKeyOrDefault();
         _sortDescending = appSettings.SortDescending;
-        _service.CommandStarted += OnCommandStarted;
-        _service.CommandOutput += OnCommandOutput;
-        _service.CommandFinished += OnCommandFinished;
-        _service.ListingParseWarning += OnListingParseWarning;
+        _provider.CommandStarted += OnCommandStarted;
+        _provider.CommandOutput += OnCommandOutput;
+        _provider.CommandFinished += OnCommandFinished;
+        _provider.ListingParseWarning += OnListingParseWarning;
 
         RootItems = new ObservableCollection<DriveNodeViewModel>();
         // Selecting a "largest item" row must behave exactly like clicking that row in the listing,
@@ -743,7 +745,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             StatusMessage = "Opening Proton Drive authentication in your browser...";
-            await _service.AuthenticateAsync();
+            await _provider.Auth.AuthenticateAsync();
             IsAuthenticated = true;
             await GoToRootAsync();
         }
@@ -763,7 +765,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             StatusMessage = "Logging out from Proton Drive...";
-            await _service.LogoutAsync();
+            await _provider.Auth.LogoutAsync();
             IsAuthenticated = false;
             ResetBrowserState();
             StatusMessage = "Logged out.";
@@ -891,7 +893,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             StatusMessage = $"Uploading {files.Count} file(s) to {CurrentPath}...";
-            await _service.UploadFilesAsync(files, CurrentPath, strategy);
+            await _provider.Operations.UploadFilesAsync(files, CurrentPath, strategy);
             StatusMessage = $"Uploaded {files.Count} file(s) to {CurrentPath}.";
             await InvalidateDeepMetricsAsync(CurrentPath);
 
@@ -926,7 +928,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             StatusMessage = $"Creating folder '{folderName}' in {CurrentPath}...";
-            await _service.CreateFolderAsync(CurrentPath, folderName);
+            await _provider.Operations.CreateFolderAsync(CurrentPath, folderName);
             StatusMessage = $"Created folder '{folderName}' in {CurrentPath}.";
             
             // Update DB immediately
@@ -965,7 +967,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             StatusMessage = $"Downloading {item.Name}...";
-            await _service.DownloadFileAsync(item.Path, folder);
+            await _provider.Operations.DownloadFileAsync(item.Path, folder);
             StatusMessage = $"Downloaded {item.Name} to {folder}.";
         }
         catch (InvalidOperationException ex)
@@ -997,7 +999,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             StatusMessage = $"Renaming {item.Name} to {newName}...";
-            await _service.RenameItemAsync(item.Path, newName);
+            await _provider.Operations.RenameItemAsync(item.Path, newName);
             StatusMessage = $"Renamed {item.Name} to {newName}.";
 
             // Update DB immediately
@@ -1043,7 +1045,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             StatusMessage = $"Creating a copy of {item.Name} as {displayTarget} in {CurrentPath}...";
-            await _service.CopyItemAsync(item.Path, CurrentPath, string.IsNullOrEmpty(newName) ? null : newName);
+            await _provider.Operations.CopyItemAsync(item.Path, CurrentPath, string.IsNullOrEmpty(newName) ? null : newName);
             StatusMessage = $"Copied {item.Name} successfully.";
             await InvalidateDeepMetricsAsync(CurrentPath);
             
@@ -1070,7 +1072,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             StatusMessage = $"Moving {item.Name} to trash...";
-            await _service.TrashItemAsync(item.Path);
+            await _provider.Operations.TrashItemAsync(item.Path);
             StatusMessage = $"Moved {item.Name} to trash.";
 
             // Update DB immediately
@@ -1183,9 +1185,9 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     private async Task EnsureFreshRemoteViewAsync(bool force, CancellationToken token)
     {
-        if (_remoteViewFreshness.ShouldRefresh(_timeProvider.GetUtcNow(), force))
+        if (_remoteViewFreshness.ShouldRefresh(_timeProvider.GetUtcNow(), force) && _provider.RemoteView is not null)
         {
-            await _service.ResetRemoteCacheAsync(token);
+            await _provider.RemoteView.ResetRemoteCacheAsync(token);
         }
     }
 
@@ -1196,7 +1198,7 @@ public sealed class MainWindowViewModel : ObservableObject
             await EnsureFreshRemoteViewAsync(forceFreshRemoteView, token);
 
             // 2. Fetch from CLI
-            var items = await _service.LoadFolderAsync(path, token);
+            var items = await _provider.Operations.ListFolderAsync(path, token);
 
             // 3. Update DB
             await _cacheService.SyncItemsAsync(path, items);
@@ -1558,7 +1560,12 @@ public sealed class MainWindowViewModel : ObservableObject
         IsCheckingCliVersion = true;
         try
         {
-            var version = await _service.GetCliVersionAsync();
+            // Diagnostics is only ever null for a provider with no external binary to version
+            // (docs/PLAN-CLOUD-PROVIDERS.md §2.6); the settings UI stops offering this command for
+            // such a provider as of P5. Today's only provider (Proton) always has one.
+            var version = _provider.Diagnostics is not null
+                ? await _provider.Diagnostics.GetVersionAsync()
+                : null;
             CliVersion = string.IsNullOrWhiteSpace(version)
                 ? "The CLI reported no version."
                 : version;

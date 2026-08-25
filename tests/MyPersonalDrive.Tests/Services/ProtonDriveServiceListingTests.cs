@@ -1,4 +1,5 @@
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Tests.Fakes;
 using Xunit;
 

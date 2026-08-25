@@ -1,7 +1,8 @@
+using MyPersonalDrive.Services;
 using System.Diagnostics;
 using System.Text;
 
-namespace MyPersonalDrive.Services;
+namespace MyPersonalDrive.Services.Providers.Proton;
 
 public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
 {

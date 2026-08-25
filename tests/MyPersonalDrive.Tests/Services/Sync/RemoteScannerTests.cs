@@ -1,4 +1,5 @@
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
 using Xunit;
@@ -43,7 +44,8 @@ public class RemoteScannerTests
         var executor = new FakeCliExecutor();
         executor.RespondForPath("/my-files/Docs", $"[{FileJson("u1", "a.txt", 10, "2026-01-01T00:00:00.000Z", "hash-a")}]");
         var service = new ProtonDriveService(executor);
-        var scanner = new RemoteScanner(service);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider);
         var mapper = new PathMapper("/my-files/Docs", "/home/user/Docs");
 
         var result = await scanner.ScanAsync("/my-files/Docs", mapper, new ExclusionMatcher());
@@ -62,7 +64,8 @@ public class RemoteScannerTests
         executor.RespondForPath("/my-files/Docs", $"[{FolderJson("u-sub", "sub")}]");
         executor.RespondForPath("/my-files/Docs/sub", $"[{FileJson("u-file", "b.txt", 5, "2026-01-01T00:00:00.000Z", "hash-b")}]");
         var service = new ProtonDriveService(executor);
-        var scanner = new RemoteScanner(service);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider);
         var mapper = new PathMapper("/my-files/Docs", "/home/user/Docs");
 
         var result = await scanner.ScanAsync("/my-files/Docs", mapper, new ExclusionMatcher());
@@ -79,7 +82,8 @@ public class RemoteScannerTests
         var executor = new FakeCliExecutor();
         executor.RespondForPath("/my-files/Docs", $"[{FolderJson("u-git", ".git")}, {FileJson("u-file", "real.txt", 1, "2026-01-01T00:00:00.000Z", "hash")}]");
         var service = new ProtonDriveService(executor);
-        var scanner = new RemoteScanner(service);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider);
         var mapper = new PathMapper("/my-files/Docs", "/home/user/Docs");
 
         var result = await scanner.ScanAsync("/my-files/Docs", mapper, new ExclusionMatcher());
@@ -97,7 +101,8 @@ public class RemoteScannerTests
         var executor = new FakeCliExecutor();
         executor.RespondForPath("/my-files/Docs", "[]");
         var service = new ProtonDriveService(executor);
-        var scanner = new RemoteScanner(service);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider);
         var mapper = new PathMapper("/my-files/Docs", "/home/user/Docs");
 
         var result = await scanner.ScanAsync("/my-files/Docs", mapper, new ExclusionMatcher());
@@ -119,7 +124,8 @@ public class RemoteScannerTests
         }
 
         var service = new ProtonDriveService(executor);
-        var scanner = new RemoteScanner(service, maxConcurrency);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider, maxConcurrency);
         var mapper = new PathMapper("/my-files/Docs", "/home/user/Docs");
 
         await scanner.ScanAsync("/my-files/Docs", mapper, new ExclusionMatcher());
@@ -172,7 +178,8 @@ public class RemoteScannerTests
         var executor = new FakeCliExecutor();
         executor.RespondForPath("/my-files/Docs", $"[{FileJson("uid-ok", "ok.txt", 3, "2026-01-01T00:00:00.000Z", "hash-ok")}, {FileJson("uid-slash", "in/voice.pdf", 3, "2026-01-01T00:00:00.000Z", "hash-slash")}]");
         var service = new ProtonDriveService(executor);
-        var scanner = new RemoteScanner(service);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider);
 
         var skipped = new List<string>();
         scanner.NodeSkipped += (_, name) => skipped.Add(name);
@@ -191,7 +198,8 @@ public class RemoteScannerTests
         var executor = new FakeCliExecutor();
         executor.RespondForPath("/my-files/Docs", $"[{FolderJson("uid-ab", "a/b")}]");
         var service = new ProtonDriveService(executor);
-        var scanner = new RemoteScanner(service);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider);
 
         var result = await scanner.ScanAsync("/my-files/Docs", new PathMapper("/my-files/Docs", "/tmp/x"), new ExclusionMatcher([]));
 

@@ -37,11 +37,22 @@
   `Views/Converters/FileKindIconConverter.cs`. Covered by
   `tests/.../Services/FileKindClassifierTests.cs`.
 - [ ] **V4** — sort control (list-mode headers reused by the other modes). Not started, optional.
-- [ ] **M1** — `FolderKindClassifier` + `FolderMetrics` model. Not started.
-- [ ] **M2** — shallow metrics from the already-loaded listing (zero CLI cost). Not started.
+- [x] **M1 — classifier + model.** `Models/FileKind.cs` and `Services/FileKindClassifier.cs`
+  landed with V3; `Models/FolderMetrics.cs` (`FolderMetrics` + `FolderKindBucket`, with
+  `IsDeep`/`IsComplete`/`UnknownSizeCount`/`ScannedFolderCount`) and `Services/ByteSize.cs`.
+- [x] **M2 — shallow metrics.** `Services/FolderMetricsCalculator.FromChildren`, called from
+  `MainWindowViewModel.DisplayItems` so both the cached paint and the CLI result refresh it. Zero
+  CLI cost. Covered by `FolderMetricsCalculatorTests` (12 tests) and `ByteSizeTests`.
 - [ ] **M3** — deep metrics scanner (`FolderStatsScanner`), progress + cancel. Not started.
 - [ ] **M4** — persistence of deep results (`FolderMetrics` table, migration 5). Not started.
-- [ ] **M5** — metrics UI (side panel section + per-row size column in list mode). Not started.
+- [x] **M5 — metrics UI** (partial: the shallow half). `ViewModels/FolderMetricsViewModel.cs`
+  (`FolderMetricsViewModel`, `FolderMetricBucketViewModel`, `LargestItemViewModel`) and a
+  "Métricas de la carpeta" section in the side panel: headline counts, total with an explicit
+  scope note, a `Border`-based histogram, clickable top-5, newest/oldest. The panel is now
+  scrollable, since status + selection + metrics overflows a short window. Covered by
+  `FolderMetricsViewModelTests` (10 tests).
+  **Not yet done:** the "Calcular tamaño total (recursivo)" button and the progress/cancel line
+  (needs M3), and the per-folder deep size shown in the listing rows and tiles (needs M4).
 - [ ] **M6** — out of scope, recorded: thumbnails, whole-drive dashboard. See §7.
 
 ---

@@ -99,6 +99,9 @@ public sealed class MainWindowViewModel : ObservableObject
         _service.ListingParseWarning += OnListingParseWarning;
 
         RootItems = new ObservableCollection<DriveNodeViewModel>();
+        // Selecting a "largest item" row must behave exactly like clicking that row in the listing,
+        // so it goes through the same handler rather than a second selection path.
+        Metrics = new FolderMetricsViewModel(HandleRowClickAsync, HandleUnexpectedError);
         BreadcrumbItems = new ObservableCollection<BreadcrumbSegmentViewModel>();
         UpdateBreadcrumbs(_rootPath);
 
@@ -126,6 +129,12 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<BreadcrumbSegmentViewModel> BreadcrumbItems { get; }
 
     public Sync.SyncPanelViewModel SyncPanel { get; }
+
+    /// <summary>
+    /// Statistics for the folder on screen, recomputed from the listing on every load
+    /// (docs/PLAN-BROWSER-VIEWS.md M2). Shallow only: direct children, no CLI calls.
+    /// </summary>
+    public FolderMetricsViewModel Metrics { get; }
 
     public AsyncCommand AuthenticateCommand { get; }
 
@@ -1051,6 +1060,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
             RootItems.Add(node);
         }
+
+        // Computed here rather than at each call site so the cached paint and the CLI result both
+        // update it, and so the numbers can never disagree with the rows actually on screen.
+        Metrics.Update(FolderMetricsCalculator.FromChildren(
+            CurrentPath,
+            RootItems.Select(node => node.Item).ToList(),
+            _timeProvider.GetUtcNow()));
     }
 
     private void UpdateBreadcrumbs(string path)

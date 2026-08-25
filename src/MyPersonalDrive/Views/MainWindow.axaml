@@ -181,11 +181,98 @@
       </Grid>
 
       <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
-        <Grid Grid.Column="0" Margin="16,0,16,16">
+        <Grid Grid.Column="0" Margin="16,0,16,16" RowDefinitions="Auto,Auto,*">
+          <!-- One sort control for all three modes rather than column headers in list mode plus a
+               separate control for the tiles: the state is the same either way, and two ways to set
+               it means two places to keep in step (docs/PLAN-BROWSER-VIEWS.md V4). Sorting is done
+               in memory over the rows already loaded, so it costs no CLI call. -->
+          <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="4" Margin="0,0,0,8">
+            <StackPanel.Styles>
+              <Style Selector="Button.sortKey">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="8,4" />
+                <Setter Property="FontSize" Value="12" />
+              </Style>
+              <Style Selector="Button.sortKey.active">
+                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                <Setter Property="FontWeight" Value="Bold" />
+              </Style>
+            </StackPanel.Styles>
+            <TextBlock Text="Ordenar por:" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
+            <Button Classes="sortKey" Classes.active="{Binding IsSortedByName}" Command="{Binding SortByNameCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="Nombre" />
+                <TextBlock Text="{Binding SortDirectionGlyph}" IsVisible="{Binding IsSortedByName}" FontSize="10" />
+              </StackPanel>
+            </Button>
+            <Button Classes="sortKey" Classes.active="{Binding IsSortedBySize}" Command="{Binding SortBySizeCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="Tamaño" />
+                <TextBlock Text="{Binding SortDirectionGlyph}" IsVisible="{Binding IsSortedBySize}" FontSize="10" />
+              </StackPanel>
+            </Button>
+            <Button Classes="sortKey" Classes.active="{Binding IsSortedByModified}" Command="{Binding SortByModifiedCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="Modificado" />
+                <TextBlock Text="{Binding SortDirectionGlyph}" IsVisible="{Binding IsSortedByModified}" FontSize="10" />
+              </StackPanel>
+            </Button>
+            <Button Classes="sortKey" Classes.active="{Binding IsSortedByKind}" Command="{Binding SortByKindCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="Tipo" />
+                <TextBlock Text="{Binding SortDirectionGlyph}" IsVisible="{Binding IsSortedByKind}" FontSize="10" />
+              </StackPanel>
+            </Button>
+
+            <TextBlock Text="{Binding FilterSummary}"
+                       VerticalAlignment="Center"
+                       Margin="8,0,0,0"
+                       Opacity="0.7"
+                       FontSize="12"
+                       IsVisible="{Binding FilterSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+
+          <!-- Filter by type. The chips come from the metrics histogram, so they only ever offer
+               kinds the folder actually contains (docs/PLAN-BROWSER-VIEWS.md M6). Filtering is a
+               view of what was already loaded - it makes no CLI call, and it does not change the
+               metrics panel, which keeps describing the whole folder. -->
+          <ItemsControl Grid.Row="1" ItemsSource="{Binding KindFilters}" Margin="0,0,0,8">
+            <ItemsControl.Styles>
+              <Style Selector="Button.kindChip">
+                <Setter Property="Padding" Value="8,3" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Margin" Value="0,0,6,6" />
+              </Style>
+              <Style Selector="Button.kindChip.active">
+                <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                <Setter Property="FontWeight" Value="Bold" />
+              </Style>
+            </ItemsControl.Styles>
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <WrapPanel />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:KindFilterViewModel">
+                <Button Classes="kindChip"
+                        Classes.active="{Binding IsActive}"
+                        Command="{Binding ApplyCommand}"
+                        Content="{Binding LabelWithCount}"
+                        ToolTip.Tip="Filtrar por este tipo" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <Grid Grid.Row="2">
           <!-- List mode: the original row, one per line, with the per-row actions inline. -->
-          <ListBox Classes="driveListing"
+          <ListBox x:Name="ListModeListing"
+                   Classes="driveListing"
                    ItemsSource="{Binding RootItems}"
-                   IsVisible="{Binding IsListView}">
+                   IsVisible="{Binding IsListView}"
+                   KeyDown="OnListingKeyDown">
             <ListBox.ItemTemplate>
               <DataTemplate x:DataType="vm:DriveNodeViewModel">
                 <Grid Classes="hoverGroup"
@@ -254,17 +341,20 @@
           </ListBox>
 
           <!-- Icons mode: a dense grid. The five row actions don't fit on a 112px tile, so they
-               move into a context menu bound to the same commands. WrapPanel does not virtualize
-               (docs/PLAN-BROWSER-VIEWS.md §3) - measure before assuming it's fine on huge folders. -->
-          <ListBox Classes="driveListing"
-                   ItemsSource="{Binding RootItems}"
-                   IsVisible="{Binding IsIconsView}">
-            <ListBox.ItemsPanel>
-              <ItemsPanelTemplate>
-                <WrapPanel ItemWidth="112" ItemHeight="112" />
-              </ItemsPanelTemplate>
-            </ListBox.ItemsPanel>
-            <ListBox.ItemTemplate>
+               move into a context menu bound to the same commands.
+
+               ItemsRepeater + UniformGridLayout rather than a ListBox over a WrapPanel: WrapPanel
+               materializes every child, so a folder with thousands of items would build thousands of
+               tiles up front (docs/PLAN-BROWSER-VIEWS.md §3). ItemsRepeater virtualizes, at the cost
+               of having no selection or keyboard model of its own - which costs this app nothing,
+               because row selection is the view model's (Classes.selected on IsSelected) and
+               activation is the tile's own Button. -->
+          <ScrollViewer IsVisible="{Binding IsIconsView}" HorizontalScrollBarVisibility="Disabled">
+          <ItemsRepeater ItemsSource="{Binding RootItems}">
+            <ItemsRepeater.Layout>
+              <UniformGridLayout ItemsStretch="Fill" MinItemWidth="112" MinItemHeight="112" />
+            </ItemsRepeater.Layout>
+            <ItemsRepeater.ItemTemplate>
               <DataTemplate x:DataType="vm:DriveNodeViewModel">
                 <Border Classes="tile" Classes.selected="{Binding IsSelected}">
                   <Border.ContextMenu>
@@ -282,8 +372,7 @@
                           BorderThickness="0"
                           Padding="0"
                           HorizontalAlignment="Stretch"
-                          VerticalAlignment="Stretch"
-                          Focusable="False">
+                          VerticalAlignment="Stretch">
                     <StackPanel Spacing="6" VerticalAlignment="Center">
                       <Path Classes="icon"
                             Width="32"
@@ -301,21 +390,19 @@
                   </Button>
                 </Border>
               </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
+            </ItemsRepeater.ItemTemplate>
+          </ItemsRepeater>
+          </ScrollViewer>
 
           <!-- Gallery mode: large tiles with a metadata line. Deliberately NOT image previews -
                the CLI exposes no thumbnails, and generating them would mean downloading every file
                (docs/PLAN-BROWSER-VIEWS.md §7). -->
-          <ListBox Classes="driveListing"
-                   ItemsSource="{Binding RootItems}"
-                   IsVisible="{Binding IsGalleryView}">
-            <ListBox.ItemsPanel>
-              <ItemsPanelTemplate>
-                <WrapPanel ItemWidth="176" ItemHeight="200" />
-              </ItemsPanelTemplate>
-            </ListBox.ItemsPanel>
-            <ListBox.ItemTemplate>
+          <ScrollViewer IsVisible="{Binding IsGalleryView}" HorizontalScrollBarVisibility="Disabled">
+          <ItemsRepeater ItemsSource="{Binding RootItems}">
+            <ItemsRepeater.Layout>
+              <UniformGridLayout ItemsStretch="Fill" MinItemWidth="176" MinItemHeight="200" />
+            </ItemsRepeater.Layout>
+            <ItemsRepeater.ItemTemplate>
               <DataTemplate x:DataType="vm:DriveNodeViewModel">
                 <Border Classes="tile" Classes.selected="{Binding IsSelected}">
                   <Border.ContextMenu>
@@ -333,8 +420,7 @@
                           BorderThickness="0"
                           Padding="0"
                           HorizontalAlignment="Stretch"
-                          VerticalAlignment="Stretch"
-                          Focusable="False">
+                          VerticalAlignment="Stretch">
                     <StackPanel Spacing="10" VerticalAlignment="Center">
                       <Border Background="{DynamicResource CardBackgroundBrush}"
                               CornerRadius="6"
@@ -367,8 +453,10 @@
                   </Button>
                 </Border>
               </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
+            </ItemsRepeater.ItemTemplate>
+          </ItemsRepeater>
+          </ScrollViewer>
+          </Grid>
         </Grid>
 
         <Border Grid.Column="1" Margin="0,0,16,16" Padding="16" Width="340" Background="{DynamicResource CardBackgroundBrush}">

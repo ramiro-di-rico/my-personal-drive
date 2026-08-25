@@ -22,6 +22,16 @@ public sealed class AppSettings
     /// </summary>
     public string ViewMode { get; set; } = nameof(Models.DriveViewMode.List);
 
+    /// <summary>The listing's sort key, as a <see cref="Models.DriveSortKey"/> name.</summary>
+    public string SortKey { get; set; } = nameof(Models.DriveSortKey.Name);
+
+    public bool SortDescending { get; set; }
+
+    public Models.DriveSortKey SortKeyOrDefault()
+        => Enum.TryParse<Models.DriveSortKey>(SortKey, ignoreCase: true, out var key)
+            ? key
+            : Models.DriveSortKey.Name;
+
     public Models.DriveViewMode ViewModeOrDefault()
         => Enum.TryParse<Models.DriveViewMode>(ViewMode, ignoreCase: true, out var mode)
             ? mode

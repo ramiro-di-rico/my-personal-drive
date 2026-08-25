@@ -139,4 +139,72 @@ public class MainWindowViewModeTests : IDisposable
         Assert.Same(node, sut.RootItems[0]);
         Assert.True(sut.RootItems[0].IsSelected);
     }
+
+    [Fact]
+    public void DefaultSort_IsByNameAscending()
+    {
+        var sut = Build();
+
+        Assert.Equal(DriveSortKey.Name, sut.SortKey);
+        Assert.False(sut.SortDescending);
+        Assert.True(sut.IsSortedByName);
+        Assert.Equal("▲", sut.SortDirectionGlyph);
+    }
+
+    [Fact]
+    public async Task SortingBySize_StartsDescending_BecauseTheQuestionIsWhatIsBiggest()
+    {
+        var sut = Build();
+
+        await sut.SortBySizeCommand.ExecuteAsync();
+
+        Assert.Equal(DriveSortKey.Size, sut.SortKey);
+        Assert.True(sut.SortDescending);
+    }
+
+    [Fact]
+    public async Task ClickingTheActiveKeyAgain_FlipsTheDirection()
+    {
+        var sut = Build();
+
+        await sut.SortByNameCommand.ExecuteAsync();
+
+        Assert.Equal(DriveSortKey.Name, sut.SortKey);
+        Assert.True(sut.SortDescending);
+    }
+
+    [Fact]
+    public async Task Sorting_ReordersTheRowsAlreadyLoaded_WithoutAnyCliCall()
+    {
+        var sut = Build();
+        // Through DisplayItems, not by pushing rows into RootItems: the rows are a rendered view of
+        // what was loaded, so sorting re-renders from that rather than reordering the view of itself.
+        sut.DisplayItems(new[] { "b.bin", "a.bin", "c.bin" }
+            .Select(name => new DriveItem($"/my-files/{name}", name, false, 100))
+            .ToList());
+
+        await sut.SortByNameCommand.ExecuteAsync();
+
+        Assert.Equal(["c.bin", "b.bin", "a.bin"], sut.RootItems.Select(node => node.DisplayName));
+    }
+
+    [Fact]
+    public async Task SortChoice_SurvivesARestart()
+    {
+        var first = Build();
+        await first.SortByModifiedCommand.ExecuteAsync();
+
+        var second = Build();
+
+        Assert.Equal(DriveSortKey.Modified, second.SortKey);
+        Assert.True(second.SortDescending);
+    }
+
+    [Fact]
+    public void AnUnrecognizedPersistedSortKey_FallsBackToName()
+    {
+        new AppSettingsService().Save(new AppSettings { SortKey = "Vibes" });
+
+        Assert.Equal(DriveSortKey.Name, Build().SortKey);
+    }
 }

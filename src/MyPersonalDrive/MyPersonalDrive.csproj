@@ -12,6 +12,12 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia.Desktop" Version="12.0.4" />
+    <!-- ItemsRepeater is NOT in the core Avalonia package; it ships separately. Needed because
+         WrapPanel does not virtualize, and the icons/gallery modes would otherwise materialize a
+         tile per item in a folder of any size (docs/PLAN-BROWSER-VIEWS.md §3). 12.0.0 is the only
+         12.x release; NuGet unifies its Avalonia reference up to the 12.0.4 the rest of the
+         project uses. Published 2026-04-07. -->
+    <PackageReference Include="Avalonia.Controls.ItemsRepeater" Version="12.0.0" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.4" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.4" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />

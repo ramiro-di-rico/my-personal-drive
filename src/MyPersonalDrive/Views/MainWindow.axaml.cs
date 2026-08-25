@@ -29,6 +29,33 @@ public partial class MainWindow : Window
     private void ScrollBreadcrumbToEnd(object? sender, EventArgs e)
         => Dispatcher.UIThread.Post(() => BreadcrumbScroll.Offset = new Vector(double.MaxValue, 0), DispatcherPriority.Background);
 
+    /// <summary>
+    /// Enter (or Space) on the focused row does what clicking it does: select a file, open a folder.
+    /// The ListBox gives arrow-key movement between rows for free, but activation is the row's own
+    /// Button, which is not focusable — making it focusable instead would put the row's five action
+    /// buttons into the tab order ahead of the next row.
+    ///
+    /// Code-behind because it is a visual-tree concern: the key event, and which item the list has
+    /// focused, are things the view knows and the view model deliberately does not.
+    /// </summary>
+    private void OnListingKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
+    {
+        if (e.Key is not (Avalonia.Input.Key.Enter or Avalonia.Input.Key.Space))
+        {
+            return;
+        }
+
+        if (sender is not ListBox { SelectedItem: DriveNodeViewModel node })
+        {
+            return;
+        }
+
+        e.Handled = true;
+        // Fire and forget through the command, so the AsyncCommand's own error routing applies
+        // rather than this handler becoming an `async void` that can take the process down.
+        node.RowCommand.Execute(null);
+    }
+
     private async void BrowseCliPath(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is not MainWindowViewModel viewModel)

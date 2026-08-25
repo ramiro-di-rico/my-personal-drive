@@ -23,20 +23,27 @@
   `ShowGalleryViewCommand`. The `PersistSettings` data-loss bug is fixed via a new
   `AppSettingsService.Update(Action<AppSettings>)`. Covered by
   `tests/.../ViewModels/MainWindowViewModeTests.cs` (6 tests, incl. the regression).
-- [x] **V2 — the three presentations** (partial). `MainWindow.axaml` now hosts three
-  `ListBox Classes="driveListing"` (list / icons / gallery) gated on the derived booleans, with
-  the row actions moved to a `ContextMenu` in the tile modes, plus three toolbar buttons
-  (`IconViewList`/`IconViewGrid`/`IconViewGallery`).
-  **Not yet done:** (a) the large-folder measurement of §3 — `WrapPanel` is still in place and
-  the `ItemsRepeater` decision is unmade; (b) Enter-to-open on the focused row — the `ListBox`
-  gives arrow-key focus, but activation still goes through the row's `Button`/`RowCommand`;
-  (c) no visual pass has been signed off (see the note under §3).
+- [x] **V2 — the three presentations.** `MainWindow.axaml` hosts a `ListBox Classes="driveListing"`
+  for list mode and, for the two tile modes, `ItemsRepeater` + `UniformGridLayout` inside a
+  `ScrollViewer`; row actions move to a `ContextMenu` on the tiles; three toolbar buttons switch
+  modes. Enter/Space on the focused row activates it (`MainWindow.axaml.cs`, `OnListingKeyDown`).
+  **Deviation from §3:** the large-folder *measurement* was never taken — see the status note in
+  §3 — so the panel decision was made on the structural argument instead, and it required a new
+  dependency (`Avalonia.Controls.ItemsRepeater` 12.0.0, published 2026-04-07; ItemsRepeater is not
+  in the core Avalonia package, which §3 assumed it might be).
 - [x] **V3 — extension→kind classification.** `Models/FileKind.cs`,
   `Services/FileKindClassifier.cs` (frozen extension table, compound extensions, dotfiles,
   invariant casing), `DriveNodeViewModel.FileKind`, nine new icons in `Assets/Icons.axaml`, and
   `Views/Converters/FileKindIconConverter.cs`. Covered by
   `tests/.../Services/FileKindClassifierTests.cs`.
-- [ ] **V4** — sort control (list-mode headers reused by the other modes). Not started, optional.
+- [x] **V4 — sort control.** `Models/DriveSortKey.cs`, `Services/DriveItemSorter.cs` (folders
+  always first; unknown sizes/timestamps last in *both* directions; name breaks every tie so the
+  order is stable), `AppSettings.SortKey`/`SortDescending`, four commands plus the derived
+  `IsSortedBy*`/`SortDirectionGlyph` on `MainWindowViewModel`, and one sort bar above the listing
+  shared by all three modes. Re-sorts in memory, no CLI call. Covered by `DriveItemSorterTests`
+  (13 tests) and six more in `MainWindowViewModeTests`.
+  **Deviation:** §2 planned per-column headers in list mode; one shared control replaced them, since
+  the state is identical for every mode and two entry points would be two things to keep in step.
 - [x] **M1 — classifier + model.** `Models/FileKind.cs` and `Services/FileKindClassifier.cs`
   landed with V3; `Models/FolderMetrics.cs` (`FolderMetrics` + `FolderKindBucket`, with
   `IsDeep`/`IsComplete`/`UnknownSizeCount`/`ScannedFolderCount`) and `Services/ByteSize.cs`.
@@ -63,7 +70,15 @@
   indeterminate progress line with a cancel button, the depth/age note ("Recursivo · 412 carpetas
   analizadas · calculado hace 3 días"), and the per-folder deep size in list rows and gallery
   tiles, loaded with one query per listing.
-- [ ] **M6** — out of scope, recorded: thumbnails, whole-drive dashboard. See §7.
+- [x] **M6 — filter by type only.** `ViewModels/KindFilterViewModel.cs` plus
+  `MainWindowViewModel.KindFilters`/`FilterSummary`: chips built from the metrics histogram (so only
+  kinds actually present are offered), filtering done over `_loadedItems` in memory with no CLI
+  call, the metrics panel deliberately unaffected, and a filter dropped when the next listing has
+  none of that kind. Covered by `MainWindowKindFilterTests` (8 tests).
+  The rest of §7 stays out of scope by decision: **thumbnails** (would download every file through
+  the CLI and write decrypted user content to disk), **whole-drive dashboard** (a full-tree scan,
+  hours) and **duplicate detection**. Filtering was picked because it is the only item of the four
+  that costs no CLI call and adds no new failure mode.
 
 ---
 
@@ -230,11 +245,24 @@ Plan:
 Do not pre-emptively adopt `ItemsRepeater`: it has no built-in selection, so it would also mean
 hand-rolling what `ListBox` gives free.
 
-**Status of step 2:** not done. The three modes are implemented on `WrapPanel` and the app launches
-against the stub CLI without error, but the number in step 2 has not been measured and no one has
-looked at the rendered window yet — the session that built this had no screenshot capability on
-Wayland. Compiled bindings *are* validated (the build fails on an unresolvable one), so the
-bindings are known good; the layout is not.
+**What actually happened.** Step 2 (measure) was never done, and step 3 was taken anyway.
+
+The measurement needs a rendered window and a stopwatch on a real mode switch; the sessions doing
+this work had no screenshot or input capability on Wayland, and adding a headless-Avalonia test
+package to measure layout would have been a second new dependency to justify. So the choice was made
+structurally rather than empirically: `WrapPanel` materializes a visual per item with no ceiling,
+which is the same shape as the bug the console comment in this file's §3 describes, and
+`ItemsRepeater` + `UniformGridLayout` removes the question instead of answering it.
+
+Cost of that call: a new package (`Avalonia.Controls.ItemsRepeater` 12.0.0 — it is *not* in core
+Avalonia 12.0.4, verified by compiling against it), and `ItemsRepeater` brings no selection or
+keyboard model. Neither mattered here: tile selection is the view model's (`Classes.selected` bound
+to `IsSelected`) and activation is each tile's own `Button`, now focusable so Tab/Enter reach it.
+
+**Still unverified:** nobody has *looked* at the rendered window in any mode. The app has been
+launched against a stub folder of 2 000 items (120 folders + 1 880 files) in icons mode and stays
+up, but "starts without erroring" is not "scrolls smoothly". Compiled bindings are validated by the
+build; the layout is not.
 
 **Tests.** XAML has no unit coverage in this repo; correctness here is the VM (V1) plus the
 `smoke-test` skill checklist, extended with: switch each mode in a folder with mixed

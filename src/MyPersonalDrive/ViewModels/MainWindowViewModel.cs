@@ -58,6 +58,16 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isSettingsView;
     private DriveViewMode _viewMode = DriveViewMode.List;
     private bool _isDeepScanRunning;
+    private DriveSortKey _sortKey = DriveSortKey.Name;
+    /// <summary>
+    /// Everything the current folder holds, before filtering. The rows in <see cref="RootItems"/> are
+    /// a view of this: a filter must never make the app forget what it loaded, or clearing it would
+    /// need another CLI call.
+    /// </summary>
+    private IReadOnlyList<DriveItem> _loadedItems = [];
+    private FileKind? _kindFilter;
+    private string _filterSummary = string.Empty;
+    private bool _sortDescending;
     private const string UnknownCliVersion = "Unknown";
     private string _cliVersion = UnknownCliVersion;
     private bool _isCheckingCliVersion;
@@ -105,6 +115,8 @@ public sealed class MainWindowViewModel : ObservableObject
         // Set through the field, not the property: the property persists, and the constructor has
         // no business writing settings.json back on every launch.
         _viewMode = appSettings.ViewModeOrDefault();
+        _sortKey = appSettings.SortKeyOrDefault();
+        _sortDescending = appSettings.SortDescending;
         _service.CommandStarted += OnCommandStarted;
         _service.CommandOutput += OnCommandOutput;
         _service.CommandFinished += OnCommandFinished;
@@ -114,6 +126,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // Selecting a "largest item" row must behave exactly like clicking that row in the listing,
         // so it goes through the same handler rather than a second selection path.
         Metrics = new FolderMetricsViewModel(HandleRowClickAsync, HandleUnexpectedError);
+        KindFilters = new ObservableCollection<KindFilterViewModel>();
         BreadcrumbItems = new ObservableCollection<BreadcrumbSegmentViewModel>();
         UpdateBreadcrumbs(_rootPath);
 
@@ -127,6 +140,10 @@ public sealed class MainWindowViewModel : ObservableObject
         DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity, HandleUnexpectedError);
         ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, HandleUnexpectedError);
         ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
+        SortByNameCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Name), onError: HandleUnexpectedError);
+        SortBySizeCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Size), onError: HandleUnexpectedError);
+        SortByModifiedCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Modified), onError: HandleUnexpectedError);
+        SortByKindCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Kind), onError: HandleUnexpectedError);
         ScanFolderDeeplyCommand = new AsyncCommand(ScanFolderDeeplyAsync, CanScanFolderDeeply, HandleUnexpectedError);
         CancelDeepScanCommand = new AsyncCommand(CancelDeepScanAsync, () => IsDeepScanRunning, HandleUnexpectedError);
         ShowListViewCommand = new AsyncCommand(() => SetViewModeAsync(DriveViewMode.List), onError: HandleUnexpectedError);
@@ -141,6 +158,12 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<DriveNodeViewModel> RootItems { get; }
 
     public ObservableCollection<BreadcrumbSegmentViewModel> BreadcrumbItems { get; }
+
+    /// <summary>
+    /// The type filters worth offering for the folder on screen — one per kind actually present,
+    /// plus "Todos". Rebuilt with the listing (docs/PLAN-BROWSER-VIEWS.md M6).
+    /// </summary>
+    public ObservableCollection<KindFilterViewModel> KindFilters { get; }
 
     public Sync.SyncPanelViewModel SyncPanel { get; }
 
@@ -157,6 +180,14 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand RefreshCommand { get; }
 
     public AsyncCommand BackCommand { get; }
+
+    public AsyncCommand SortByNameCommand { get; }
+
+    public AsyncCommand SortBySizeCommand { get; }
+
+    public AsyncCommand SortByModifiedCommand { get; }
+
+    public AsyncCommand SortByKindCommand { get; }
 
     public AsyncCommand ScanFolderDeeplyCommand { get; }
 
@@ -245,6 +276,52 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         }
     }
+
+    /// <summary>
+    /// What the listing is ordered by. Clicking the active key again flips the direction, which is
+    /// what a column header does everywhere else.
+    /// </summary>
+    public DriveSortKey SortKey
+    {
+        get => _sortKey;
+        private set
+        {
+            if (SetProperty(ref _sortKey, value))
+            {
+                RaiseSortStates();
+            }
+        }
+    }
+
+    public bool SortDescending
+    {
+        get => _sortDescending;
+        private set
+        {
+            if (SetProperty(ref _sortDescending, value))
+            {
+                RaiseSortStates();
+            }
+        }
+    }
+
+    /// <summary>Non-empty only while a filter is hiding something.</summary>
+    public string FilterSummary
+    {
+        get => _filterSummary;
+        private set => SetProperty(ref _filterSummary, value);
+    }
+
+    public bool IsSortedByName => SortKey == DriveSortKey.Name;
+
+    public bool IsSortedBySize => SortKey == DriveSortKey.Size;
+
+    public bool IsSortedByModified => SortKey == DriveSortKey.Modified;
+
+    public bool IsSortedByKind => SortKey == DriveSortKey.Kind;
+
+    /// <summary>The arrow shown next to the active key.</summary>
+    public string SortDirectionGlyph => SortDescending ? "▼" : "▲";
 
     /// <summary>
     /// Whether the recursive scan is in flight. Separate from <see cref="IsLoading"/> on purpose:
@@ -1186,7 +1263,31 @@ public sealed class MainWindowViewModel : ObservableObject
         IsWarning = true;
     }
 
-    private void DisplayItems(IEnumerable<DriveItem> items)
+    /// <summary>
+    /// Replaces the listing with <paramref name="items"/>: remembers them as the folder's full
+    /// contents, then renders the filtered, sorted view of them.
+    ///
+    /// Internal rather than private so tests can populate the listing directly. The production
+    /// route (<see cref="FetchFromCliAndUpdateCacheAsync"/>) marshals through
+    /// <c>Dispatcher.UIThread.InvokeAsync</c>, which never completes without a running Avalonia
+    /// dispatcher — so a test that went through the CLI path to get rows on screen would hang
+    /// rather than fail.
+    /// </summary>
+    internal void DisplayItems(IEnumerable<DriveItem> items)
+    {
+        _loadedItems = items as IReadOnlyList<DriveItem> ?? items.ToList();
+
+        // A filter belongs to the folder it was chosen in. Carrying it into the next folder would
+        // hide files the user has never filtered and make the listing look wrong, or empty.
+        if (_kindFilter is not null && !_loadedItems.Any(item => FileKindClassifier.Classify(item.Name, item.IsFolder) == _kindFilter))
+        {
+            _kindFilter = null;
+        }
+
+        RenderItems();
+    }
+
+    private void RenderItems()
     {
         // Rebuilding replaces every row's view-model, so the previous selection highlight would
         // otherwise vanish even on a plain refresh (which intentionally keeps the side panel's
@@ -1194,8 +1295,12 @@ public sealed class MainWindowViewModel : ObservableObject
         var previouslySelectedPath = _selectedNode?.Path;
         _selectedNode = null;
 
+        var visible = _kindFilter is null
+            ? _loadedItems
+            : _loadedItems.Where(item => FileKindClassifier.Classify(item.Name, item.IsFolder) == _kindFilter).ToList();
+
         RootItems.Clear();
-        foreach (var item in items.OrderByDescending(item => item.IsFolder).ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (var item in DriveItemSorter.Sort(visible, SortKey, SortDescending))
         {
             var node = new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, HandleUnexpectedError);
             if (previouslySelectedPath is not null && item.Path == previouslySelectedPath)
@@ -1209,10 +1314,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
         // Computed here rather than at each call site so the cached paint and the CLI result both
         // update it, and so the numbers can never disagree with the rows actually on screen.
-        Metrics.Update(FolderMetricsCalculator.FromChildren(
-            CurrentPath,
-            RootItems.Select(node => node.Item).ToList(),
-            _timeProvider.GetUtcNow()));
+        // Built from everything loaded, never from the filtered rows: metrics answer "what is in
+        // this folder", and a total that silently followed the filter would be a different question
+        // wearing the same label.
+        var metrics = FolderMetricsCalculator.FromChildren(CurrentPath, _loadedItems, _timeProvider.GetUtcNow());
+        Metrics.Update(metrics);
+        RebuildKindFilters(metrics);
 
         // Fire and forget: a stored folder size is a nice-to-have annotation, and the rows must
         // paint without waiting on the database.
@@ -1326,6 +1433,8 @@ public sealed class MainWindowViewModel : ObservableObject
             settings.CliPath = CliPath;
             settings.IsAuthenticated = IsAuthenticated;
             settings.ViewMode = ViewMode.ToString();
+            settings.SortKey = SortKey.ToString();
+            settings.SortDescending = SortDescending;
         });
     }
 
@@ -1347,6 +1456,74 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task ToggleCommandConsoleAsync()
     {
         IsCommandConsoleVisible = !IsCommandConsoleVisible;
+        await Task.CompletedTask;
+    }
+
+    private void RaiseSortStates()
+    {
+        OnPropertyChanged(nameof(IsSortedByName));
+        OnPropertyChanged(nameof(IsSortedBySize));
+        OnPropertyChanged(nameof(IsSortedByModified));
+        OnPropertyChanged(nameof(IsSortedByKind));
+        OnPropertyChanged(nameof(SortDirectionGlyph));
+    }
+
+    private void RebuildKindFilters(FolderMetrics metrics)
+    {
+        KindFilters.Clear();
+        if (metrics.Buckets.Count <= 1)
+        {
+            // One kind (or none) means every chip would be a no-op, and "Todos" alone is just noise.
+            FilterSummary = string.Empty;
+            return;
+        }
+
+        KindFilters.Add(new KindFilterViewModel(null, metrics.FileCount + metrics.FolderCount, ApplyKindFilterAsync, HandleUnexpectedError)
+        {
+            IsActive = _kindFilter is null,
+        });
+
+        foreach (var bucket in metrics.Buckets.OrderByDescending(bucket => bucket.Count).ThenBy(bucket => bucket.Kind.ToString(), StringComparer.Ordinal))
+        {
+            KindFilters.Add(new KindFilterViewModel(bucket.Kind, bucket.Count, ApplyKindFilterAsync, HandleUnexpectedError)
+            {
+                IsActive = _kindFilter == bucket.Kind,
+            });
+        }
+
+        FilterSummary = _kindFilter is null
+            ? string.Empty
+            : $"Mostrando {RootItems.Count:n0} de {metrics.FileCount + metrics.FolderCount:n0} elementos.";
+    }
+
+    private async Task ApplyKindFilterAsync(FileKind? kind)
+    {
+        // Clicking the active chip clears it, so the filter can always be undone from where it was
+        // applied, not only from "Todos".
+        _kindFilter = _kindFilter == kind ? null : kind;
+        RenderItems();
+        await Task.CompletedTask;
+    }
+
+    private async Task SortByAsync(DriveSortKey key)
+    {
+        if (SortKey == key)
+        {
+            SortDescending = !SortDescending;
+        }
+        else
+        {
+            SortKey = key;
+            // A new key starts ascending, except the two where "most" is the interesting end: the
+            // reason to sort by size or date is almost always to find the biggest or the newest.
+            SortDescending = key is DriveSortKey.Size or DriveSortKey.Modified;
+        }
+
+        PersistSettings();
+
+        // Re-sorted from what was loaded, not from the visible rows: sorting must not also drop
+        // whatever the active filter is hiding.
+        RenderItems();
         await Task.CompletedTask;
     }
 

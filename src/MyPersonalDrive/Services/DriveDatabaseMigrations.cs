@@ -103,5 +103,25 @@ public static class DriveDatabaseMigrations
                 Value TEXT NOT NULL
             );
             """),
+
+        // Recursive folder metrics from docs/PLAN-BROWSER-VIEWS.md M4. Only *deep, complete*
+        // results are stored: shallow ones are recomputed for free on every folder load, so
+        // persisting them would just be a second source of truth to keep from going stale.
+        // A row costs the user minutes of scanning, which is why it survives a restart rather
+        // than living in memory.
+        new SqliteMigration(5, """
+            CREATE TABLE FolderMetrics (
+                Path               TEXT PRIMARY KEY,
+                FileCount          INTEGER NOT NULL,
+                FolderCount        INTEGER NOT NULL,
+                TotalSize          INTEGER NOT NULL,
+                UnknownSizeCount   INTEGER NOT NULL,
+                ScannedFolderCount INTEGER NOT NULL,
+                NewestModifiedAt   TEXT,
+                OldestModifiedAt   TEXT,
+                BucketsJson        TEXT NOT NULL,
+                ComputedAt         TEXT NOT NULL
+            );
+            """),
     ];
 }

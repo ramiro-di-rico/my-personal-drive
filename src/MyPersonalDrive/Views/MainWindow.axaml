@@ -190,7 +190,7 @@
               <DataTemplate x:DataType="vm:DriveNodeViewModel">
                 <Grid Classes="hoverGroup"
                       Classes.selected="{Binding IsSelected}"
-                      ColumnDefinitions="*,Auto,Auto,Auto,Auto"
+                      ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto"
                       Margin="0,0,0,6">
                   <Button Grid.Column="0"
                           Command="{Binding RowCommand}"
@@ -205,7 +205,17 @@
                     </StackPanel>
                   </Button>
 
-                  <Button Grid.Column="1"
+                  <!-- The folder's recursive size, when someone has already scanned it. Files show
+                       nothing here: their size is already in the details panel. -->
+                  <TextBlock Grid.Column="1"
+                             Text="{Binding DeepSizeText}"
+                             IsVisible="{Binding HasDeepSize}"
+                             VerticalAlignment="Center"
+                             Margin="8,0"
+                             FontSize="12"
+                             Opacity="0.7" />
+
+                  <Button Grid.Column="2"
                           Classes="rowAction"
                           ToolTip.Tip="Create a copy"
                           Margin="8,0,0,0"
@@ -213,7 +223,7 @@
                     <Path Classes="icon" Data="{StaticResource IconCopy}" />
                   </Button>
 
-                  <Button Grid.Column="2"
+                  <Button Grid.Column="3"
                           Classes="rowAction"
                           ToolTip.Tip="Rename item"
                           Margin="8,0,0,0"
@@ -221,7 +231,7 @@
                     <Path Classes="icon" Data="{StaticResource IconPencil}" />
                   </Button>
 
-                  <Button Grid.Column="3"
+                  <Button Grid.Column="4"
                           Classes="rowAction"
                           ToolTip.Tip="Download file"
                           Margin="8,0,0,0"
@@ -230,7 +240,7 @@
                     <Path Classes="icon" Data="{StaticResource IconDownload}" />
                   </Button>
 
-                  <Button Grid.Column="4"
+                  <Button Grid.Column="5"
                           Classes="rowAction"
                           ToolTip.Tip="Move to trash"
                           Margin="8,0,0,0"
@@ -348,6 +358,11 @@
                                  Opacity="0.7"
                                  FontSize="12"
                                  IsVisible="{Binding SizeText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                      <TextBlock Text="{Binding DeepSizeText}"
+                                 TextAlignment="Center"
+                                 Opacity="0.7"
+                                 FontSize="12"
+                                 IsVisible="{Binding HasDeepSize}" />
                     </StackPanel>
                   </Button>
                 </Border>
@@ -425,13 +440,40 @@
             <StackPanel Spacing="10" IsVisible="{Binding Metrics.HasItems}">
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBlock FontWeight="Bold" Text="{Binding Metrics.TotalSizeText}" FontSize="18" />
-                <TextBlock Text="en archivos de esta carpeta" VerticalAlignment="Bottom" Opacity="0.7" FontSize="12" />
+                <TextBlock Text="{Binding Metrics.TotalSizeCaption}" TextWrapping="Wrap" VerticalAlignment="Bottom" Opacity="0.7" FontSize="12" />
               </StackPanel>
+              <TextBlock Text="{Binding Metrics.DepthNote}"
+                         TextWrapping="Wrap"
+                         FontSize="12"
+                         Opacity="0.8"
+                         IsVisible="{Binding Metrics.DepthNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
               <TextBlock Text="{Binding Metrics.ScopeNote}"
                          TextWrapping="Wrap"
                          Opacity="0.7"
                          FontSize="12"
                          IsVisible="{Binding Metrics.ScopeNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+              <!-- The recursive scan. Explicitly user-initiated and labelled with its cost: on this
+                   CLI it is one ~3.5s process per subfolder (docs/PLAN-BROWSER-VIEWS.md M3), so it
+                   must never fire on navigation. -->
+              <Button Command="{Binding ScanFolderDeeplyCommand}"
+                      IsVisible="{Binding !Metrics.IsScanning}"
+                      HorizontalAlignment="Stretch"
+                      HorizontalContentAlignment="Left">
+                <StackPanel Spacing="2">
+                  <TextBlock Text="Calcular tamaño total (recursivo)" />
+                  <TextBlock Text="Analiza todas las subcarpetas; puede tardar varios minutos."
+                             TextWrapping="Wrap"
+                             FontSize="11"
+                             Opacity="0.7" />
+                </StackPanel>
+              </Button>
+
+              <StackPanel Spacing="6" IsVisible="{Binding Metrics.IsScanning}">
+                <ProgressBar IsIndeterminate="True" />
+                <TextBlock Text="{Binding Metrics.ProgressText}" FontSize="12" />
+                <Button Command="{Binding CancelDeepScanCommand}" Content="Cancelar análisis" />
+              </StackPanel>
 
               <!-- Bar chart made of Borders: no charting dependency, and the widths come from the
                    view model (see FolderMetricBucketViewModel.BarMaxWidth, which tracks the 260px

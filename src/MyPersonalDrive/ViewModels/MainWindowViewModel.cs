@@ -14,6 +14,9 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly ProtonDriveService _service;
     private readonly DriveCacheService _cacheService;
     private readonly AppSettingsService _settings;
+    private readonly FolderMetricsStore? _metricsStore;
+    private readonly FolderStatsScanner? _statsScanner;
+    private CancellationTokenSource? _deepScanCts;
     private readonly Stack<string> _navigationHistory = new();
     private readonly TimeProvider _timeProvider;
     private readonly RemoteViewFreshnessPolicy _remoteViewFreshness = new();
@@ -54,6 +57,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _hasSelection;
     private bool _isSettingsView;
     private DriveViewMode _viewMode = DriveViewMode.List;
+    private bool _isDeepScanRunning;
     private const string UnknownCliVersion = "Unknown";
     private string _cliVersion = UnknownCliVersion;
     private bool _isCheckingCliVersion;
@@ -73,8 +77,16 @@ public sealed class MainWindowViewModel : ObservableObject
         TimeProvider? timeProvider = null,
         ICliReleaseFeed? releaseFeed = null,
         CliUpdateInstaller? updateInstaller = null,
-        Func<bool>? isSyncInProgress = null)
+        Func<bool>? isSyncInProgress = null,
+        FolderMetricsStore? metricsStore = null,
+        FolderStatsScanner? statsScanner = null)
     {
+        // Optional so the many existing view-model tests don't all have to build a database and a
+        // scanner to exercise unrelated behavior. When either is absent the deep-scan command
+        // simply can't execute (see CanScanFolderDeeply), which is also the honest state of the
+        // feature on a machine with no CLI configured.
+        _metricsStore = metricsStore;
+        _statsScanner = statsScanner;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _releaseFeed = releaseFeed;
         _updateInstaller = updateInstaller ?? new CliUpdateInstaller();
@@ -115,6 +127,8 @@ public sealed class MainWindowViewModel : ObservableObject
         DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity, HandleUnexpectedError);
         ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, HandleUnexpectedError);
         ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
+        ScanFolderDeeplyCommand = new AsyncCommand(ScanFolderDeeplyAsync, CanScanFolderDeeply, HandleUnexpectedError);
+        CancelDeepScanCommand = new AsyncCommand(CancelDeepScanAsync, () => IsDeepScanRunning, HandleUnexpectedError);
         ShowListViewCommand = new AsyncCommand(() => SetViewModeAsync(DriveViewMode.List), onError: HandleUnexpectedError);
         ShowIconsViewCommand = new AsyncCommand(() => SetViewModeAsync(DriveViewMode.Icons), onError: HandleUnexpectedError);
         ShowGalleryViewCommand = new AsyncCommand(() => SetViewModeAsync(DriveViewMode.Gallery), onError: HandleUnexpectedError);
@@ -143,6 +157,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand RefreshCommand { get; }
 
     public AsyncCommand BackCommand { get; }
+
+    public AsyncCommand ScanFolderDeeplyCommand { get; }
+
+    public AsyncCommand CancelDeepScanCommand { get; }
 
     public AsyncCommand ShowListViewCommand { get; }
 
@@ -224,6 +242,24 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 CheckForCliUpdateCommand.RaiseCanExecuteChanged();
                 InstallCliUpdateCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether the recursive scan is in flight. Separate from <see cref="IsLoading"/> on purpose:
+    /// this runs for minutes, and gating every button in the window on it (which is what IsLoading
+    /// does) would make the app look hung while the user is free to keep browsing.
+    /// </summary>
+    public bool IsDeepScanRunning
+    {
+        get => _isDeepScanRunning;
+        private set
+        {
+            if (SetProperty(ref _isDeepScanRunning, value))
+            {
+                ScanFolderDeeplyCommand.RaiseCanExecuteChanged();
+                CancelDeepScanCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -512,6 +548,108 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private bool CanRefresh() => !IsLoading && IsAuthenticated;
 
+    private bool CanScanFolderDeeply()
+        => IsAuthenticated && !IsDeepScanRunning && _statsScanner is not null && _metricsStore is not null;
+
+    /// <summary>
+    /// The recursive scan of the folder on screen. One at a time, app-wide: every folder is a ~3.5 s
+    /// CLI process (docs/PLAN-BROWSER-VIEWS.md M3), and two scans would compete for the executor's
+    /// concurrency ceiling with each other, with the sync engine, and with the user's own browsing.
+    /// </summary>
+    private async Task ScanFolderDeeplyAsync()
+    {
+        if (_statsScanner is null || _metricsStore is null)
+        {
+            return;
+        }
+
+        var path = CurrentPath;
+        _deepScanCts?.Cancel();
+        _deepScanCts = new CancellationTokenSource();
+        var token = _deepScanCts.Token;
+
+        IsDeepScanRunning = true;
+        Metrics.BeginDeepScan();
+
+        try
+        {
+            var progress = new Progress<FolderScanProgress>(report =>
+                Metrics.ReportDeepScanProgress(report.FoldersScanned, report.FoldersQueued));
+
+            var metrics = await _statsScanner.ScanAsync(path, progress, token);
+
+            // Only a finished scan is persisted; a cancelled one is shown and forgotten
+            // (FolderMetricsStore.SaveAsync enforces that too, this just avoids the round-trip).
+            if (metrics.IsComplete)
+            {
+                await _metricsStore.SaveAsync(metrics, CancellationToken.None);
+            }
+
+            // No Dispatcher hop anywhere in this method: the command is invoked from the UI thread,
+            // so every await here resumes on it. Marshalling explicitly would also make the method
+            // untestable — Dispatcher.UIThread.InvokeAsync never completes without a running
+            // Avalonia dispatcher, which no unit test has.
+            //
+            // The user may have navigated away during the minutes this took. Their metrics panel now
+            // describes a different folder, so showing this result there would simply be wrong — the
+            // stored row is still theirs to find on the way back.
+            if (CurrentPath == path)
+            {
+                Metrics.Update(metrics);
+            }
+
+            StatusMessage = metrics.IsComplete
+                ? $"Analizadas {metrics.ScannedFolderCount} carpetas en {path}."
+                : $"Análisis de {path} cancelado tras {metrics.ScannedFolderCount} carpetas.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = FormatCliError(path, ex);
+            IsWarning = true;
+        }
+        catch (DbException ex)
+        {
+            // The scan itself succeeded; only storing it failed. Say so rather than implying the
+            // minutes were wasted.
+            StatusMessage = $"Se analizó {path} pero no se pudo guardar el resultado: {ex.Message}";
+            IsWarning = true;
+        }
+        finally
+        {
+            IsDeepScanRunning = false;
+            Metrics.EndDeepScan();
+        }
+    }
+
+    private async Task CancelDeepScanAsync()
+    {
+        _deepScanCts?.Cancel();
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Throws away the stored recursive metrics that a change at <paramref name="path"/> makes
+    /// wrong — the folder itself, everything under it, and every folder above it. Best effort: a
+    /// failure here must not turn a successful upload or delete into an error message.
+    /// </summary>
+    private async Task InvalidateDeepMetricsAsync(string path)
+    {
+        if (_metricsStore is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _metricsStore.InvalidateForChangeAtAsync(path);
+        }
+        catch (DbException)
+        {
+            // A stale metric is a wrong number on screen; a crashed delete is a lost file. If the
+            // cache can't be invalidated the user's next scan will fix it.
+        }
+    }
+
     private bool CanGoBack() => !IsLoading && IsAuthenticated && _navigationHistory.Count > 0;
 
     private bool CanUpload() => !IsLoading && IsAuthenticated;
@@ -678,6 +816,7 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusMessage = $"Uploading {files.Count} file(s) to {CurrentPath}...";
             await _service.UploadFilesAsync(files, CurrentPath, strategy);
             StatusMessage = $"Uploaded {files.Count} file(s) to {CurrentPath}.";
+            await InvalidateDeepMetricsAsync(CurrentPath);
 
             _ = RefreshAsync(); // Refresh in background
         }
@@ -716,6 +855,7 @@ public sealed class MainWindowViewModel : ObservableObject
             // Update DB immediately
             var newFolderPath = ProtonDriveService.CombinePath(CurrentPath, folderName);
             await _cacheService.AddOrUpdateItemAsync(CurrentPath, new DriveItem(newFolderPath, folderName, true));
+            await InvalidateDeepMetricsAsync(newFolderPath);
 
             _ = RefreshAsync(); // Refresh in background
         }
@@ -788,6 +928,10 @@ public sealed class MainWindowViewModel : ObservableObject
             var newPath = ProtonDriveService.CombinePath(parentPath, newName);
             await _cacheService.RemoveItemAsync(item.Path);
             await _cacheService.AddOrUpdateItemAsync(parentPath, item with { Path = newPath, Name = newName });
+            // Both paths: the old subtree's metrics are gone, and the new name's ancestors no
+            // longer describe what's under them.
+            await InvalidateDeepMetricsAsync(item.Path);
+            await InvalidateDeepMetricsAsync(newPath);
 
             _ = RefreshAsync(); // Refresh in background
         }
@@ -824,6 +968,7 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusMessage = $"Creating a copy of {item.Name} as {displayTarget} in {CurrentPath}...";
             await _service.CopyItemAsync(item.Path, CurrentPath, string.IsNullOrEmpty(newName) ? null : newName);
             StatusMessage = $"Copied {item.Name} successfully.";
+            await InvalidateDeepMetricsAsync(CurrentPath);
             
             _ = RefreshAsync(); // Refresh in background
         }
@@ -853,7 +998,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
             // Update DB immediately
             await _cacheService.RemoveItemAsync(item.Path);
-            
+            await InvalidateDeepMetricsAsync(item.Path);
+
             _ = RefreshAsync(); // Refresh in background
         }
         catch (InvalidOperationException ex)
@@ -1067,6 +1213,58 @@ public sealed class MainWindowViewModel : ObservableObject
             CurrentPath,
             RootItems.Select(node => node.Item).ToList(),
             _timeProvider.GetUtcNow()));
+
+        // Fire and forget: a stored folder size is a nice-to-have annotation, and the rows must
+        // paint without waiting on the database.
+        _ = AnnotateFolderSizesAsync(CurrentPath, RootItems.Where(node => node.IsFolder).ToList());
+    }
+
+    /// <summary>
+    /// Fills in <see cref="DriveNodeViewModel.DeepSizeText"/> for the folders on screen that someone
+    /// has already scanned. One query for the whole listing, not one per row.
+    /// </summary>
+    private async Task AnnotateFolderSizesAsync(string path, IReadOnlyList<DriveNodeViewModel> folders)
+    {
+        if (_metricsStore is null || folders.Count == 0)
+        {
+            return;
+        }
+
+        Dictionary<string, FolderMetrics> stored;
+        try
+        {
+            stored = await _metricsStore.GetManyAsync(folders.Select(folder => folder.Path).ToList());
+        }
+        catch (DbException)
+        {
+            // Contention with the sync engine over cache.db. An annotation is not worth a warning.
+            return;
+        }
+
+        if (stored.Count == 0)
+        {
+            return;
+        }
+
+        // Posted, not awaited: this method is fire-and-forget from DisplayItems, so nothing needs the
+        // completion — and awaiting a dispatcher hop would hang wherever no dispatcher loop is
+        // running, which includes every unit test.
+        Dispatcher.UIThread.Post(() =>
+        {
+            // The listing may have been rebuilt while the query ran; these row view models would
+            // then be orphans, and writing to them would leave the new rows blank instead.
+            if (CurrentPath != path)
+            {
+                return;
+            }
+
+            foreach (var folder in folders)
+            {
+                folder.DeepSizeText = stored.TryGetValue(folder.Path, out var metrics)
+                    ? ByteSize.Format(metrics.TotalSize)
+                    : null;
+            }
+        });
     }
 
     private void UpdateBreadcrumbs(string path)

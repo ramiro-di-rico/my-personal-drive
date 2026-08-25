@@ -15,6 +15,14 @@ Current functional state: browse `/my-files`, upload, download, rename, copy, cr
 move to trash, and a live console showing CLI output. There's a local SQLite cache used to
 paint the UI instantly while the CLI responds.
 
+The listing can be shown as a **list, an icons grid or a gallery** of large tiles (the choice is
+persisted in `settings.json`), with per-type icons from `FileKindClassifier`. The side panel shows
+**per-directory metrics**: counts, total size and a type histogram computed for free from the
+listing already on screen, plus an opt-in **recursive scan** (`FolderStatsScanner`, progress and
+cancel) whose result is persisted in the `FolderMetrics` table and then annotated onto folder rows.
+A recursive scan costs ~3.5 s per subfolder, so it is never automatic. See
+[PLAN-BROWSER-VIEWS.md](PLAN-BROWSER-VIEWS.md).
+
 Synchronization with a local directory is **present** as of commit `87e91d6`: sync pairs
 (download-only, upload-only, or two-way) that run on their own, with the on/off choice persisted
 across restarts. See [PLAN-LOCAL-SYNC.md](PLAN-LOCAL-SYNC.md) for the design.

@@ -11,6 +11,7 @@ public sealed class DriveNodeViewModel : ObservableObject
     private readonly Func<DriveItem, Task> _renameItemAsync;
     private readonly Func<DriveItem, Task> _copyItemAsync;
     private bool _isSelected;
+    private string? _deepSizeText;
 
     public DriveNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Func<DriveItem, Task> downloadItemAsync, Func<DriveItem, Task> trashItemAsync, Func<DriveItem, Task> renameItemAsync, Func<DriveItem, Task> copyItemAsync, Action<Exception>? onError = null)
     {
@@ -54,6 +55,26 @@ public sealed class DriveNodeViewModel : ObservableObject
     public FileKind FileKind { get; }
 
     public string? SizeText => Item.Size is null ? null : $"{Item.Size:n0} bytes";
+
+    /// <summary>
+    /// A folder's recursive size, once someone has paid for the scan that produced it
+    /// (docs/PLAN-BROWSER-VIEWS.md M4/M5). Null for files, and for folders nobody has analyzed —
+    /// the browser gradually learns these rather than computing them on sight, because each one
+    /// costs ~3.5 s per subfolder.
+    /// </summary>
+    public string? DeepSizeText
+    {
+        get => _deepSizeText;
+        set
+        {
+            if (SetProperty(ref _deepSizeText, value))
+            {
+                OnPropertyChanged(nameof(HasDeepSize));
+            }
+        }
+    }
+
+    public bool HasDeepSize => !string.IsNullOrEmpty(DeepSizeText);
 
     public string? ModifiedText => Item.ModifiedAt?.ToLocalTime().ToString("g");
 

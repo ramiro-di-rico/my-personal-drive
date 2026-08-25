@@ -39,8 +39,13 @@ public partial class App : Application
                 GetRemoteFolderChildren = service.GetChildrenAsync,
             };
 
+            // Same cache.db again, same shared migrations - see the note above.
+            var metricsStore = new FolderMetricsStore(Path.Combine(settings.BaseFolder, "cache.db"));
+
             var mainWindowViewModel = new MainWindowViewModel(
-                service, cacheService, settings, syncPanelViewModel, releaseFeed: new CliReleaseFeed());
+                service, cacheService, settings, syncPanelViewModel, releaseFeed: new CliReleaseFeed(),
+                metricsStore: metricsStore,
+                statsScanner: new FolderStatsScanner(service));
 
             desktop.MainWindow = new MainWindow
             {

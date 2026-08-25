@@ -43,16 +43,26 @@
 - [x] **M2 — shallow metrics.** `Services/FolderMetricsCalculator.FromChildren`, called from
   `MainWindowViewModel.DisplayItems` so both the cached paint and the CLI result refresh it. Zero
   CLI cost. Covered by `FolderMetricsCalculatorTests` (12 tests) and `ByteSizeTests`.
-- [ ] **M3** — deep metrics scanner (`FolderStatsScanner`), progress + cancel. Not started.
-- [ ] **M4** — persistence of deep results (`FolderMetrics` table, migration 5). Not started.
+- [x] **M3 — deep metrics scanner.** `Services/RemoteTreeWalker.cs` extracted from
+  `Services/Sync/RemoteScanner.cs` (which kept its own tests unchanged) and
+  `Services/FolderStatsScanner.cs` on top of it: progress as counts, cancellation checked per wave
+  *and* after each semaphore slot, partial results returned with `IsComplete = false`, and no CLI
+  cache reset. Covered by `FolderStatsScannerTests` (8 tests).
+- [x] **M4 — persistence.** Migration 5 (`FolderMetrics` table), `Services/FolderMetricsStore.cs`
+  (save/get/get-many/invalidate), `[JsonSerializable(typeof(List<FolderKindBucket>))]` in
+  `AppJsonContext`. Only complete deep scans are stored; ancestor *and* descendant invalidation is
+  wired into trash, upload, rename, copy and create-folder. Covered by `FolderMetricsStoreTests`
+  (13 tests) and `MainWindowDeepMetricsTests` (7 tests).
 - [x] **M5 — metrics UI** (partial: the shallow half). `ViewModels/FolderMetricsViewModel.cs`
   (`FolderMetricsViewModel`, `FolderMetricBucketViewModel`, `LargestItemViewModel`) and a
   "Métricas de la carpeta" section in the side panel: headline counts, total with an explicit
   scope note, a `Border`-based histogram, clickable top-5, newest/oldest. The panel is now
   scrollable, since status + selection + metrics overflows a short window. Covered by
   `FolderMetricsViewModelTests` (10 tests).
-  **Not yet done:** the "Calcular tamaño total (recursivo)" button and the progress/cancel line
-  (needs M3), and the per-folder deep size shown in the listing rows and tiles (needs M4).
+  Completed with M3/M4: the "Calcular tamaño total (recursivo)" button with its cost warning, the
+  indeterminate progress line with a cancel button, the depth/age note ("Recursivo · 412 carpetas
+  analizadas · calculado hace 3 días"), and the per-folder deep size in list rows and gallery
+  tiles, loaded with one query per listing.
 - [ ] **M6** — out of scope, recorded: thumbnails, whole-drive dashboard. See §7.
 
 ---

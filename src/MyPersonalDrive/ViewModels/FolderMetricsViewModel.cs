@@ -77,19 +77,27 @@ public sealed class FolderMetricsViewModel : ObservableObject
 {
     private readonly Func<DriveItem, Task> _selectItem;
     private readonly Action<Exception>? _onError;
+    private readonly TimeProvider _timeProvider;
     private string _headline = "Sin datos.";
     private string _totalSizeText = "—";
+    private string _totalSizeCaption = "en archivos de esta carpeta";
     private string _scopeNote = string.Empty;
     private string _newestText = "—";
     private string _oldestText = "—";
     private bool _hasItems;
     private bool _hasBuckets;
     private bool _hasLargestItems;
+    private bool _isDeep;
+    private bool _isPartial;
+    private string _depthNote = string.Empty;
+    private string _progressText = string.Empty;
+    private bool _isScanning;
 
-    public FolderMetricsViewModel(Func<DriveItem, Task> selectItem, Action<Exception>? onError = null)
+    public FolderMetricsViewModel(Func<DriveItem, Task> selectItem, Action<Exception>? onError = null, TimeProvider? timeProvider = null)
     {
         _selectItem = selectItem;
         _onError = onError;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         Buckets = new ObservableCollection<FolderMetricBucketViewModel>();
         LargestItems = new ObservableCollection<LargestItemViewModel>();
     }
@@ -109,6 +117,17 @@ public sealed class FolderMetricsViewModel : ObservableObject
     {
         get => _totalSizeText;
         private set => SetProperty(ref _totalSizeText, value);
+    }
+
+    /// <summary>
+    /// What the big number covers. Lives here rather than as fixed text in the view because the
+    /// answer changes with the metric's depth, and a shallow total labelled as a folder's size is
+    /// exactly the mistake this feature has to avoid.
+    /// </summary>
+    public string TotalSizeCaption
+    {
+        get => _totalSizeCaption;
+        private set => SetProperty(ref _totalSizeCaption, value);
     }
 
     /// <summary>
@@ -152,13 +171,73 @@ public sealed class FolderMetricsViewModel : ObservableObject
         private set => SetProperty(ref _hasLargestItems, value);
     }
 
+    /// <summary>Whether what's on screen came from a recursive scan.</summary>
+    public bool IsDeep
+    {
+        get => _isDeep;
+        private set => SetProperty(ref _isDeep, value);
+    }
+
+    /// <summary>A cancelled scan's numbers: real, but a floor rather than a total.</summary>
+    public bool IsPartial
+    {
+        get => _isPartial;
+        private set => SetProperty(ref _isPartial, value);
+    }
+
+    /// <summary>
+    /// Where the number came from and how old it is — "recursivo · 412 carpetas · calculado hace
+    /// 3 días". Shown because a deep total cost minutes and the user has to be able to judge
+    /// whether it's still worth trusting; the app deliberately does not silently expire it.
+    /// </summary>
+    public string DepthNote
+    {
+        get => _depthNote;
+        private set => SetProperty(ref _depthNote, value);
+    }
+
+    public string ProgressText
+    {
+        get => _progressText;
+        private set => SetProperty(ref _progressText, value);
+    }
+
+    public bool IsScanning
+    {
+        get => _isScanning;
+        private set => SetProperty(ref _isScanning, value);
+    }
+
+    public void BeginDeepScan()
+    {
+        IsScanning = true;
+        ProgressText = "Analizando carpetas...";
+    }
+
+    public void ReportDeepScanProgress(int foldersScanned, int foldersQueued)
+        => ProgressText = foldersQueued > 0
+            ? $"{foldersScanned:n0} carpetas analizadas · {foldersQueued:n0} en cola"
+            : $"{foldersScanned:n0} carpetas analizadas";
+
+    public void EndDeepScan()
+    {
+        IsScanning = false;
+        ProgressText = string.Empty;
+    }
+
     public void Update(FolderMetrics metrics)
     {
+        IsDeep = metrics.IsDeep;
+        IsPartial = !metrics.IsComplete;
+        DepthNote = BuildDepthNote(metrics, _timeProvider.GetUtcNow());
         HasItems = !metrics.IsEmpty;
         Headline = metrics.IsEmpty
             ? "Carpeta vacía."
             : $"{Plural(metrics.FileCount, "archivo", "archivos")} · {Plural(metrics.FolderCount, "carpeta", "carpetas")}";
         TotalSizeText = ByteSize.Format(metrics.TotalSize);
+        TotalSizeCaption = metrics.IsDeep
+            ? (metrics.IsComplete ? "en total, incluidas las subcarpetas" : "analizado hasta la cancelación")
+            : "en archivos de esta carpeta";
         ScopeNote = BuildScopeNote(metrics);
         NewestText = FormatTimestamp(metrics.NewestModifiedAt);
         OldestText = FormatTimestamp(metrics.OldestModifiedAt);
@@ -179,6 +258,45 @@ public sealed class FolderMetricsViewModel : ObservableObject
         }
 
         HasLargestItems = LargestItems.Count > 0;
+    }
+
+    private static string BuildDepthNote(FolderMetrics metrics, DateTimeOffset now)
+    {
+        if (!metrics.IsDeep)
+        {
+            return string.Empty;
+        }
+
+        var scope = metrics.IsComplete
+            ? $"Recursivo · {metrics.ScannedFolderCount:n0} carpetas analizadas"
+            : $"Parcial · {metrics.ScannedFolderCount:n0} carpetas analizadas antes de cancelar";
+
+        return $"{scope} · {Age(now - metrics.ComputedAt)}";
+    }
+
+    /// <summary>
+    /// Coarse on purpose: the useful question about a deep metric is "is this from today or from
+    /// last month", not the minute it was produced.
+    /// </summary>
+    private static string Age(TimeSpan elapsed)
+    {
+        if (elapsed < TimeSpan.FromMinutes(2))
+        {
+            return "recién calculado";
+        }
+
+        if (elapsed < TimeSpan.FromHours(1))
+        {
+            return $"calculado hace {(int)elapsed.TotalMinutes} min";
+        }
+
+        if (elapsed < TimeSpan.FromDays(1))
+        {
+            return $"calculado hace {(int)elapsed.TotalHours} h";
+        }
+
+        var days = (int)elapsed.TotalDays;
+        return days == 1 ? "calculado hace 1 día" : $"calculado hace {days} días";
     }
 
     private static string BuildScopeNote(FolderMetrics metrics)

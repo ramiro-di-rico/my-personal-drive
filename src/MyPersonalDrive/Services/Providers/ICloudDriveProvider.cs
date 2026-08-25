@@ -17,6 +17,8 @@ public interface ICloudDriveProvider
 
     IDriveAuthenticator Auth { get; }
 
+    IProviderPathSyntax Paths { get; }
+
     /// <summary>Null when the provider has no stale-cache problem to invalidate.</summary>
     IRemoteViewInvalidator? RemoteView { get; }
 

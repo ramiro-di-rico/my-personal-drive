@@ -12,6 +12,7 @@ namespace MyPersonalDrive.Services.Providers.Proton;
 public sealed class ProtonDriveProvider : ICloudDriveProvider, IDriveOperations, IDriveAuthenticator, IRemoteViewInvalidator, IProviderDiagnostics
 {
     private readonly ProtonDriveService _service;
+    private readonly ProtonPathSyntax _paths = new();
 
     public ProtonDriveProvider(ProtonDriveService service)
     {
@@ -52,6 +53,8 @@ public sealed class ProtonDriveProvider : ICloudDriveProvider, IDriveOperations,
     public IDriveOperations Operations => this;
 
     public IDriveAuthenticator Auth => this;
+
+    public IProviderPathSyntax Paths => _paths;
 
     public IRemoteViewInvalidator? RemoteView => this;
 

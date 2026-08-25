@@ -27,21 +27,36 @@ public sealed class SyncExecutor
     private const int MaxLogEntriesPerPair = 1000;
 
     private readonly IDriveOperations _operations;
+    private readonly IContentHasher _hasher;
+    private readonly RemoteHashAlgorithm _remoteHashAlgorithm;
     private readonly SyncStateStore _stateStore;
     private readonly ILocalScanner _localScanner;
     private readonly IRemoteScanner _remoteScanner;
     private readonly TimeProvider _timeProvider;
     private readonly SyncEchoSuppressor _echoSuppressor;
 
+    /// <param name="hasher">
+    /// Computes local content hashes. Defaults to <see cref="Sha1ContentHasher"/> — correct as
+    /// long as the active provider is Proton; the composition root should pass one matching
+    /// <c>Capabilities.RemoteHash</c> once a second provider exists (docs/PLAN-CLOUD-PROVIDERS.md P3/P6).
+    /// </param>
+    /// <param name="remoteHashAlgorithm">
+    /// Tags fingerprints built from remote data — see the mismatch guard in
+    /// <see cref="SyncReconciler"/>. Defaults to <see cref="RemoteHashAlgorithm.Sha1"/>, Proton's algorithm.
+    /// </param>
     public SyncExecutor(
         IDriveOperations operations,
         SyncStateStore stateStore,
         ILocalScanner localScanner,
         IRemoteScanner remoteScanner,
         TimeProvider? timeProvider = null,
-        SyncEchoSuppressor? echoSuppressor = null)
+        SyncEchoSuppressor? echoSuppressor = null,
+        IContentHasher? hasher = null,
+        RemoteHashAlgorithm remoteHashAlgorithm = RemoteHashAlgorithm.Sha1)
     {
         _operations = operations;
+        _hasher = hasher ?? new Sha1ContentHasher();
+        _remoteHashAlgorithm = remoteHashAlgorithm;
         _stateStore = stateStore;
         _localScanner = localScanner;
         _remoteScanner = remoteScanner;
@@ -117,7 +132,7 @@ public sealed class SyncExecutor
         await _stateStore.EnqueueConflictsAsync(pair.Id, unresolved, now, cancellationToken);
 
         var context = new RunContext(pair, mapper, local, remote,
-            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_operations, _stateStore, mapper, pair.Id) : null);
+            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_operations, _hasher, _remoteHashAlgorithm, _stateStore, mapper, pair.Id) : null);
         context.Baseline?.SeedFromScan(remote);
 
         var (failureCount, aborted) = await DrainQueueAsync(context, cancellationToken);
@@ -264,7 +279,8 @@ public sealed class SyncExecutor
             foreach (var item in await _operations.ListFolderAsync(mapper.ToRemoteAbsolute(parent), cancellationToken))
             {
                 var relativePath = parent.Length == 0 ? item.Name : $"{parent}/{item.Name}";
-                remote[relativePath] = new NodeFingerprint(relativePath, item.IsFolder, item.Size, item.ModifiedAt, item.NodeId, item.ContentHash);
+                remote[relativePath] = new NodeFingerprint(relativePath, item.IsFolder, item.Size, item.ModifiedAt, item.NodeId, item.ContentHash,
+                    item.ContentHash is null ? null : _remoteHashAlgorithm);
             }
         }
         catch (DriveException) when (resolution == ConflictResolution.KeepLocal)
@@ -273,7 +289,7 @@ public sealed class SyncExecutor
         }
 
         var context = new RunContext(pair, mapper, new Dictionary<string, NodeFingerprint>(), remote,
-            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_operations, _stateStore, mapper, pair.Id) : null);
+            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_operations, _hasher, _remoteHashAlgorithm, _stateStore, mapper, pair.Id) : null);
         context.Baseline?.SeedFromScan(remote);
 
         var now = _timeProvider.GetUtcNow();
@@ -415,8 +431,8 @@ public sealed class SyncExecutor
         {
             try
             {
-                var hash = await LocalFileHasher.ComputeSha1Async(mapper.ToLocalAbsolute(relativePath), cancellationToken);
-                hashed[relativePath] = hashed[relativePath] with { ContentHash = hash };
+                var hash = await _hasher.ComputeAsync(mapper.ToLocalAbsolute(relativePath), cancellationToken);
+                hashed[relativePath] = hashed[relativePath] with { ContentHash = hash, HashAlgorithm = _hasher.Algorithm };
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

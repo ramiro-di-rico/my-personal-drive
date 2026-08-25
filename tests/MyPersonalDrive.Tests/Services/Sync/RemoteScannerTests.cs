@@ -1,4 +1,5 @@
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
@@ -205,5 +206,68 @@ public class RemoteScannerTests
 
         Assert.Empty(result);
         Assert.Single(executor.Calls); // only the root was listed
+    }
+
+    // ---- case-insensitive providers (docs/PLAN-CLOUD-PROVIDERS.md §2.4, P3) ----
+    // Proton itself is always case-sensitive; these exercise the generic detection through a
+    // decorator that only overrides Paths.Comparison, since no case-insensitive provider exists yet.
+
+    [Fact]
+    public async Task OnACaseInsensitiveProvider_TwoNamesDifferingOnlyByCase_AreBothSkippedAndReported()
+    {
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath("/my-files/Docs",
+            $"[{FileJson("uid-1", "Report.txt", 3, "2026-01-01T00:00:00.000Z", "hash-1")}, " +
+            $"{FileJson("uid-2", "report.txt", 4, "2026-01-01T00:00:00.000Z", "hash-2")}]");
+        var provider = new CaseInsensitivePathsDecorator(new ProtonDriveProvider(new ProtonDriveService(executor)));
+        var scanner = new RemoteScanner(provider);
+
+        var skipped = new List<string>();
+        scanner.NodeSkipped += (_, name) => skipped.Add(name);
+
+        var result = await scanner.ScanAsync("/my-files/Docs", new PathMapper("/my-files/Docs", "/tmp/x"), new ExclusionMatcher([]));
+
+        Assert.Empty(result);
+        Assert.Equal(new HashSet<string> { "Report.txt", "report.txt" }, skipped.ToHashSet());
+    }
+
+    [Fact]
+    public async Task OnACaseInsensitiveProvider_NamesDifferingByMoreThanCase_AreNotTreatedAsCollisions()
+    {
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath("/my-files/Docs", $"[{FileJson("uid-1", "a.txt", 3, "2026-01-01T00:00:00.000Z", "hash-1")}]");
+        var provider = new CaseInsensitivePathsDecorator(new ProtonDriveProvider(new ProtonDriveService(executor)));
+        var scanner = new RemoteScanner(provider);
+
+        var result = await scanner.ScanAsync("/my-files/Docs", new PathMapper("/my-files/Docs", "/tmp/x"), new ExclusionMatcher([]));
+
+        Assert.Equal(["a.txt"], result.Keys);
+    }
+
+    /// <summary>Wraps a real provider, overriding only <see cref="IProviderPathSyntax.Comparison"/>.</summary>
+    private sealed class CaseInsensitivePathsDecorator : ICloudDriveProvider
+    {
+        private readonly ICloudDriveProvider _inner;
+
+        public CaseInsensitivePathsDecorator(ICloudDriveProvider inner) => _inner = inner;
+
+        public ProviderId Id => _inner.Id;
+        public string DisplayName => _inner.DisplayName;
+        public ProviderCapabilities Capabilities => _inner.Capabilities;
+        public IDriveOperations Operations => _inner.Operations;
+        public IDriveAuthenticator Auth => _inner.Auth;
+        public IProviderPathSyntax Paths { get; } = new FakePathSyntax(StringComparison.OrdinalIgnoreCase);
+        public IRemoteViewInvalidator? RemoteView => _inner.RemoteView;
+        public IProviderDiagnostics? Diagnostics => _inner.Diagnostics;
+        public event EventHandler<ProviderActivity>? Activity { add => _inner.Activity += value; remove => _inner.Activity -= value; }
+        public event EventHandler<string>? ListingParseWarning { add => _inner.ListingParseWarning += value; remove => _inner.ListingParseWarning -= value; }
+    }
+
+    private sealed class FakePathSyntax : IProviderPathSyntax
+    {
+        public FakePathSyntax(StringComparison comparison) => Comparison = comparison;
+        public StringComparison Comparison { get; }
+        public string Combine(string parentPath, string name) => ProtonDriveService.CombinePath(parentPath, name);
+        public bool IsRemoteNameMappableLocally(string name) => !ProtonDriveService.HasUnmappableName(name);
     }
 }

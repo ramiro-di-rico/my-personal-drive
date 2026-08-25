@@ -112,6 +112,28 @@ public class SyncReconcilerTests
         Assert.Empty(plan.Conflicts);
     }
 
+    /// <summary>
+    /// docs/PLAN-CLOUD-PROVIDERS.md P3/R2: a hash comparison is only meaningful when both sides
+    /// were produced by the same algorithm. Same size and mtime as the baseline, but the current
+    /// fingerprint's hash string doesn't match the baseline's — which would look like "changed"
+    /// (and enqueue a needless upload) if the reconciler trusted it, but the two were computed
+    /// with different algorithms so the mismatch is expected and meaningless. The guard must fall
+    /// back to size+mtime, which agree, and correctly conclude nothing changed.
+    /// </summary>
+    [Fact]
+    public void TwoWay_LocalHashAlgorithmDiffersFromBaseline_ButSizeAndMtimeAgree_NoAction()
+    {
+        var remoteFp = FileFp("a.txt");
+        var baselineLocalFp = new NodeFingerprint("a.txt", false, 100, T0, null, "sha1-digest", RemoteHashAlgorithm.Sha1);
+        var currentLocalFp = new NodeFingerprint("a.txt", false, 100, T0, null, "quickxor-digest", RemoteHashAlgorithm.QuickXor);
+
+        var plan = Reconcile(SyncDirection.TwoWay, Map(currentLocalFp), Map(remoteFp),
+            BaselineMap(BaselineOf("a.txt", false, baselineLocalFp, remoteFp)));
+
+        Assert.Empty(plan.Actions);
+        Assert.Empty(plan.Conflicts);
+    }
+
     [Fact]
     public void TwoWay_LocalChangedOnly_Uploads()
     {

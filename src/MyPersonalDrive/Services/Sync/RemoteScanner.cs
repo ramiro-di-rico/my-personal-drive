@@ -54,6 +54,11 @@ public sealed class RemoteScanner : IRemoteScanner
         }
 
         var result = new Dictionary<string, NodeFingerprint>();
+        // Only populated (and only checked) for a case-insensitive provider — see
+        // ReportCaseCollisionIfAny. Empty for Proton, so this costs nothing today.
+        var seenByFold = _provider.Paths.Comparison == StringComparison.Ordinal
+            ? null
+            : new Dictionary<string, string>(StringComparer.FromComparison(_provider.Paths.Comparison));
 
         await _walker.WalkAsync(remoteRoot, item =>
         {
@@ -62,11 +67,7 @@ public sealed class RemoteScanner : IRemoteScanner
             // identity model intact — relative paths stay unambiguously '/'-separated — where
             // the alternative would be to invent a substitute name, which in a TwoWay pair
             // would then upload back as a second, differently-named copy.
-            //
-            // Still hard-coded to Proton's rule here: docs/PLAN-CLOUD-PROVIDERS.md P3 is what
-            // moves this behind IProviderPathSyntax so a provider with different unmappable
-            // characters (e.g. OneDrive's `" * : < > ? \ |`) isn't silently held to Proton's.
-            if (Providers.Proton.ProtonDriveService.HasUnmappableName(item.Name))
+            if (!_provider.Paths.IsRemoteNameMappableLocally(item.Name))
             {
                 NodeSkipped?.Invoke(this, item.Name);
                 return false;
@@ -78,10 +79,45 @@ public sealed class RemoteScanner : IRemoteScanner
                 return false;
             }
 
-            result[relativePath] = new NodeFingerprint(relativePath, item.IsFolder, item.Size, item.ModifiedAt, item.NodeId, item.ContentHash);
+            if (seenByFold is not null && !ReportCaseCollisionIfAny(seenByFold, relativePath, result))
+            {
+                return false;
+            }
+
+            result[relativePath] = new NodeFingerprint(relativePath, item.IsFolder, item.Size, item.ModifiedAt, item.NodeId, item.ContentHash,
+                item.ContentHash is null ? null : _provider.Capabilities.RemoteHash);
             return true;
         }, cancellationToken: cancellationToken);
 
         return result;
+    }
+
+    /// <summary>
+    /// Two remote paths that differ only by case are one local path on a case-insensitive
+    /// provider — e.g. OneDrive's <c>Photos/</c> and <c>photos/</c> would both map to one local
+    /// folder (docs/PLAN-CLOUD-PROVIDERS.md §2.4). Rather than let the second one silently
+    /// overwrite the first in <c>result</c>, or invent which one "wins", both are skipped and
+    /// reported — same treatment as an unmappable name. Never happens on Proton: <paramref
+    /// name="seenByFold"/> is only non-empty for a provider whose <c>Paths.Comparison</c> ignores
+    /// case.
+    /// </summary>
+    private bool ReportCaseCollisionIfAny(Dictionary<string, string> seenByFold, string relativePath, Dictionary<string, NodeFingerprint> result)
+    {
+        if (seenByFold.TryGetValue(relativePath, out var existing))
+        {
+            NodeSkipped?.Invoke(this, relativePath);
+            if (!string.Equals(existing, relativePath, StringComparison.Ordinal))
+            {
+                // The first occurrence was already added to `result` under its own casing before
+                // the second arrived; it must be retracted too, since neither can be trusted alone.
+                NodeSkipped?.Invoke(this, existing);
+                result.Remove(existing);
+            }
+
+            return false;
+        }
+
+        seenByFold[relativePath] = relativePath;
+        return true;
     }
 }

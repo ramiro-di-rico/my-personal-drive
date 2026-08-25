@@ -451,6 +451,16 @@ public static class SyncReconciler
     private static bool IsChanged(NodeFingerprint? current, NodeFingerprint? baseline, TimeSpan tolerance)
         => !AreEquivalent(current, baseline, tolerance);
 
+    /// <summary>
+    /// Precondition on the hash branch below: <see cref="NodeFingerprint.ContentHash"/> strings
+    /// are only comparable when both sides' <see cref="NodeFingerprint.HashAlgorithm"/> are the
+    /// same algorithm. A provider whose remote hash isn't SHA-1 (docs/PLAN-CLOUD-PROVIDERS.md P6)
+    /// would otherwise have a locally-computed SHA-1 compared against a QuickXor digest — two
+    /// unrelated strings that will simply never match, silently reporting every file as changed.
+    /// <see cref="RemoteHashAlgorithm.None"/> or a missing tag is not treated as a mismatch: it
+    /// means "unknown", the honest state of every fingerprint before P4 persists the algorithm,
+    /// and today's only algorithm (Sha1) is correct on both sides regardless.
+    /// </summary>
     private static bool AreEquivalent(NodeFingerprint? a, NodeFingerprint? b, TimeSpan tolerance)
     {
         if (a is null || b is null)
@@ -463,7 +473,7 @@ public static class SyncReconciler
             return false;
         }
 
-        if (a.ContentHash is not null && b.ContentHash is not null)
+        if (a.ContentHash is not null && b.ContentHash is not null && !IsAlgorithmMismatch(a.HashAlgorithm, b.HashAlgorithm))
         {
             return string.Equals(a.ContentHash, b.ContentHash, StringComparison.Ordinal);
         }
@@ -475,6 +485,9 @@ public static class SyncReconciler
 
         return (a.ModifiedAt.Value - b.ModifiedAt.Value).Duration() <= tolerance;
     }
+
+    private static bool IsAlgorithmMismatch(RemoteHashAlgorithm? a, RemoteHashAlgorithm? b)
+        => a is { } left && b is { } right && left != right;
 
     private static int PriorityFor(SyncOperation operation, string relativePath)
     {

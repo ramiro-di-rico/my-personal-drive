@@ -930,7 +930,7 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusMessage = $"Created folder '{folderName}' in {CurrentPath}.";
             
             // Update DB immediately
-            var newFolderPath = ProtonDriveService.CombinePath(CurrentPath, folderName);
+            var newFolderPath = _provider.Paths.Combine(CurrentPath, folderName);
             await _cacheService.AddOrUpdateItemAsync(CurrentPath, new DriveItem(newFolderPath, folderName, true));
             await InvalidateDeepMetricsAsync(newFolderPath);
 
@@ -1002,7 +1002,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
             // Update DB immediately
             var parentPath = GetParentPath(item.Path);
-            var newPath = ProtonDriveService.CombinePath(parentPath, newName);
+            var newPath = _provider.Paths.Combine(parentPath, newName);
             await _cacheService.RemoveItemAsync(item.Path);
             await _cacheService.AddOrUpdateItemAsync(parentPath, item with { Path = newPath, Name = newName });
             // Both paths: the old subtree's metrics are gone, and the new name's ancestors no

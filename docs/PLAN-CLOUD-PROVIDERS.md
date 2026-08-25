@@ -61,7 +61,36 @@
       structure (`ProviderSettings` keyed by provider id, migrating `CliPath`/`IsAuthenticated`);
       building a one-off nested section for this single flag now would just be redone there.
       Verified: 562 tests pass (561 + the new provider test), app and AOT builds clean.
-- [ ] **P3** — per-provider path syntax and content-hash algorithm. Not started.
+- [x] **P3 — per-provider path syntax and content-hash algorithm.**
+      Added `Services/Providers/IProviderPathSyntax.cs` (`Combine`, `IsRemoteNameMappableLocally`,
+      `Comparison`) and `Providers/Proton/ProtonPathSyntax.cs` (delegates to
+      `ProtonDriveService.CombinePath`/`HasUnmappableName`); `ICloudDriveProvider.Paths` exposes
+      it. `RemoteScanner` and `MainWindowViewModel` now go through `provider.Paths` instead of the
+      static Proton calls; `RemoteScanner` also reports a case-collision as a skipped node when
+      `Paths.Comparison` is case-insensitive (inert for Proton, exercised via a test decorator
+      since no case-insensitive provider exists yet).
+      Added `Services/Providers/IContentHasher.cs` + `Sha1ContentHasher.cs` (wraps
+      `LocalFileHasher`); `SyncExecutor` and `SyncBaselineWriter` take a hasher and a
+      `RemoteHashAlgorithm` via optional constructor parameters (default: Sha1, so every existing
+      call site is unaffected) and tag every `NodeFingerprint` they build with which algorithm
+      produced its hash. `SyncReconciler.AreEquivalent` gained the mismatch guard: two hashes are
+      only compared when both sides' algorithm tags agree (or are unset); otherwise it falls back
+      to size+mtime instead of reporting a spurious change. `RemoteHashAlgorithm` moved from
+      `Services/Providers/ProviderCapabilities.cs` to `Models/RemoteHashAlgorithm.cs` so
+      `NodeFingerprint` (a plain data record) can carry it without depending on `Services`.
+      **Deviations:** `PathMapper` was *not* injected with `IProviderPathSyntax` — it never called
+      `CombinePath`/`HasUnmappableName` in the first place (it builds remote paths by plain `/`
+      concatenation, which is exactly equivalent since an unmappable name is filtered by
+      `RemoteScanner` before any relative path reaches it); injecting an unused dependency there
+      would be abstraction with nothing to justify it. `IProviderPathSyntax` also omits `Root`,
+      `GetParent` and `IsLocalNameMappableRemotely` from §2.4's original design — nothing calls
+      them yet (the upload-side check is a P6 concern once OneDrive's own rules exist to test
+      against). `SyncReconciler`'s dictionaries stay `StringComparer.Ordinal`, per §2.4's own
+      decision, not a deviation.
+      Verified: 565 tests pass (2 new RemoteScanner case-collision tests, 1 new
+      SyncReconciler algorithm-mismatch test — confirmed load-bearing by temporarily removing the
+      guard and watching the test fail with a spurious upload), AOT publish clean, published
+      binary runs against a stub CLI.
 - [ ] **P4** — account-scope the persisted state (`cache.db` migration 6). Not started.
 - [ ] **P5** — provider selection in settings; provider-specific settings sections. Not started.
 - [ ] **P6** — `OneDriveProvider` over Microsoft Graph. Not started.

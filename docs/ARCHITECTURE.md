@@ -66,15 +66,20 @@ src/MyPersonalDrive/
   App.axaml(.cs)                   # composition root: wires everything by hand
   Models/
     DriveItem.cs                   # immutable record of a drive node
+    NodeFingerprint.cs             # per-node snapshot; HashAlgorithm tags which algorithm produced ContentHash
+    RemoteHashAlgorithm.cs         # None|Sha1|Sha256|QuickXor
     UploadConflictStrategy.cs      # enum None|KeepBoth|Replace|Skip
   Services/
     Providers/
-      ICloudDriveProvider.cs       # the facade every consumer talks to (see §5)
+      ICloudDriveProvider.cs       # the facade every consumer talks to (see §5); exposes Paths
       IDriveOperations.cs / IDriveAuthenticator.cs / IRemoteViewInvalidator.cs / IProviderDiagnostics.cs
+      IProviderPathSyntax.cs       # Combine / IsRemoteNameMappableLocally / Comparison
+      IContentHasher.cs / Sha1ContentHasher.cs
       ProviderCapabilities.cs / ProviderId.cs
       ProviderActivity.cs          # provider-neutral activity feed (Started/Output/Finished)
       DriveException.cs / DriveErrorKind.cs
       Proton/
+        ProtonPathSyntax.cs        # delegates to ProtonDriveService.CombinePath/HasUnmappableName
         ProtonDriveProvider.cs     # adapts ProtonDriveService to ICloudDriveProvider; maps its
                                     # three Cli*EventArgs events onto one ProviderActivity feed
         ProtonDriveService.cs      # translates domain operations -> CLI args + parsing

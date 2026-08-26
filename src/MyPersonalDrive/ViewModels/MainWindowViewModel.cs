@@ -81,6 +81,18 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isCliUpdateAvailable;
     private bool _isCliUpdateBusy;
 
+    /// <summary>
+    /// What the settings view's provider picker would list — see docs/PLAN-CLOUD-PROVIDERS.md P5.
+    /// Only Proton exists today, so there is nothing to switch <em>to</em> yet: this surfaces the
+    /// active provider's name, but does not yet expose a way to change it. That "switch with
+    /// confirmation, warn about affected sync pairs" flow the plan describes is deferred to P6,
+    /// when there is a second real provider to build and test it against — building it now would
+    /// mean unreachable UI and tests against a provider that doesn't exist.
+    /// </summary>
+    public IReadOnlyList<ProviderDescriptor> AvailableProviders { get; }
+
+    public string ActiveProviderDisplayName => _provider.DisplayName;
+
     public MainWindowViewModel(
         ICloudDriveProvider provider,
         DriveCacheService cacheService,
@@ -91,7 +103,8 @@ public sealed class MainWindowViewModel : ObservableObject
         CliUpdateInstaller? updateInstaller = null,
         Func<bool>? isSyncInProgress = null,
         FolderMetricsStore? metricsStore = null,
-        FolderStatsScanner? statsScanner = null)
+        FolderStatsScanner? statsScanner = null,
+        IProviderCatalog? providerCatalog = null)
     {
         // Optional so the many existing view-model tests don't all have to build a database and a
         // scanner to exercise unrelated behavior. When either is absent the deep-scan command
@@ -106,6 +119,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // reachable in a test without driving a real sync cycle to a chosen moment.
         // Capturing the parameter, not the SyncPanel property, which is only assigned below.
         _isSyncInProgress = isSyncInProgress ?? (() => syncPanel.IsSyncInProgress);
+        AvailableProviders = (providerCatalog ?? new ProviderCatalog()).Available;
         _provider = provider;
         _cacheService = cacheService;
         _settings = settings;

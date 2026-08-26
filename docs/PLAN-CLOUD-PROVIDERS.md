@@ -134,7 +134,36 @@
       the published binary (full directory backed up first to
       `~/.config/MyPersonalDrive.pre-p4-backup`) — same result, `user_version` now 6, all rows
       intact, app stayed running.
-- [ ] **P5** — provider selection in settings; provider-specific settings sections. Not started.
+- [x] **P5 (partial) — provider selection scaffolding in settings.**
+      Added `Services/Providers/{ProviderDescriptor,IProviderCatalog,ProviderCatalog}.cs`: the
+      catalog centralizes the Proton-construction wiring that used to sit inline in
+      `App.axaml.cs` (`ProtonDriveCliLocator` → `ProtonDriveCliExecutor` → `ProtonDriveService` →
+      `ProtonDriveProvider`) behind `Create(ProviderId, AppSettingsService)`, and exposes
+      `Available` — today exactly one entry, Proton — for a settings-view picker to enumerate.
+      `AppSettings.ActiveProvider` (string, `nameof(ProviderId.Proton)` default,
+      `ActiveProviderOrDefault()` — same degrade-on-unrecognized-value contract as `ViewMode`) is
+      read once, in `App.axaml.cs`, to choose which provider `catalog.Create` builds.
+      `MainWindowViewModel` gained `AvailableProviders` (from the injected/default catalog) and
+      `ActiveProviderDisplayName` (`_provider.DisplayName`); the settings view's connection card
+      shows the active provider's name above the CLI-path row.
+      **Deliberately not done, and why:** the plan's "switching provider with sync pairs
+      configured must be blocked or explicit... persist and prompt for restart" flow, and moving
+      `AppSettings.CliPath`/`IsAuthenticated` into a provider-scoped structure, are **deferred to
+      P6**. `AvailableProviders` has exactly one entry today — there is nothing to switch *to*,
+      so a confirmation/restart flow built now would be exercised only by a synthetic second
+      provider in a unit test, never by the real UI, which is exactly the kind of untested,
+      premature surface this plan has avoided building at every other phase (P1's
+      `IDriveAuthenticator`, P3's `IProviderPathSyntax` members). Restructuring `AppSettings` into
+      a dictionary now, before OneDrive's actual settings shape (a token path, no `CliPath` at
+      all) is known, risks designing the wrong shape and redoing it in P6 anyway. Both land
+      together with P6, when there is a second real provider to build and verify them against.
+      Verified: 573 tests pass (8 new — `ProviderCatalogTests`, `MainWindowProviderTests`, two
+      `AppSettings.ActiveProviderOrDefault` cases), AOT publish clean, published binary runs
+      against a stub CLI with no crash. The new settings-view label could not be visually
+      confirmed in this sandbox (screenshot tooling unavailable here — `import`/`xwd` both failed
+      to capture despite a live X display); the binding itself is covered by
+      `MainWindowProviderTests.ActiveProviderDisplayName_ReflectsTheInjectedProvider`, but an
+      actual look at the running window is still owed before calling this fully done.
 - [ ] **P6** — `OneDriveProvider` over Microsoft Graph. Not started.
 - [ ] **P7** — *optional* multiple active accounts. Not started, deliberately last.
 - [ ] **P8** — *optional* delta-based remote scanning where the provider supports it. Not started.

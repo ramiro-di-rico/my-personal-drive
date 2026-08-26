@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.ViewModels;
@@ -19,12 +20,16 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var settings = new AppSettingsService();
-            var locator = new ProtonDriveCliLocator(settings);
-            var executor = new ProtonDriveCliExecutor(locator);
-            var service = new ProtonDriveService(executor, settings.Load().StrictListingParsing);
-            // The one active provider (docs/PLAN-CLOUD-PROVIDERS.md P1); everything below talks to
-            // it through ICloudDriveProvider, never to ProtonDriveService directly.
-            var provider = new ProtonDriveProvider(service);
+            // The one active provider (docs/PLAN-CLOUD-PROVIDERS.md P5); everything below talks to
+            // it through ICloudDriveProvider, never to a concrete provider type. The catalog is
+            // also what the settings view's provider picker enumerates.
+            var catalog = new ProviderCatalog();
+            var provider = catalog.Create(settings.Load().ActiveProviderOrDefault(), settings);
+            // 'proton:default' — matching exactly what migration 6 backfilled every pre-existing
+            // row to (docs/PLAN-CLOUD-PROVIDERS.md P4) — never computed from `provider.Id`
+            // here: ProviderId.Proton.ToString() is "Proton" (capital P), which would silently
+            // stop matching those rows. A real per-provider/account key mapping is P6's job, once
+            // there is a second account whose rows must not collide with these.
             var cacheService = new DriveCacheService(Path.Combine(settings.BaseFolder, "cache.db"));
 
             // Same underlying cache.db as cacheService above; SyncStateStore applies the same
@@ -49,7 +54,8 @@ public partial class App : Application
             var mainWindowViewModel = new MainWindowViewModel(
                 provider, cacheService, settings, syncPanelViewModel, releaseFeed: new CliReleaseFeed(),
                 metricsStore: metricsStore,
-                statsScanner: new FolderStatsScanner(provider));
+                statsScanner: new FolderStatsScanner(provider),
+                providerCatalog: catalog);
 
             desktop.MainWindow = new MainWindow
             {

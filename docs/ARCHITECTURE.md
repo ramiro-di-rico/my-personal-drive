@@ -108,26 +108,30 @@ There is no test project. There is no DI container: the object graph is wired by
 
 ## 4. Composition root
 
-[`App.axaml.cs`](../src/MyPersonalDrive/App.axaml.cs) — all the wiring in a single method. As of
-the provider seam (docs/PLAN-CLOUD-PROVIDERS.md P1), the CLI chain is wrapped in a
-`ProtonDriveProvider` and everything below the composition root depends on `ICloudDriveProvider`,
-never on `ProtonDriveService` directly:
+[`App.axaml.cs`](../src/MyPersonalDrive/App.axaml.cs) — all the wiring in a single method. Since
+the provider seam (docs/PLAN-CLOUD-PROVIDERS.md P1–P5), everything below the composition root
+depends on `ICloudDriveProvider`/`IDriveOperations`, never on `ProtonDriveService` directly:
 
 ```
-AppSettingsService  ──► ProtonDriveCliLocator ──► ProtonDriveCliExecutor ──► ProtonDriveService ──► ProtonDriveProvider ─┐
-AppSettingsService.BaseFolder/cache.db ──► DriveCacheService ────────────────────────────────────────────────────────────┼─► MainWindowViewModel
-AppSettingsService ──────────────────────────────────────────────────────────────────────────────────────────────────────┘
-                                                                                                    └─► MainWindow.DataContext
+AppSettingsService.Load().ActiveProviderOrDefault() ──► ProviderCatalog.Create(id, settings) ──► ICloudDriveProvider ─┐
+AppSettingsService.BaseFolder/cache.db ──► DriveCacheService ─────────────────────────────────────────────────────────┼─► MainWindowViewModel
+AppSettingsService ─────────────────────────────────────────────────────────────────────────────────────────────────────┘
+                                                                                                 └─► MainWindow.DataContext
 ```
 
-`SyncExecutor`, `RemoteScanner`, `FolderStatsScanner` and `SyncPanelViewModel`'s
-`GetRemoteFolderChildren` delegate are all built from `provider`/`provider.Operations`, not from
-the Proton-specific types. Only Proton exists today, so `provider` is always a
-`ProtonDriveProvider`; adding a second backend means a second branch in the composition root that
-picks which one to build, not a change to any of those consumers. See
-docs/PLAN-CLOUD-PROVIDERS.md for the full plan (including the still-open work: errors and the
-console are still Proton-shaped, path syntax and content hashing are still hard-coded to Proton's
-rules, and nothing persisted is account-scoped yet).
+`ProviderCatalog` (`Services/Providers/ProviderCatalog.cs`) is the one place that still knows how
+to build a Proton chain (`ProtonDriveCliLocator` → `ProtonDriveCliExecutor` → `ProtonDriveService`
+→ `ProtonDriveProvider`); it also exposes `Available` — today exactly one `ProviderDescriptor`,
+Proton — which `MainWindowViewModel.AvailableProviders` surfaces for the settings view's provider
+label. `SyncExecutor`, `RemoteScanner`, `FolderStatsScanner` and `SyncPanelViewModel`'s
+`GetRemoteFolderChildren` delegate are all built from `provider`/`provider.Operations`, never from
+a Proton-specific type; adding a second backend means a case in `ProviderCatalog.Create`, not a
+change to any of those consumers. See docs/PLAN-CLOUD-PROVIDERS.md for the full plan — still open:
+`AppSettings.CliPath`/`IsAuthenticated` are still flat (not provider-scoped) and there is no UI to
+actually switch providers yet, both deliberately deferred to P6 until there is a second provider
+to build that against; path syntax and content hashing are behind interfaces (P3) but only Proton
+implements them; persisted state is account-scoped (P4) but every row's account key is still the
+`'proton:default'` sentinel.
 
 Nothing is a container singleton; they're single instances created by hand.
 

@@ -678,6 +678,7 @@
           <TextBlock FontSize="18" FontWeight="Bold" Text="Conexión" />
           <Border Padding="16" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
             <StackPanel Spacing="10">
+              <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
               <TextBlock Text="Ruta al ejecutable de proton-drive:" />
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBox Width="420"

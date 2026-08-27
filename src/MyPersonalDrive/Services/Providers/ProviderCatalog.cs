@@ -18,6 +18,9 @@ public sealed class ProviderCatalog : IProviderCatalog
             _ => throw new NotSupportedException($"Provider '{id}' is not available yet.")
         };
 
+    public ProviderId ResolveOrDefault(ProviderId requested)
+        => Available.Any(descriptor => descriptor.Id == requested) ? requested : Available[0].Id;
+
     private static Proton.ProtonDriveProvider CreateProton(AppSettingsService settings)
     {
         var locator = new Proton.ProtonDriveCliLocator(settings);

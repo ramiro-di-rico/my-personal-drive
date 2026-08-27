@@ -134,6 +134,27 @@ public class SyncReconcilerTests
         Assert.Empty(plan.Conflicts);
     }
 
+    /// <summary>
+    /// Regression test for the P1-P5 adversarial review: <see cref="RemoteHashAlgorithm.None"/>
+    /// means "no algorithm" — as meaningless for the mismatch check as a missing (null) tag — so
+    /// pairing it with a known algorithm must NOT be treated as a mismatch. Both sides appear new
+    /// (no baseline), so the reconciler compares local directly against remote; deliberately
+    /// different mtimes mean the only way this test passes is if the equal hash strings were
+    /// actually trusted, not if the guard fell through to comparing mtimes instead.
+    /// </summary>
+    [Fact]
+    public void TwoWay_BothNew_OneSideTaggedNone_IsNotTreatedAsAnAlgorithmMismatch()
+    {
+        var localFp = new NodeFingerprint("a.txt", false, 100, T0, null, "hash-a", RemoteHashAlgorithm.Sha1);
+        var remoteFp = new NodeFingerprint("a.txt", false, 100, T1, null, "hash-a", RemoteHashAlgorithm.None);
+
+        var plan = Reconcile(SyncDirection.TwoWay, Map(localFp), Map(remoteFp));
+
+        var action = Assert.Single(plan.Actions);
+        Assert.Equal(SyncOperation.UpdateBaselineOnly, action.Operation);
+        Assert.Empty(plan.Conflicts);
+    }
+
     [Fact]
     public void TwoWay_LocalChangedOnly_Uploads()
     {
@@ -712,6 +733,33 @@ public class SyncReconcilerTests
         // Same size, different hash: a different file that happens to be the same length. Matching on
         // size alone would move the wrong node — which is exactly why mtime/size heuristics are refused.
         var plan = ReconcileAfterLocalMove(movedHash: "hash-different");
+
+        Assert.DoesNotContain(plan.Actions, a => a.Operation == SyncOperation.RenameRemote);
+        Assert.Contains(plan.Actions, a => a.Operation == SyncOperation.UploadFile);
+    }
+
+    /// <summary>
+    /// docs/PLAN-CLOUD-PROVIDERS.md P3/R2, regression from the P1-P5 adversarial review:
+    /// move-detection compares the baseline's local hash against a freshly-hashed candidate's —
+    /// two values that can come from different <c>IContentHasher</c>s across runs — and must
+    /// apply the same algorithm-mismatch guard <c>AreEquivalent</c> already has, not a bare
+    /// string comparison. Here the two hash strings coincidentally collide (a stand-in for
+    /// "unrelated, since they came from different algorithms"), so trusting the string match
+    /// would move the wrong node; the guard must refuse the move and fall back to the ordinary
+    /// upload+trash instead.
+    /// </summary>
+    [Fact]
+    public void AMoveIsRefused_WhenTheBaselineAndCandidateHashesCameFromDifferentAlgorithms()
+    {
+        const string oldPath = "old/x.pdf";
+        const string newPath = "new/x.pdf";
+        var local = Map(new NodeFingerprint(newPath, false, 100, T1, null, "hash-a", RemoteHashAlgorithm.QuickXor));
+        var remote = Map(RemoteFp(oldPath, "uid-1", size: 100));
+        var baseline = BaselineMap(BaselineOf(oldPath, false,
+            new NodeFingerprint(oldPath, false, 100, T0, null, "hash-a", RemoteHashAlgorithm.Sha1),
+            RemoteFp(oldPath, "uid-1")));
+
+        var plan = SyncReconciler.Reconcile(1, SyncDirection.TwoWay, ConflictPolicy.Ask, local, remote, baseline, Timestamp);
 
         Assert.DoesNotContain(plan.Actions, a => a.Operation == SyncOperation.RenameRemote);
         Assert.Contains(plan.Actions, a => a.Operation == SyncOperation.UploadFile);

@@ -168,6 +168,48 @@
 - [ ] **P7** — *optional* multiple active accounts. Not started, deliberately last.
 - [ ] **P8** — *optional* delta-based remote scanning where the provider supports it. Not started.
 
+### Adversarial review of P1–P5 — 5 confirmed bugs fixed
+
+An 8-angle adversarial review of the full P1–P5 diff found 5 CONFIRMED correctness bugs and 5
+PLAUSIBLE cleanup/design issues. All 5 confirmed bugs are fixed, each with a regression test
+verified to fail without the fix:
+
+1. **`RemoteScanner`/`RemoteTreeWalker` case-collision leak.** The per-item collision check
+   retracted a colliding folder from the scan's `result` dictionary, but `RemoteTreeWalker` had
+   already queued that folder into the next BFS wave before the collision was even detected — so
+   its children were still walked and added, leaking part of a folder that was supposed to be
+   entirely excluded. Fixed by moving collision detection to a new `filterSiblings` hook on
+   `RemoteTreeWalker.WalkAsync`, run once per sibling batch *before* any item reaches the
+   per-node callback, so a colliding folder is never queued in the first place. Test:
+   `RemoteScannerTests.OnACaseInsensitiveProvider_ACollidingFolder_IsNeverDescendedInto`.
+2. **`ProviderId.OneDrive` could crash startup.** It's a real enum member (added in P1, ahead of
+   P6) with no catalog entry; `AppSettings.ActiveProviderOrDefault`'s `Enum.TryParse` only catches
+   a name this build has never heard of, not a valid id it can't build, so `App.axaml.cs` would
+   call `ProviderCatalog.Create` uncaught and crash. Fixed by adding
+   `IProviderCatalog.ResolveOrDefault`, which checks catalog membership (not just enum-parseability)
+   before `App.axaml.cs` ever calls `Create`. Tests: `ProviderCatalogTests.ResolveOrDefault_*`.
+3. **`SyncReconciler.DetectLocalMoves` skipped the P3 algorithm guard.** It compared a persisted
+   baseline hash against a freshly-computed candidate hash by raw string equality, with no check
+   that both came from the same `IContentHasher` — unlike `AreEquivalent`, ~50 lines away in the
+   same file, which already had this guard. Fixed by reusing `IsAlgorithmMismatch` here too. Test:
+   `AMoveIsRefused_WhenTheBaselineAndCandidateHashesCameFromDifferentAlgorithms`.
+4. **`IsAlgorithmMismatch` treated `RemoteHashAlgorithm.None` as a real algorithm**, contradicting
+   its own doc comment ("`None` or a missing tag is not treated as a mismatch: it means
+   'unknown'"). Fixed by adding an `IsKnownAlgorithm` check so only two *known*, differing
+   algorithms count as a mismatch. Test: `TwoWay_BothNew_OneSideTaggedNone_IsNotTreatedAsAnAlgorithmMismatch`.
+5. **Stale skip-log message.** Once P3 broadened `RemoteScanner.NodeSkipped` to also fire for
+   case collisions, `SyncExecutor`'s log handler still hardcoded the unmappable-name explanation
+   ("its name contains '/'") for every skip, regardless of reason. Fixed by giving `NodeSkipped` a
+   typed payload (`NodeSkip(string Name, NodeSkipReason Reason)`) instead of a bare string, so the
+   log message can be accurate per reason. Test:
+   `SyncExecutorTests.RunAsync_ACaseCollidingRemoteName_IsSkippedWithAnAccurateExplanation_NotTheSlashOne`.
+
+The 5 PLAUSIBLE findings (hasher/remoteHashAlgorithm can drift apart, `SqliteMigrationRunner`
+disables foreign keys for the whole migration run rather than just the rebuild statements, the
+`"proton:default"` sentinel and the hash-tagging ternary are each duplicated across a few files,
+and ~50 test call sites repeat provider-construction boilerplate) are cleanup/design items, not
+correctness bugs, and are left for a future pass.
+
 ---
 
 ## 0. Executive summary

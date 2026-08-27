@@ -532,6 +532,33 @@ public class SyncExecutorTests : IDisposable
         Assert.Contains("rename it there", warning.Message);
     }
 
+    /// <summary>
+    /// Regression test for the P1-P5 adversarial review: once P3 taught <c>RemoteScanner</c> to
+    /// also skip case-colliding siblings on a case-insensitive provider, the log message here
+    /// still hardcoded the unmappable-name explanation ("its name contains '/'") for every skip —
+    /// factually wrong for a name with no slash at all. Uses
+    /// <see cref="CaseInsensitivePathsDecorator"/> since Proton itself never collides.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_ACaseCollidingRemoteName_IsSkippedWithAnAccurateExplanation_NotTheSlashOne()
+    {
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath(RemoteRoot, $"[{FolderEntry("Report")}, {FolderEntry("report")}]");
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore);
+        var provider = new CaseInsensitivePathsDecorator(new ProtonDriveProvider(new ProtonDriveService(executor)));
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
+
+        await sut.RunAsync(pair);
+
+        var logs = await stateStore.GetRecentLogsAsync(pair.Id, 50);
+        var warnings = logs.Where(l => l.Level == SyncLogLevel.Warning).ToList();
+        Assert.NotEmpty(warnings);
+        Assert.All(warnings, w => Assert.DoesNotContain("contains '/'", w.Message));
+        Assert.Contains(warnings, w => w.Message.Contains("collides", StringComparison.Ordinal));
+    }
+
     // ------------------------------------------------------------------ F4: progress (§12)
 
     [Fact]

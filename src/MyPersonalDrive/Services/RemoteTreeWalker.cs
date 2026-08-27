@@ -55,10 +55,20 @@ public sealed class RemoteTreeWalker
     /// level). Progress on this walk cannot be a percentage: BFS does not know the total until it is
     /// finished, so callers report counts.
     /// </param>
+    /// <param name="filterSiblings">
+    /// Runs once per listing — i.e. once per set of siblings under one parent — before any of
+    /// them reach <paramref name="onNode"/>. This is the only point where a caller can drop an
+    /// item with full sibling context: <paramref name="onNode"/> decides one item at a time and,
+    /// once it returns true for a folder, that folder is already queued for the next wave —
+    /// too late to un-queue if a *later* sibling in the same listing turns out to make it
+    /// invalid (e.g. two names that collide under a case-insensitive provider). Null runs every
+    /// listing unfiltered.
+    /// </param>
     public async Task WalkAsync(
         string rootPath,
         Func<DriveItem, bool> onNode,
         Action<int, int>? onWaveCompleted = null,
+        Func<IReadOnlyList<DriveItem>, IReadOnlyList<DriveItem>>? filterSiblings = null,
         CancellationToken cancellationToken = default)
     {
         using var semaphore = new SemaphoreSlim(_maxConcurrency);
@@ -75,8 +85,9 @@ public sealed class RemoteTreeWalker
             foldersVisited += currentWave.Count;
 
             var nextWave = new List<string>();
-            foreach (var items in listings)
+            foreach (var rawItems in listings)
             {
+                var items = filterSiblings is null ? rawItems : filterSiblings(rawItems);
                 foreach (var item in items)
                 {
                     if (onNode(item) && item.IsFolder)

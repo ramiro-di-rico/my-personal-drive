@@ -91,5 +91,7 @@ public class MainWindowProviderTests : IDisposable
 
         public ICloudDriveProvider Create(ProviderId id, AppSettingsService settings)
             => throw new NotSupportedException();
+
+        public ProviderId ResolveOrDefault(ProviderId requested) => ProviderId.OneDrive;
     }
 }

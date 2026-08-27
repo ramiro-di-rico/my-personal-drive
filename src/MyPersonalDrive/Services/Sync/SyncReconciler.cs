@@ -218,8 +218,14 @@ public static class SyncReconciler
                 continue; // nothing recorded to match against
             }
 
+            // `entry.LocalAtSync` is a *persisted* baseline fingerprint — possibly written by an
+            // earlier run under a different `IContentHasher` than whatever hashed today's
+            // `candidates` (docs/PLAN-CLOUD-PROVIDERS.md P3/P6) — so this needs the same
+            // algorithm-mismatch guard as `AreEquivalent`, not a bare string comparison.
             var matches = candidates
-                .Where(c => c.Value.Size == size && string.Equals(c.Value.ContentHash, hash, StringComparison.Ordinal))
+                .Where(c => c.Value.Size == size
+                            && !IsAlgorithmMismatch(c.Value.HashAlgorithm, entry.LocalAtSync.HashAlgorithm)
+                            && string.Equals(c.Value.ContentHash, hash, StringComparison.Ordinal))
                 .ToList();
 
             if (matches.Count != 1)
@@ -486,8 +492,17 @@ public static class SyncReconciler
         return (a.ModifiedAt.Value - b.ModifiedAt.Value).Duration() <= tolerance;
     }
 
+    /// <summary>
+    /// True only when both sides name a <em>known</em> algorithm and they differ. Matches the doc
+    /// comment on <see cref="AreEquivalent"/>: <see cref="RemoteHashAlgorithm.None"/> is "no
+    /// algorithm", exactly as meaningless for this comparison as a missing (null) tag, so neither
+    /// one — alone or together — counts as a mismatch against anything.
+    /// </summary>
     private static bool IsAlgorithmMismatch(RemoteHashAlgorithm? a, RemoteHashAlgorithm? b)
-        => a is { } left && b is { } right && left != right;
+        => IsKnownAlgorithm(a) && IsKnownAlgorithm(b) && a != b;
+
+    private static bool IsKnownAlgorithm(RemoteHashAlgorithm? algorithm)
+        => algorithm is not (null or RemoteHashAlgorithm.None);
 
     private static int PriorityFor(SyncOperation operation, string relativePath)
     {

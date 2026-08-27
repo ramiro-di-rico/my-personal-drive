@@ -336,6 +336,24 @@ public sealed class SyncExecutor
         return directory.Length == 0 ? stamped : $"{directory}/{stamped}";
     }
 
+    /// <summary>
+    /// Regression: this used to be one hardcoded string assuming the only skip reason was an
+    /// unmappable name. Once P3 added <see cref="NodeSkipReason.CaseCollision"/>, that message
+    /// became actively misleading for a case-insensitive provider's collisions — see the P1-P5
+    /// adversarial review.
+    /// </summary>
+    private static string DescribeSkip(NodeSkip skip)
+        => skip.Reason switch
+        {
+            NodeSkipReason.UnmappableName =>
+                $"Skipped '{skip.Name}': its name contains '/', which can't be used in a local filename. " +
+                "It stays on Proton Drive but won't be synced — rename it there to include it.",
+            NodeSkipReason.CaseCollision =>
+                $"Skipped '{skip.Name}': its name collides with a sibling once case is ignored. " +
+                "Both stay on Proton Drive but won't be synced — rename one of them there to include it.",
+            _ => $"Skipped '{skip.Name}': it can't be represented locally."
+        };
+
     private async Task<(IReadOnlyDictionary<string, NodeFingerprint> Local, IReadOnlyDictionary<string, NodeFingerprint> Remote, PathMapper Mapper)> ScanBothSidesAsync(SyncPair pair, CancellationToken cancellationToken)
     {
         var mapper = new PathMapper(pair.RemotePath, pair.LocalPath);
@@ -346,8 +364,8 @@ public sealed class SyncExecutor
 
         // Subscribed per scan: a node the scanner had to leave out is only discoverable here, and a
         // file visible in Proton Drive but never in the synced folder needs an explanation.
-        var skipped = new List<string>();
-        void OnSkipped(object? _, string name) => skipped.Add(name);
+        var skipped = new List<NodeSkip>();
+        void OnSkipped(object? _, NodeSkip skip) => skipped.Add(skip);
         _remoteScanner.NodeSkipped += OnSkipped;
         IReadOnlyDictionary<string, NodeFingerprint> remote;
         try
@@ -359,11 +377,9 @@ public sealed class SyncExecutor
             _remoteScanner.NodeSkipped -= OnSkipped;
         }
 
-        foreach (var name in skipped.Distinct(StringComparer.Ordinal))
+        foreach (var skip in skipped.DistinctBy(s => s.Name, StringComparer.Ordinal))
         {
-            await _stateStore.LogAsync(pair.Id, SyncLogLevel.Warning, name,
-                $"Skipped '{name}': its name contains '/', which can't be used in a local filename. " +
-                "It stays on Proton Drive but won't be synced — rename it there to include it.",
+            await _stateStore.LogAsync(pair.Id, SyncLogLevel.Warning, skip.Name, DescribeSkip(skip),
                 _timeProvider.GetUtcNow(), cancellationToken);
         }
 

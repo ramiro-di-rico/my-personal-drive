@@ -183,7 +183,7 @@ public class RemoteScannerTests
         var scanner = new RemoteScanner(provider);
 
         var skipped = new List<string>();
-        scanner.NodeSkipped += (_, name) => skipped.Add(name);
+        scanner.NodeSkipped += (_, skip) => skipped.Add(skip.Name);
 
         var result = await scanner.ScanAsync("/my-files/Docs", new PathMapper("/my-files/Docs", "/tmp/x"), new ExclusionMatcher([]));
 
@@ -223,7 +223,7 @@ public class RemoteScannerTests
         var scanner = new RemoteScanner(provider);
 
         var skipped = new List<string>();
-        scanner.NodeSkipped += (_, name) => skipped.Add(name);
+        scanner.NodeSkipped += (_, skip) => skipped.Add(skip.Name);
 
         var result = await scanner.ScanAsync("/my-files/Docs", new PathMapper("/my-files/Docs", "/tmp/x"), new ExclusionMatcher([]));
 
@@ -244,30 +244,36 @@ public class RemoteScannerTests
         Assert.Equal(["a.txt"], result.Keys);
     }
 
-    /// <summary>Wraps a real provider, overriding only <see cref="IProviderPathSyntax.Comparison"/>.</summary>
-    private sealed class CaseInsensitivePathsDecorator : ICloudDriveProvider
+    /// <summary>
+    /// Regression test for the bug found in the P1-P5 adversarial review: the earlier
+    /// per-item implementation detected a collision only when the *second* colliding name
+    /// arrived, by which point a colliding *folder* sibling had already been queued into the
+    /// walker's next BFS wave — so its children were walked and added to the result despite the
+    /// folder itself being retracted. The fix filters collisions per sibling batch, before any of
+    /// them reach the walker's per-item queueing decision, so a colliding folder is never
+    /// descended into in the first place.
+    /// </summary>
+    [Fact]
+    public async Task OnACaseInsensitiveProvider_ACollidingFolder_IsNeverDescendedInto()
     {
-        private readonly ICloudDriveProvider _inner;
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath("/my-files/Docs",
+            $"[{FolderJson("uid-1", "Photos")}, {FolderJson("uid-2", "photos")}]");
+        // If the bug regresses, the scanner will list this folder's children and leak them into
+        // the result — RespondForPath means that call would actually succeed, which is exactly
+        // what must not happen.
+        executor.RespondForPath("/my-files/Docs/Photos", $"[{FileJson("uid-3", "vacation.jpg", 5, "2026-01-01T00:00:00.000Z", "hash-3")}]");
+        var provider = new CaseInsensitivePathsDecorator(new ProtonDriveProvider(new ProtonDriveService(executor)));
+        var scanner = new RemoteScanner(provider);
 
-        public CaseInsensitivePathsDecorator(ICloudDriveProvider inner) => _inner = inner;
+        var skipped = new List<string>();
+        scanner.NodeSkipped += (_, skip) => skipped.Add(skip.Name);
 
-        public ProviderId Id => _inner.Id;
-        public string DisplayName => _inner.DisplayName;
-        public ProviderCapabilities Capabilities => _inner.Capabilities;
-        public IDriveOperations Operations => _inner.Operations;
-        public IDriveAuthenticator Auth => _inner.Auth;
-        public IProviderPathSyntax Paths { get; } = new FakePathSyntax(StringComparison.OrdinalIgnoreCase);
-        public IRemoteViewInvalidator? RemoteView => _inner.RemoteView;
-        public IProviderDiagnostics? Diagnostics => _inner.Diagnostics;
-        public event EventHandler<ProviderActivity>? Activity { add => _inner.Activity += value; remove => _inner.Activity -= value; }
-        public event EventHandler<string>? ListingParseWarning { add => _inner.ListingParseWarning += value; remove => _inner.ListingParseWarning -= value; }
-    }
+        var result = await scanner.ScanAsync("/my-files/Docs", new PathMapper("/my-files/Docs", "/tmp/x"), new ExclusionMatcher([]));
 
-    private sealed class FakePathSyntax : IProviderPathSyntax
-    {
-        public FakePathSyntax(StringComparison comparison) => Comparison = comparison;
-        public StringComparison Comparison { get; }
-        public string Combine(string parentPath, string name) => ProtonDriveService.CombinePath(parentPath, name);
-        public bool IsRemoteNameMappableLocally(string name) => !ProtonDriveService.HasUnmappableName(name);
+        Assert.Empty(result);
+        Assert.Equal(new HashSet<string> { "Photos", "photos" }, skipped.ToHashSet());
+        // Only the root listing happened; "Photos"'s children were never listed at all.
+        Assert.Single(executor.Calls);
     }
 }

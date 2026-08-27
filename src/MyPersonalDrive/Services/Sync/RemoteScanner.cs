@@ -3,14 +3,27 @@ using MyPersonalDrive.Services.Providers;
 
 namespace MyPersonalDrive.Services.Sync;
 
+/// <summary>Why <see cref="IRemoteScanner.NodeSkipped"/> fired for a given node.</summary>
+public enum NodeSkipReason
+{
+    /// <summary>The name can't exist as a local filename at all (e.g. contains '/' on Linux).</summary>
+    UnmappableName,
+
+    /// <summary>The name collides with a sibling once the provider's comparison ignores case.</summary>
+    CaseCollision
+}
+
+/// <summary>The node <see cref="IRemoteScanner.NodeSkipped"/> reports, and why.</summary>
+public readonly record struct NodeSkip(string Name, NodeSkipReason Reason);
+
 public interface IRemoteScanner
 {
     /// <summary>
-    /// Raised for a node the scanner deliberately left out because its name can't be represented
-    /// locally. Reported rather than silently dropped: a file the user can see in Proton Drive but
-    /// never in their synced folder needs an explanation, not silence.
+    /// Raised for a node the scanner deliberately left out because it can't be represented
+    /// locally under its real name. Reported rather than silently dropped: a file the user can
+    /// see in Proton Drive but never in their synced folder needs an explanation, not silence.
     /// </summary>
-    event EventHandler<string>? NodeSkipped;
+    event EventHandler<NodeSkip>? NodeSkipped;
 
     Task<IReadOnlyDictionary<string, NodeFingerprint>> ScanAsync(
         string remoteRoot, PathMapper pathMapper, ExclusionMatcher exclusions, CancellationToken cancellationToken = default);
@@ -30,7 +43,7 @@ public sealed class RemoteScanner : IRemoteScanner
     private readonly ICloudDriveProvider _provider;
     private readonly RemoteTreeWalker _walker;
 
-    public event EventHandler<string>? NodeSkipped;
+    public event EventHandler<NodeSkip>? NodeSkipped;
 
     public RemoteScanner(ICloudDriveProvider provider, int maxConcurrency = 0)
     {
@@ -54,11 +67,7 @@ public sealed class RemoteScanner : IRemoteScanner
         }
 
         var result = new Dictionary<string, NodeFingerprint>();
-        // Only populated (and only checked) for a case-insensitive provider — see
-        // ReportCaseCollisionIfAny. Empty for Proton, so this costs nothing today.
-        var seenByFold = _provider.Paths.Comparison == StringComparison.Ordinal
-            ? null
-            : new Dictionary<string, string>(StringComparer.FromComparison(_provider.Paths.Comparison));
+        var comparison = _provider.Paths.Comparison;
 
         await _walker.WalkAsync(remoteRoot, item =>
         {
@@ -69,7 +78,7 @@ public sealed class RemoteScanner : IRemoteScanner
             // would then upload back as a second, differently-named copy.
             if (!_provider.Paths.IsRemoteNameMappableLocally(item.Name))
             {
-                NodeSkipped?.Invoke(this, item.Name);
+                NodeSkipped?.Invoke(this, new NodeSkip(item.Name, NodeSkipReason.UnmappableName));
                 return false;
             }
 
@@ -79,45 +88,63 @@ public sealed class RemoteScanner : IRemoteScanner
                 return false;
             }
 
-            if (seenByFold is not null && !ReportCaseCollisionIfAny(seenByFold, relativePath, result))
-            {
-                return false;
-            }
-
             result[relativePath] = new NodeFingerprint(relativePath, item.IsFolder, item.Size, item.ModifiedAt, item.NodeId, item.ContentHash,
                 item.ContentHash is null ? null : _provider.Capabilities.RemoteHash);
             return true;
-        }, cancellationToken: cancellationToken);
+        },
+        // Only exercised for a case-insensitive provider — a no-op passthrough for Proton
+        // (Comparison == Ordinal), so this costs nothing today.
+        filterSiblings: comparison == StringComparison.Ordinal ? null : siblings => DropCaseCollisions(siblings, comparison),
+        cancellationToken: cancellationToken);
 
         return result;
     }
 
     /// <summary>
-    /// Two remote paths that differ only by case are one local path on a case-insensitive
+    /// Two remote names that differ only by case are one local name on a case-insensitive
     /// provider — e.g. OneDrive's <c>Photos/</c> and <c>photos/</c> would both map to one local
-    /// folder (docs/PLAN-CLOUD-PROVIDERS.md §2.4). Rather than let the second one silently
-    /// overwrite the first in <c>result</c>, or invent which one "wins", both are skipped and
-    /// reported — same treatment as an unmappable name. Never happens on Proton: <paramref
-    /// name="seenByFold"/> is only non-empty for a provider whose <c>Paths.Comparison</c> ignores
-    /// case.
+    /// folder (docs/PLAN-CLOUD-PROVIDERS.md §2.4). Rather than let one silently overwrite the
+    /// other, or invent which one "wins", every name in a colliding group is dropped and
+    /// reported — same treatment as an unmappable name.
+    ///
+    /// Runs once per <see cref="RemoteTreeWalker.WalkAsync"/> listing (i.e. once per set of true
+    /// siblings — same parent), <em>before</em> any of them reach the per-item callback above.
+    /// That ordering is what makes this correct: a colliding folder is dropped here, so it is
+    /// never queued for the walk's next wave in the first place. Deciding per-item instead (drop
+    /// the second occurrence, retract the first from <c>result</c>) was tried and found unsound —
+    /// by the time a later sibling reveals the collision, an earlier folder sibling may already
+    /// be queued to descend into, and retracting it from <c>result</c> doesn't stop that descent:
+    /// its children still get walked and added, leaking part of a folder that was supposed to be
+    /// entirely excluded.
     /// </summary>
-    private bool ReportCaseCollisionIfAny(Dictionary<string, string> seenByFold, string relativePath, Dictionary<string, NodeFingerprint> result)
+    private IReadOnlyList<DriveItem> DropCaseCollisions(IReadOnlyList<DriveItem> siblings, StringComparison comparison)
     {
-        if (seenByFold.TryGetValue(relativePath, out var existing))
+        if (siblings.Count < 2)
         {
-            NodeSkipped?.Invoke(this, relativePath);
-            if (!string.Equals(existing, relativePath, StringComparison.Ordinal))
-            {
-                // The first occurrence was already added to `result` under its own casing before
-                // the second arrived; it must be retracted too, since neither can be trusted alone.
-                NodeSkipped?.Invoke(this, existing);
-                result.Remove(existing);
-            }
-
-            return false;
+            return siblings;
         }
 
-        seenByFold[relativePath] = relativePath;
-        return true;
+        var byFold = siblings.GroupBy(s => s.Name, StringComparer.FromComparison(comparison)).ToList();
+        if (byFold.TrueForAll(group => group.Count() == 1))
+        {
+            return siblings;
+        }
+
+        var survivors = new List<DriveItem>(siblings.Count);
+        foreach (var group in byFold)
+        {
+            if (group.Count() == 1)
+            {
+                survivors.Add(group.Single());
+                continue;
+            }
+
+            foreach (var collided in group)
+            {
+                NodeSkipped?.Invoke(this, new NodeSkip(collided.Name, NodeSkipReason.CaseCollision));
+            }
+        }
+
+        return survivors;
     }
 }

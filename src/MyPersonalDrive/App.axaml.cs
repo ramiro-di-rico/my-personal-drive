@@ -24,7 +24,11 @@ public partial class App : Application
             // it through ICloudDriveProvider, never to a concrete provider type. The catalog is
             // also what the settings view's provider picker enumerates.
             var catalog = new ProviderCatalog();
-            var provider = catalog.Create(settings.Load().ActiveProviderOrDefault(), settings);
+            // ResolveOrDefault, not ActiveProviderOrDefault alone: the settings value can name a
+            // real ProviderId (e.g. OneDrive) that this build still can't construct, and Create
+            // throws for exactly that case — resolving first is what keeps a stale/edited
+            // settings.json from crashing the app at startup instead of degrading to Proton.
+            var provider = catalog.Create(catalog.ResolveOrDefault(settings.Load().ActiveProviderOrDefault()), settings);
             // 'proton:default' — matching exactly what migration 6 backfilled every pre-existing
             // row to (docs/PLAN-CLOUD-PROVIDERS.md P4) — never computed from `provider.Id`
             // here: ProviderId.Proton.ToString() is "Proton" (capital P), which would silently

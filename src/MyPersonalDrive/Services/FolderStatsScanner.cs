@@ -52,7 +52,7 @@ public sealed class FolderStatsScanner
                     aggregate.FoldersVisited = visited;
                     progress?.Report(new FolderScanProgress(visited, queued));
                 },
-                cancellationToken);
+                cancellationToken: cancellationToken);
         }
         catch (OperationCanceledException)
         {

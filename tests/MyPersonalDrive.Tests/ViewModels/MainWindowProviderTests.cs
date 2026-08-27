@@ -82,6 +82,44 @@ public class MainWindowProviderTests : IDisposable
         Assert.Equal(ProviderId.OneDrive, descriptor.Id);
     }
 
+    /// <summary>
+    /// Regression test: "/my-files" is Proton's own root folder name, not a generic convention —
+    /// hardcoding it as the app-wide root broke browsing on OneDrive (a real "/my-files no longer
+    /// exists" warning on first launch, caught by hand after this phase's live-verification
+    /// session — see docs/PLAN-CLOUD-PROVIDERS.md Appendix A). OneDrive roots at "/".
+    /// </summary>
+    [Fact]
+    public void RootPath_ForProton_IsMyFiles()
+    {
+        var sut = Build();
+
+        Assert.Equal("/my-files", sut.RootPath);
+        Assert.Equal("/my-files", sut.CurrentPath);
+    }
+
+    [Fact]
+    public void RootPath_ForOneDrive_IsSlash()
+    {
+        var authenticator = new MyPersonalDrive.Services.Providers.OneDrive.GraphAuthenticator(
+            "client-id",
+            new MyPersonalDrive.Services.Providers.OneDrive.OneDriveTokenStore(_tempAppData),
+            new HttpClient(new FakeHttpMessageHandler()));
+        var oneDriveProvider = new MyPersonalDrive.Services.Providers.OneDrive.OneDriveProvider(
+            authenticator,
+            new MyPersonalDrive.Services.Providers.OneDrive.GraphHttpClient(authenticator, new HttpClient(new FakeHttpMessageHandler())));
+        var store = new SyncStateStore(_dbPath);
+        var syncExecutor = new SyncExecutor(oneDriveProvider.Operations, store, new LocalScanner(), new RemoteScanner(oneDriveProvider));
+        var panel = new SyncPanelViewModel(store, syncExecutor, new SyncCrashRecovery(store));
+        var sut = new MainWindowViewModel(
+            oneDriveProvider,
+            new DriveCacheService(Path.Combine(_tempAppData, "cache.db")),
+            new AppSettingsService(),
+            panel);
+
+        Assert.Equal("/", sut.RootPath);
+        Assert.Equal("/", sut.CurrentPath);
+    }
+
     /// <summary>Proves the constructor reads from whatever catalog it's given, not a hardcoded one.</summary>
     private sealed class StubCatalog : IProviderCatalog
     {

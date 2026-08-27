@@ -28,7 +28,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly RemoteViewFreshnessPolicy _remoteViewFreshness = new();
     private CancellationTokenSource? _cts;
     private DriveNodeViewModel? _selectedNode;
-    private readonly string _rootPath = "/my-files";
+    private readonly string _rootPath;
     private readonly CommandLogBuffer _commandLog = new();
 
     /// <summary>
@@ -41,7 +41,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _commandLogFlushScheduled;
     private string _cliPath;
     private string _oneDriveClientId;
-    private string _currentPath = "/my-files";
+    private string _currentPath;
     private string _statusMessage = "Select a Proton Drive CLI executable to begin.";
     private bool _isWarning;
     private bool _isLoading;
@@ -148,6 +148,13 @@ public sealed class MainWindowViewModel : ObservableObject
         _isSyncInProgress = isSyncInProgress ?? (() => syncPanel.IsSyncInProgress);
         AvailableProviders = (providerCatalog ?? new ProviderCatalog()).Available;
         _provider = provider;
+        // "/my-files" is Proton's own root folder name, not a generic convention — OneDrive (and
+        // any future provider) roots at "/". Browsing "/my-files" against Graph 404s immediately
+        // (verified: docs/PLAN-CLOUD-PROVIDERS.md Appendix A), which is exactly the "path no
+        // longer exists" warning this was hardcoded into before a second provider existed to catch
+        // it.
+        _rootPath = _provider.Id == ProviderId.OneDrive ? "/" : "/my-files";
+        _currentPath = _rootPath;
         _cacheService = cacheService;
         _settings = settings;
         SyncPanel = syncPanel;

@@ -929,6 +929,15 @@ Captured 2026-08-27, live session against a real personal Microsoft account, via
    next listing call with no propagation delay observed.
 5. **Trash**: `DELETE .../{path}:` on the uploaded test file succeeded with no error, run as
    best-effort cleanup after the test's assertions.
+6. **`MainWindowViewModel._rootPath` was hardcoded to `"/my-files"` app-wide** — Proton's own root
+   folder name, not a generic convention. Caught by hand (not the integration test, which talks to
+   `OneDriveOperations` directly and never exercises the view model): the real app, switched to
+   OneDrive and signed in successfully via the UI, tried to browse `/my-files` on launch and got a
+   real `[fail]` from `GET /my-files/children` with a "path no longer exists" warning — OneDrive
+   404s a nonexistent path exactly as expected, the bug was assuming that path existed at all.
+   Fixed: `_rootPath` (and the initial `_currentPath`) are now computed from `provider.Id` in
+   `MainWindowViewModel`'s constructor (`"/"` for OneDrive, `"/my-files"` for Proton), covered by
+   `MainWindowProviderTests.RootPath_ForOneDrive_IsSlash`/`RootPath_ForProton_IsMyFiles`.
 
 **Not yet captured**: pagination (`@odata.nextLink`) against a folder with more than `$top=200`
 children, chunked upload for a file over 4 MiB, async copy monitoring, 429/503 rate-limiting

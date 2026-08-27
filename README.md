@@ -11,10 +11,11 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
 
 ## Features
 
-- Two cloud providers, switchable in Settings (restart to apply): Proton Drive (via the CLI) and
-  OneDrive (via Microsoft Graph, sign in with your Microsoft account)
+- Two cloud providers — Proton Drive (via the CLI) and OneDrive (via Microsoft Graph, sign in with
+  your Microsoft account) — both can be configured and syncing at once; the settings picker
+  chooses which one you're *browsing* (restart to change that)
 - Authenticate and logout through the CLI
-- Auto-load `/my-files` after authentication
+- Auto-load the active provider's root folder after authentication
 - Browse folders with breadcrumb navigation
 - Go back to parent folders without leaving `/my-files`
 - Show file and folder metadata in the status pane
@@ -24,9 +25,11 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
   menu button
 - Upload files to the current folder
 - Move files to trash
-- Sync a Proton Drive folder with a local folder — download-only, upload-only, or two-way,
-  running automatically with the on/off choice persisted across restarts
-- Live CLI command console with realtime output
+- Sync a remote folder with a local folder — download-only, upload-only, or two-way, running
+  automatically with the on/off choice persisted across restarts. Proton and OneDrive each sync
+  independently — pausing one doesn't affect the other
+- Live console with realtime output from the CLI (Proton) and Graph requests (OneDrive), tagged
+  by account when both are active
 - Show the installed `proton-drive` CLI version in the settings view
 - Check Proton's published releases for a newer CLI, and install it after verifying its SHA-512
 

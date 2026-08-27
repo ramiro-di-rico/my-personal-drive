@@ -222,7 +222,61 @@
       based unit tests plus the live integration test above; no real account needed for the
       unit-test count), 0 IL2xxx/IL3xxx trim/AOT warnings on a `linux-x64` self-contained publish
       (R4), the published binary launches and stays up.
-- [ ] **P7** — *optional* multiple active accounts. Not started, deliberately last.
+- [x] **P7, Phase A** — Proton and OneDrive active and syncing at once, no restart. Scope
+      narrowed from the original sketch: exploration found Proton's CLI has no multi-account
+      concept of its own (`auth login`/`auth logout` against one CLI installation), so true
+      multiple accounts of the *same* provider stays out of scope (would need CLI
+      config-directory isolation) — the real shape here is at most one session per provider
+      *type*, both active together. This also removed the "global concurrency budget" problem the
+      original sketch worried about: `SyncScheduler`'s per-instance one-cycle-at-a-time semaphore
+      exists to stop two *same-provider* CLI processes from crashing each other, and with exactly
+      one session per provider that risk doesn't exist between a Proton scheduler and a OneDrive
+      scheduler — no new cross-instance gate was needed.
+
+      `App.axaml.cs` now builds an `AccountSyncContext` per provider `ProviderCatalog.Available`
+      lists (both constructed unconditionally — cheap and side-effect-free even unconfigured, real
+      failures surface lazily on first use), picks one as "primary" (the persisted
+      `ActiveProvider` preference, browsed by `MainWindowViewModel` same as before), and wires
+      every other context's sync engine + console activity alongside it.
+      `SyncPanelViewModel.AddAccount` merges a second account's pairs into the same `Pairs` list
+      (each row labeled via `SyncPairViewModel.AccountLabel`, blank when there's only one
+      account), with its own independent `AccountSyncToggleViewModel` — pausing one account's
+      automatic sync doesn't touch the other's. `MainWindowViewModel.ObserveAdditionalProviderActivity`
+      tags console lines by account (`[OneDrive] GET …`), and `CommandLogBuffer`'s cap doubled
+      (200→400) since one buffer now serves two interleaved sources.
+
+      **A live test of the actual UI (not just the Graph-level integration test) surfaced two real
+      bugs, both fixed:**
+      1. `SyncStateStore.GetAutomaticSyncEnabledAsync`/`SetAutomaticSyncEnabledAsync` read/wrote a
+         single **unscoped** row in the shared `cache.db` — toggling one account's automatic sync
+         silently toggled every account's. Fixed by scoping the key per `AccountKey`, with a
+         one-time fallback to the old unscoped key *only* for `"proton:default"` so an existing
+         single-Proton install's saved on/off choice survives the upgrade. Covered by
+         `SyncStateStoreTests`.
+      2. The explorer header ("Proton Drive browser", "Point the app at the Proton Drive CLI…")
+         was a hardcoded string — harmless when Proton was the only provider, actively misleading
+         once OneDrive could be the browsed account (a real screenshot showed "Proton Drive
+         browser" over a OneDrive folder listing). Fixed: `MainWindowViewModel.BrowserHeaderTitle`/
+         `BrowserHeaderSubtitle` are provider-neutral, computed from whichever provider is
+         actually browsed.
+
+      **Deliberately not done (Phase B):** the account-switcher *browsing* UI — extracting
+      `RootItems`/`CurrentPath`/breadcrumbs/selection/viewer/metrics out of `MainWindowViewModel`
+      into a per-account object with a `SelectedAccount` the view rebinds to, so which account
+      you're browsing can change without a restart. The Settings provider picker still requires a
+      restart to change what's *browsed* (sync/console already run for both regardless). Also not
+      done: any real same-provider multi-account support, and an "add account" flow beyond what
+      Settings already offers (both providers' settings already coexist independently).
+
+      Verified: 726 tests pass (12 new — `SyncPanelMultiAccountTests`,
+      `SyncStateStoreTests`'s two new account-scoping cases), manual test with both providers
+      configured and authenticated for real: app launches with no crash, two independent
+      automatic-sync toggles appear and behave independently, sync pairs on each account are
+      correctly labeled, and the header correctly reads "OneDrive browser" when OneDrive is the
+      browsed account.
+- [ ] **P7, general form** — *optional* true multiple accounts of the same provider (needs Proton
+      CLI config-directory isolation). Not started, deliberately last, and likely never needed
+      given Phase A's scope already covers "different providers active together."
 - [ ] **P8** — *optional* delta-based remote scanning where the provider supports it. Not started.
 
 ### Adversarial review of P1–P5 — 5 confirmed bugs fixed

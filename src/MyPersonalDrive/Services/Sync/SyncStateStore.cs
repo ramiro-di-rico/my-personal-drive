@@ -54,12 +54,32 @@ public sealed class SyncStateStore
     /// Whether the automatic sync loop should be running. Defaults to true for a database that
     /// has never recorded a choice, so existing users keep the behaviour they had before this
     /// setting existed.
+    ///
+    /// Scoped by <see cref="_accountKey"/> (prefixed into the row's key, not a schema change —
+    /// <c>AppSettings</c> is a plain key/value table) — found by a P7 Phase A test
+    /// (docs/PLAN-CLOUD-PROVIDERS.md): before this, the row was a single unscoped key shared by
+    /// every account's <see cref="SyncStateStore"/> instance against the same <c>cache.db</c>, so
+    /// pausing OneDrive's automatic sync silently paused Proton's too (or vice versa). The
+    /// unscoped key is still read as a fallback *only* for the pre-P7 default account key
+    /// (`"proton:default"`), so an existing single-Proton-account install's saved on/off choice
+    /// survives the upgrade instead of silently resetting to the default (on) the first time it's
+    /// read under the new scoped key.
     /// </summary>
     public async Task<bool> GetAutomaticSyncEnabledAsync(CancellationToken ct = default)
-        => await GetSettingAsync(AutomaticSyncEnabledKey, ct) is not "0";
+    {
+        var value = await GetSettingAsync(ScopedSettingKey(AutomaticSyncEnabledKey), ct);
+        if (value is null && _accountKey == "proton:default")
+        {
+            value = await GetSettingAsync(AutomaticSyncEnabledKey, ct);
+        }
+
+        return value is not "0";
+    }
 
     public async Task SetAutomaticSyncEnabledAsync(bool isEnabled, CancellationToken ct = default)
-        => await SetSettingAsync(AutomaticSyncEnabledKey, isEnabled ? "1" : "0", ct);
+        => await SetSettingAsync(ScopedSettingKey(AutomaticSyncEnabledKey), isEnabled ? "1" : "0", ct);
+
+    private string ScopedSettingKey(string key) => $"{_accountKey}:{key}";
 
     private Task<string?> GetSettingAsync(string key, CancellationToken ct)
         => SqliteOffThread.RunAsync<string?>(async () =>

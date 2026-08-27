@@ -110,38 +110,55 @@ There is no test project. There is no DI container: the object graph is wired by
 
 [`App.axaml.cs`](../src/MyPersonalDrive/App.axaml.cs) — all the wiring in a single method. Since
 the provider seam (docs/PLAN-CLOUD-PROVIDERS.md P1–P5), everything below the composition root
-depends on `ICloudDriveProvider`/`IDriveOperations`, never on `ProtonDriveService` directly:
+depends on `ICloudDriveProvider`/`IDriveOperations`, never on `ProtonDriveService` directly. Since
+P7 Phase A, it builds **one `AccountSyncContext` per provider `ProviderCatalog.Available` lists**
+(`Services/AccountSyncContext.cs` — `Provider`, `AccountKey`, `DisplayName`,
+`CacheService`/`StateStore`/`MetricsStore`, `Executor`, `Scheduler`), not one provider for the
+whole app:
 
 ```
-AppSettingsService.Load().ActiveProviderOrDefault() ──► ProviderCatalog.Create(id, settings) ──► ICloudDriveProvider ─┐
-AppSettingsService.BaseFolder/cache.db ──► DriveCacheService ─────────────────────────────────────────────────────────┼─► MainWindowViewModel
-AppSettingsService ─────────────────────────────────────────────────────────────────────────────────────────────────────┘
-                                                                                                 └─► MainWindow.DataContext
+ProviderCatalog.Available ──► BuildAccountContext(provider) per entry ──► [AccountSyncContext, AccountSyncContext, …]
+                                                                                    │
+                             pick "primary" = AppSettings.ActiveProviderOrDefault() │
+                                    ├─► MainWindowViewModel (browses only the primary)
+                                    ├─► SyncPanelViewModel(primary) + .AddAccount(other) per remaining context
+                                    └─► MainWindowViewModel.ObserveAdditionalProviderActivity(other) per remaining context
 ```
 
 `ProviderCatalog` (`Services/Providers/ProviderCatalog.cs`) is the one place that knows how to
 build either provider's construction chain (Proton: `ProtonDriveCliLocator` →
 `ProtonDriveCliExecutor` → `ProtonDriveService` → `ProtonDriveProvider`; OneDrive:
-`OneDriveTokenStore` → `GraphAuthenticator` → `GraphHttpClient` → `OneDriveProvider`); it exposes
-`Available` — both `ProviderDescriptor`s, since P6 — which `MainWindowViewModel.AvailableProviders`
-surfaces for the settings view's provider picker. `SyncExecutor`, `RemoteScanner`,
-`FolderStatsScanner` and `SyncPanelViewModel`'s `GetRemoteFolderChildren` delegate are all built
-from `provider`/`provider.Operations`, never from a provider-specific type — adding OneDrive meant
-a case in `ProviderCatalog.Create`, not a change to any of those consumers. The composition root
-also picks `SyncExecutor`'s content hasher from `provider.Capabilities.RemoteHash`
-(`Sha1ContentHasher` vs `QuickXorHasher`) rather than hardcoding Proton's — the one piece of
-provider-specific wiring `SyncExecutor` itself can't do (its own doc comment on the `hasher`
-parameter flagged this as owed to the composition root once a second provider existed).
-The composition root also computes `accountKey` as `{provider.Id}:default` lowercased (`"proton:
-default"`/`"onedrive:default"`) and passes it to `DriveCacheService`/`SyncStateStore`/
-`FolderMetricsStore` — without this, every store's own `"proton:default"` constructor default
-would apply regardless of which provider is active, and switching providers would let OneDrive's
-cache/sync-pair rows collide with Proton's under the same sentinel. See docs/PLAN-CLOUD-PROVIDERS.md
-P6 for what's still open: `AppSettings.CliPath`/`IsAuthenticated` are flat rather than a shared
-provider-keyed structure (deliberately — see §5.4's "Settings surface" note, now deferred further
-to P7); a switch confirms and asks for a restart but does not warn about affected sync pairs;
-`":default"` is still a fixed suffix, not a real per-account identity — P7's job once multiple
-accounts of the same provider can be active together.
+`OneDriveTokenStore` → `GraphAuthenticator` → `GraphHttpClient` → `OneDriveProvider`); both
+constructors are cheap and side-effect-free even when unconfigured (an empty
+`CliPath`/`OneDriveClientId` — real failures surface lazily, on the first actual operation), which
+is what makes building a context for every available provider unconditionally safe. `Available`
+also feeds `MainWindowViewModel.AvailableProviders` for the settings view's provider picker.
+`SyncExecutor`, `RemoteScanner`, `FolderStatsScanner` and `SyncPanelViewModel`'s
+`GetRemoteFolderChildren` delegate are all built from `provider`/`provider.Operations`, never from
+a provider-specific type — adding OneDrive meant a case in `ProviderCatalog.Create`, not a change
+to any of those consumers. Each context picks its own `SyncExecutor` content hasher from
+`provider.Capabilities.RemoteHash` (`Sha1ContentHasher` vs `QuickXorHasher`) rather than hardcoding
+Proton's, and computes its own `accountKey` as `{provider.Id}:default` lowercased (`"proton:
+default"`/`"onedrive:default"`) — without this, every store's own `"proton:default"` constructor
+default would apply regardless of which provider is active, letting one account's cache/sync-pair
+rows collide with another's under the same sentinel.
+
+**P7 Phase A** (docs/PLAN-CLOUD-PROVIDERS.md): Proton and OneDrive can both be configured and
+syncing *at once*, not just one "active" provider — narrowed from a general multi-account design
+because Proton's CLI has no multi-account concept of its own, so at most one session per provider
+*type* exists. Only the *browsing* UI still shows one account (the "primary" — the persisted
+`ActiveProvider` preference); sync and the console activity feed run for every built context
+regardless. `SyncPanelViewModel.AddAccount` merges a second account's pairs into one `Pairs` list
+(labeled per row once there's more than one account) with its own independent
+`AccountSyncToggleViewModel`, and `MainWindowViewModel.ObserveAdditionalProviderActivity` tags
+console lines by account. A real gap P7 Phase A's own live testing found and fixed: `AppSettings`
+(`CliPath`/`IsAuthenticated` vs `OneDriveClientId`/`IsOneDriveAuthenticated`) are still flat rather
+than a shared provider-keyed structure (deliberately — see §5.4's "Settings surface" note); a
+provider-picker switch still confirms and restarts for changing what's *browsed*
+(browsing-account-switch-without-restart is Phase B, not built yet), and does not warn about
+affected sync pairs; `":default"` is still a fixed per-provider suffix, not a real per-account
+identity — true same-provider multi-account (P7's general form) stays out of scope, needing Proton
+CLI config-directory isolation.
 
 Nothing is a container singleton; they're single instances created by hand.
 

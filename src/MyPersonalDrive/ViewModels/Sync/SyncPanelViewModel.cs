@@ -13,14 +13,21 @@ namespace MyPersonalDrive.ViewModels.Sync;
 /// </summary>
 public sealed class SyncPanelViewModel : ObservableObject
 {
-    private readonly SyncStateStore _stateStore;
-    private readonly SyncExecutor _executor;
-    private readonly SyncCrashRecovery _crashRecovery;
-    private readonly SyncScheduler? _scheduler;
-    private readonly string _providerDisplayName;
+    /// <summary>
+    /// One active account's sync machinery, grouped for the multi-account merge (P7 Phase A,
+    /// docs/PLAN-CLOUD-PROVIDERS.md). The primary slot (index 0, built by the constructor) is what
+    /// every existing single-account property/command still reads — <see cref="AddAccount"/> only
+    /// ever appends, so nothing about the primary slot's behavior changes for callers that never
+    /// call it (every existing test).
+    /// </summary>
+    private sealed record AccountSlot(string DisplayName, SyncStateStore StateStore, SyncExecutor Executor, SyncCrashRecovery CrashRecovery, SyncScheduler? Scheduler);
+
+    private readonly List<AccountSlot> _slots = new();
     private string _statusMessage;
     private bool _isBusy;
     private bool _hasRecovered;
+
+    private AccountSlot Primary => _slots[0];
 
     /// <param name="providerDisplayName">
     /// Named in a couple of user-facing strings ("Add a folder to start syncing it from…").
@@ -30,28 +37,56 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// </param>
     public SyncPanelViewModel(SyncStateStore stateStore, SyncExecutor executor, SyncCrashRecovery crashRecovery, SyncScheduler? scheduler = null, string providerDisplayName = "Proton Drive")
     {
-        _stateStore = stateStore;
-        _executor = executor;
-        _crashRecovery = crashRecovery;
-        _scheduler = scheduler;
-        _providerDisplayName = providerDisplayName;
-        _statusMessage = $"Add a folder to start syncing it from {_providerDisplayName}.";
+        _statusMessage = $"Add a folder to start syncing it from {providerDisplayName}.";
         Pairs = new ObservableCollection<SyncPairViewModel>();
+        AccountSyncToggles = new ObservableCollection<AccountSyncToggleViewModel>();
 
         AddPairCommand = new AsyncCommand(AddPairAsync, () => !IsBusy, ReportError);
         RefreshCommand = new AsyncCommand(LoadPairsAsync, () => !IsBusy, ReportError);
-        ToggleAutomaticSyncCommand = new AsyncCommand(ToggleAutomaticSyncAsync, () => _scheduler is not null, ReportError);
+        ToggleAutomaticSyncCommand = new AsyncCommand(ToggleAutomaticSyncAsync, () => Primary.Scheduler is not null, ReportError);
 
-        if (_scheduler is not null)
+        AddSlot(new AccountSlot(providerDisplayName, stateStore, executor, crashRecovery, scheduler));
+    }
+
+    /// <summary>
+    /// Registers a second (or later) active account's sync machinery alongside the primary one —
+    /// P7 Phase A: Proton and OneDrive can both be configured and syncing at once. Its pairs merge
+    /// into the same <see cref="Pairs"/> list (each row already knows which account it belongs to
+    /// via <see cref="SyncPairViewModel"/>'s account label), and it gets its own independent
+    /// <see cref="AccountSyncToggleViewModel"/> — pausing one account's automatic sync must not
+    /// touch another's.
+    /// </summary>
+    /// <summary>
+    /// Registers the slot only — it does <b>not</b> trigger a reload itself. <see cref="LoadPairsAsync"/>
+    /// isn't safe to run concurrently with itself (it clears <see cref="Pairs"/> before rebuilding
+    /// it), and every real caller adds every account before the first
+    /// <see cref="InitializeAsync"/>/<see cref="RecoverFromPreviousRunAsync"/> call anyway (the
+    /// composition root calls this synchronously for each account, then
+    /// <c>MainWindowViewModel.InitializeAsync</c> loads the panel once, afterward). A caller that
+    /// adds an account to an already-initialized panel should follow up with
+    /// <see cref="RefreshCommand"/> itself.
+    /// </summary>
+    public void AddAccount(SyncStateStore stateStore, SyncExecutor executor, SyncCrashRecovery crashRecovery, SyncScheduler? scheduler, string providerDisplayName)
+        => AddSlot(new AccountSlot(providerDisplayName, stateStore, executor, crashRecovery, scheduler));
+
+    private void AddSlot(AccountSlot slot)
+    {
+        _slots.Add(slot);
+        AccountSyncToggles.Add(new AccountSyncToggleViewModel(slot.DisplayName, slot.Scheduler, slot.StateStore));
+
+        if (slot.Scheduler is not null)
         {
             // A cycle the scheduler ran on its own still has to be reflected in the row the user
             // is looking at, or the panel would show stale "Up to date" times.
-            _scheduler.PairSynced += (_, _) => Dispatcher.UIThread.Post(() => _ = LoadPairsAsync());
-            _scheduler.WatcherDegraded += (_, reason) => Dispatcher.UIThread.Post(() => StatusMessage = reason);
+            slot.Scheduler.PairSynced += (_, _) => Dispatcher.UIThread.Post(() => _ = LoadPairsAsync());
+            slot.Scheduler.WatcherDegraded += (_, reason) => Dispatcher.UIThread.Post(() => StatusMessage = $"{slot.DisplayName}: {reason}");
         }
     }
 
     public ObservableCollection<SyncPairViewModel> Pairs { get; }
+
+    /// <summary>One entry per active account (including the primary), for the per-account automatic-sync toggles — see <see cref="AccountSyncToggleViewModel"/>.</summary>
+    public ObservableCollection<AccountSyncToggleViewModel> AccountSyncToggles { get; }
 
     public AsyncCommand AddPairCommand { get; }
 
@@ -59,7 +94,7 @@ public sealed class SyncPanelViewModel : ObservableObject
 
     public AsyncCommand ToggleAutomaticSyncCommand { get; }
 
-    public bool IsAutomaticSyncRunning => _scheduler?.IsRunning ?? false;
+    public bool IsAutomaticSyncRunning => Primary.Scheduler?.IsRunning ?? false;
 
     /// <summary>
     /// Whether a pair is mid-scan or mid-transfer right now. Distinct from
@@ -128,48 +163,65 @@ public sealed class SyncPanelViewModel : ObservableObject
         }
 
         _hasRecovered = true;
-        var cleared = await _crashRecovery.RecoverAsync();
-        if (cleared > 0)
+
+        // Every active account's own leftovers, not just the primary's — a crash affects whichever
+        // account was mid-transfer, which might not be the one currently on screen.
+        var clearedMessages = new List<string>();
+        foreach (var slot in _slots)
         {
-            StatusMessage = $"Recovered from a previous run: cleared {cleared} leftover download folder(s).";
+            var cleared = await slot.CrashRecovery.RecoverAsync();
+            if (cleared > 0)
+            {
+                clearedMessages.Add($"{slot.DisplayName}: cleared {cleared} leftover download folder(s).");
+            }
+
+            // Only after recovery: starting the loop first could hand a cycle a queue whose
+            // 'Running' rows haven't been requeued yet. And only if the user hadn't switched
+            // automatic sync off in a previous run — that choice is meant to outlive the process.
+            if (slot.Scheduler is not null && await slot.StateStore.GetAutomaticSyncEnabledAsync())
+            {
+                slot.Scheduler.Start();
+            }
         }
 
-        // Only after recovery: starting the loop first could hand a cycle a queue whose 'Running'
-        // rows haven't been requeued yet. And only if the user hadn't switched automatic sync
-        // off in a previous run — that choice is meant to outlive the process.
-        if (_scheduler is not null && await _stateStore.GetAutomaticSyncEnabledAsync())
+        if (clearedMessages.Count > 0)
         {
-            _scheduler.Start();
-        }
-        else if (_scheduler is not null)
-        {
-            StatusMessage = "Automatic sync is off (as you left it). Turn it on to resume automatic cycles.";
+            StatusMessage = "Recovered from a previous run: " + string.Join(" ", clearedMessages);
         }
 
         RaiseAutomaticSyncState();
+        foreach (var toggle in AccountSyncToggles)
+        {
+            toggle.RaiseState();
+        }
     }
 
     private async Task ToggleAutomaticSyncAsync()
     {
-        if (_scheduler is null)
+        var scheduler = Primary.Scheduler;
+        if (scheduler is null)
         {
             return;
         }
 
-        if (_scheduler.IsRunning)
+        if (scheduler.IsRunning)
         {
-            await _scheduler.StopAsync();
-            await _stateStore.SetAutomaticSyncEnabledAsync(false);
+            await scheduler.StopAsync();
+            await Primary.StateStore.SetAutomaticSyncEnabledAsync(false);
             StatusMessage = "Automatic sync paused. Local changes won't be picked up until you resume it.";
         }
         else
         {
-            _scheduler.Start();
-            await _stateStore.SetAutomaticSyncEnabledAsync(true);
+            scheduler.Start();
+            await Primary.StateStore.SetAutomaticSyncEnabledAsync(true);
             StatusMessage = "Automatic sync resumed.";
         }
 
         RaiseAutomaticSyncState();
+        // The primary slot's own AccountSyncToggleViewModel (AccountSyncToggles[0]) points at the
+        // same scheduler/store this just changed — keep its displayed state in sync too, since a
+        // caller might be bound to either surface.
+        AccountSyncToggles[0].RaiseState();
     }
 
     private void RaiseAutomaticSyncState()
@@ -183,12 +235,15 @@ public sealed class SyncPanelViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            var pairs = await _stateStore.GetPairsAsync();
             Pairs.Clear();
-            foreach (var pair in pairs)
+            foreach (var slot in _slots)
             {
-                var row = AddPairViewModel(pair);
-                await row.RefreshOutstandingAsync();
+                var pairs = await slot.StateStore.GetPairsAsync();
+                foreach (var pair in pairs)
+                {
+                    var row = AddPairViewModel(pair, slot);
+                    await row.RefreshOutstandingAsync();
+                }
             }
         }
         finally
@@ -197,9 +252,12 @@ public sealed class SyncPanelViewModel : ObservableObject
         }
     }
 
-    private SyncPairViewModel AddPairViewModel(SyncPair pair)
+    private SyncPairViewModel AddPairViewModel(SyncPair pair, AccountSlot slot)
     {
-        var viewModel = new SyncPairViewModel(pair, _executor, _stateStore, RemovePairViewModel)
+        // Only labeled once there's more than one active account — with a single account, every
+        // row obviously belongs to it, and the label would be pure noise.
+        var accountLabel = _slots.Count > 1 ? slot.DisplayName : "";
+        var viewModel = new SyncPairViewModel(pair, slot.Executor, slot.StateStore, RemovePairViewModel, accountLabel)
         {
             RequestPreviewConfirmationAsync = RequestPreviewConfirmationAsync,
             RequestConflictResolutionsAsync = RequestConflictResolutionsAsync,
@@ -229,9 +287,12 @@ public sealed class SyncPanelViewModel : ObservableObject
         IsBusy = true;
         try
         {
+            // A new pair always targets the primary account — GetRemoteFolderChildren (the "Add
+            // pair" dialog's remote picker) is wired to the primary provider, so that's whichever
+            // account's remote folder the user was actually looking at when they picked it.
             // Validated against what's actually in the database, not the rows currently loaded in
             // the panel — the scheduler and other windows can have added pairs since.
-            var validationError = SyncPairValidator.Validate(request.RemotePath, request.LocalPath, await _stateStore.GetPairsAsync())
+            var validationError = SyncPairValidator.Validate(request.RemotePath, request.LocalPath, await Primary.StateStore.GetPairsAsync())
                                   ?? LocalFolderInspector.CheckWritable(request.LocalPath);
             if (validationError is not null)
             {
@@ -245,8 +306,8 @@ public sealed class SyncPanelViewModel : ObservableObject
                 return;
             }
 
-            var pair = await _stateStore.CreatePairAsync(request.RemotePath, request.LocalPath, request.Direction, request.ConflictPolicy);
-            AddPairViewModel(pair);
+            var pair = await Primary.StateStore.CreatePairAsync(request.RemotePath, request.LocalPath, request.Direction, request.ConflictPolicy);
+            AddPairViewModel(pair, Primary);
             StatusMessage = $"Added: {pair.RemotePath} {DirectionArrow(pair.Direction)} {pair.LocalPath}";
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 19) // SQLITE_CONSTRAINT (the pair's UNIQUE(RemotePath, LocalPath))
@@ -287,7 +348,7 @@ public sealed class SyncPanelViewModel : ObservableObject
 
         return await confirm(
             $"'{request.LocalPath}' already contains more than {LocalFolderInspector.BusyFolderThreshold} items. " +
-            $"Syncing it in this direction will upload all of them to {_providerDisplayName}. Continue?");
+            $"Syncing it in this direction will upload all of them to {Primary.DisplayName}. Continue?");
     }
 
     private static string DirectionArrow(SyncDirection direction) => direction switch

@@ -56,6 +56,55 @@ public class SyncStateStoreTests : IDisposable
         Assert.True(await CreateSut().GetAutomaticSyncEnabledAsync());
     }
 
+    /// <summary>
+    /// P7 Phase A regression (docs/PLAN-CLOUD-PROVIDERS.md): the flag used to be one unscoped row
+    /// in the shared `cache.db`, so two accounts sharing that file (e.g. Proton + OneDrive) would
+    /// silently share one on/off choice — turning OneDrive's automatic sync off also turned
+    /// Proton's off. Caught by <c>SyncPanelMultiAccountTests</c>.
+    /// </summary>
+    [Fact]
+    public async Task AutomaticSyncEnabled_IsScopedPerAccountKey_NotSharedAcrossAccountsInTheSameDatabase()
+    {
+        var accountA = new SyncStateStore(_dbPath, "account-a");
+        var accountB = new SyncStateStore(_dbPath, "account-b");
+
+        await accountA.SetAutomaticSyncEnabledAsync(false);
+        await accountB.SetAutomaticSyncEnabledAsync(true);
+
+        Assert.False(await accountA.GetAutomaticSyncEnabledAsync());
+        Assert.True(await accountB.GetAutomaticSyncEnabledAsync());
+    }
+
+    /// <summary>
+    /// An existing single-Proton-account install wrote this flag under the old unscoped key,
+    /// before P7 introduced per-account scoping. That choice must survive the upgrade rather than
+    /// silently resetting to the default (on) the first time it's read under the new scoped key —
+    /// only for "proton:default", the sentinel every pre-P7 row was backfilled to (P4).
+    /// </summary>
+    [Fact]
+    public async Task AutomaticSyncEnabled_FallsBackToTheLegacyUnscopedKey_ForTheDefaultProtonAccountOnly()
+    {
+        var legacyStore = new SyncStateStore(_dbPath); // defaults to "proton:default"
+        await legacyStore.GetPairsAsync(); // ensure migrations have run before writing to AppSettings by hand
+
+        // Simulate a pre-P7 row: written directly under the old unscoped key, not through
+        // SetAutomaticSyncEnabledAsync (which now always writes the scoped key).
+        await using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = "INSERT INTO AppSettings (Key, Value) VALUES ('AutomaticSyncEnabled', '0')";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        Assert.False(await legacyStore.GetAutomaticSyncEnabledAsync());
+
+        // A non-default account key must NOT see the legacy Proton row — it has no legacy data of
+        // its own, so it should just get the ordinary "never recorded a choice" default (on).
+        var oneDriveStore = new SyncStateStore(_dbPath, "onedrive:default");
+        Assert.True(await oneDriveStore.GetAutomaticSyncEnabledAsync());
+    }
+
     [Fact]
     public async Task GetPair_ById_ReturnsMatchingPair()
     {

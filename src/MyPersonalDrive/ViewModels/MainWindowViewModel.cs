@@ -29,7 +29,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private CancellationTokenSource? _cts;
     private DriveNodeViewModel? _selectedNode;
     private readonly string _rootPath;
-    private readonly CommandLogBuffer _commandLog = new();
+    // Doubled from CommandLogBuffer's own default (200): with two provider sessions able to be
+    // active at once (P7), one interleaved buffer now serves two sources, and a burst from one
+    // must not push the other's entire recent history out.
+    private readonly CommandLogBuffer _commandLog = new(maxLines: CommandLogBuffer.MaxLines * 2);
 
     /// <summary>
     /// Guards <see cref="_pendingCommandLines"/>, which the CLI executor's events fill from whatever
@@ -99,6 +102,15 @@ public sealed class MainWindowViewModel : ObservableObject
     public IReadOnlyList<ProviderDescriptor> AvailableProviders { get; }
 
     public string ActiveProviderDisplayName => _provider.DisplayName;
+
+    /// <summary>
+    /// The explorer header's title/subtitle — provider-neutral (P7 Phase A surfaced this as a real
+    /// gap: with OneDrive as the browsed account, a hardcoded "Proton Drive browser" header was
+    /// actively misleading, not just cosmetically stale).
+    /// </summary>
+    public string BrowserHeaderTitle => $"{_provider.DisplayName} browser";
+
+    public string BrowserHeaderSubtitle => $"Browsing {RootPath} on {_provider.DisplayName}.";
 
     /// <summary>Which connection-card block the settings view shows — Proton's (CLI path, version, update) or OneDrive's (sign-in/out, account label).</summary>
     public bool IsProtonActive => _provider.Id == ProviderId.Proton;
@@ -173,8 +185,11 @@ public sealed class MainWindowViewModel : ObservableObject
         _viewMode = appSettings.ViewModeOrDefault();
         _sortKey = appSettings.SortKeyOrDefault();
         _sortDescending = appSettings.SortDescending;
-        _provider.Activity += OnActivity;
-        _provider.ListingParseWarning += OnListingParseWarning;
+        // The browsed provider's own activity is tagged like any other session's, so interleaved
+        // lines from ObserveAdditionalProviderActivity (P7, both providers active at once) read
+        // consistently regardless of which one happens to be on screen.
+        _provider.Activity += (_, activity) => OnActivity(_provider.DisplayName, activity);
+        _provider.ListingParseWarning += (_, message) => OnListingParseWarning(_provider.DisplayName, message);
 
         RootItems = new ObservableCollection<DriveNodeViewModel>();
         // Selecting a "largest item" row must behave exactly like clicking that row in the listing,
@@ -2156,28 +2171,45 @@ public sealed class MainWindowViewModel : ObservableObject
         await Task.CompletedTask;
     }
 
-    private void OnActivity(object? sender, ProviderActivity activity)
+    /// <summary>
+    /// Lets the console show activity from a provider session other than the one this view model
+    /// browses — the composition root calls this once per additional active session (P7: Proton
+    /// and OneDrive can both be configured and syncing at once, even though only one is on screen
+    /// at a time until Phase B's account switcher). Lines from every session share one buffer,
+    /// prefixed with <paramref name="accountLabel"/> so an interleaved console stays readable.
+    /// </summary>
+    public void ObserveAdditionalProviderActivity(string accountLabel, ICloudDriveProvider provider)
+    {
+        provider.Activity += (_, activity) => OnActivity(accountLabel, activity);
+        provider.ListingParseWarning += (_, message) => OnListingParseWarning(accountLabel, message);
+    }
+
+    private void OnActivity(string accountLabel, ProviderActivity activity)
     {
         switch (activity.Kind)
         {
             case ActivityKind.Started:
-                Dispatcher.UIThread.Post(() => ActiveCommand = activity.Label ?? string.Empty);
-                QueueCommandLine($"> {activity.Label}");
+                Dispatcher.UIThread.Post(() => ActiveCommand = $"[{accountLabel}] {activity.Label}");
+                QueueCommandLine($"[{accountLabel}] > {activity.Label}");
                 break;
 
             case ActivityKind.Output:
-                QueueCommandLine(activity.IsError ? $"[err] {activity.Text}" : activity.Text ?? string.Empty);
+                QueueCommandLine($"[{accountLabel}] " + (activity.IsError ? $"[err] {activity.Text}" : activity.Text ?? string.Empty));
                 break;
 
             case ActivityKind.Finished:
-                QueueCommandLine(activity.IsError ? $"[fail] exit {activity.ExitCode}" : $"[done] exit {activity.ExitCode}");
+                QueueCommandLine($"[{accountLabel}] " + (activity.IsError ? $"[fail] exit {activity.ExitCode}" : $"[done] exit {activity.ExitCode}"));
+                // Unconditional, same as before P7: with two sessions active, one session's
+                // Finished can clear ActiveCommand out from under the other's still-running
+                // Started. A single "what's active" label can't represent two concurrent
+                // operations correctly — a real per-session indicator is Phase B's job.
                 Dispatcher.UIThread.Post(() => ActiveCommand = "Idle");
                 break;
         }
     }
 
-    private void OnListingParseWarning(object? sender, string message)
-        => QueueCommandLine($"[warn] {message}");
+    private void OnListingParseWarning(string accountLabel, string message)
+        => QueueCommandLine($"[{accountLabel}] [warn] {message}");
 
     /// <summary>
     /// Buffers a console line and makes sure exactly one flush is pending.

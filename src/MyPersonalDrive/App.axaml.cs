@@ -22,63 +22,50 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var settings = new AppSettingsService();
-            // The one active provider (docs/PLAN-CLOUD-PROVIDERS.md P5); everything below talks to
-            // it through ICloudDriveProvider, never to a concrete provider type. The catalog is
-            // also what the settings view's provider picker enumerates.
             var catalog = new ProviderCatalog();
-            // ResolveOrDefault, not ActiveProviderOrDefault alone: the settings value can name a
-            // real ProviderId (e.g. OneDrive) that this build still can't construct, and Create
-            // throws for exactly that case — resolving first is what keeps a stale/edited
-            // settings.json from crashing the app at startup instead of degrading to Proton.
-            var provider = catalog.Create(catalog.ResolveOrDefault(settings.Load().ActiveProviderOrDefault()), settings);
-            // Lowercased provider id + ":default" — for Proton this is exactly "proton:default",
-            // matching what migration 6 backfilled every pre-existing row to (P4), so existing
-            // Proton installs see no change. For OneDrive it's "onedrive:default": the real
-            // per-provider key mapping P4's own doc comment flagged as owed once a second provider
-            // existed (P6) — without this, every store below defaults to "proton:default"
-            // regardless of which provider is active, and a user who switches providers would see
-            // OneDrive's cache/sync-pair rows collide with Proton's under the same sentinel.
-            // ":default" rather than a real per-account identity either way — P7's job once
-            // multiple accounts of the same provider can be active together.
-            var accountKey = $"{provider.Id.ToString().ToLowerInvariant()}:default";
-            var cacheService = new DriveCacheService(Path.Combine(settings.BaseFolder, "cache.db"), accountKey);
 
-            // Same underlying cache.db as cacheService above; SyncStateStore applies the same
-            // shared DriveDatabaseMigrations, so either can be constructed independently.
-            var syncStateStore = new SyncStateStore(Path.Combine(settings.BaseFolder, "cache.db"), accountKey);
-            // One suppressor shared by the executor (which registers its own writes and deletions)
-            // and the scheduler's watchers (which consult it). Two instances would defeat it —
-            // see docs/PLAN-LOCAL-SYNC.md §9.
-            var echoSuppressor = new SyncEchoSuppressor();
-            // Which hasher/algorithm-tag pair matches the active provider's Capabilities.RemoteHash
-            // — SyncExecutor's own default (Sha1ContentHasher) is only correct for Proton
-            // (docs/PLAN-CLOUD-PROVIDERS.md P3/P6, and SyncExecutor's own doc comment on `hasher`).
-            var hasher = provider.Capabilities.RemoteHash == RemoteHashAlgorithm.QuickXor
-                ? (IContentHasher)new QuickXorHasher()
-                : new Sha1ContentHasher();
-            var syncExecutor = new SyncExecutor(
-                provider.Operations, syncStateStore, new LocalScanner(), new RemoteScanner(provider),
-                echoSuppressor: echoSuppressor, hasher: hasher, remoteHashAlgorithm: provider.Capabilities.RemoteHash);
-            var syncScheduler = new SyncScheduler(
-                syncStateStore, syncExecutor, echoSuppressor,
-                // The bool that actually matters depends on which provider is active — mirrors
-                // MainWindowViewModel's own IsAuthenticated field selection.
-                isAuthenticated: () => provider.Id == ProviderId.OneDrive ? settings.Load().IsOneDriveAuthenticated : settings.Load().IsAuthenticated);
-            var syncPanelViewModel = new SyncPanelViewModel(syncStateStore, syncExecutor, new SyncCrashRecovery(syncStateStore), syncScheduler, provider.DisplayName)
+            // P7 Phase A (docs/PLAN-CLOUD-PROVIDERS.md): a session per provider *type*, not just
+            // the one the settings picker names — Proton's CLI has no multi-account concept of its
+            // own, so at most one session per provider exists, but both can be active together.
+            // Both constructors are cheap and side-effect-free even when unconfigured (an empty
+            // CliPath/OneDriveClientId) — real failures surface lazily, on the first actual
+            // operation, never here, so building both unconditionally is safe.
+            var contexts = catalog.Available
+                .Select(descriptor => BuildAccountContext(catalog.Create(descriptor.Id, settings), settings))
+                .ToList();
+
+            // Which session the browser opens on: the persisted preference if that provider's
+            // session exists (it always will, today — every provider is built above), else
+            // whichever one is first, same degrade-gracefully spirit as ProviderCatalog's own
+            // ResolveOrDefault.
+            var preferredId = settings.Load().ActiveProviderOrDefault();
+            var primary = contexts.FirstOrDefault(context => context.Provider.Id == preferredId) ?? contexts[0];
+            var others = contexts.Where(context => !ReferenceEquals(context, primary)).ToList();
+
+            var syncPanelViewModel = new SyncPanelViewModel(primary.StateStore, primary.Executor, new SyncCrashRecovery(primary.StateStore), primary.Scheduler, primary.DisplayName)
             {
-                GetRemoteFolderChildren = provider.Operations.ListFolderAsync,
+                GetRemoteFolderChildren = primary.Provider.Operations.ListFolderAsync,
             };
-
-            // Same cache.db again, same shared migrations - see the note above.
-            var metricsStore = new FolderMetricsStore(Path.Combine(settings.BaseFolder, "cache.db"), accountKey);
+            foreach (var other in others)
+            {
+                syncPanelViewModel.AddAccount(other.StateStore, other.Executor, new SyncCrashRecovery(other.StateStore), other.Scheduler, other.DisplayName);
+            }
 
             var mainWindowViewModel = new MainWindowViewModel(
-                provider, cacheService, settings, syncPanelViewModel, releaseFeed: new CliReleaseFeed(),
-                metricsStore: metricsStore,
-                statsScanner: new FolderStatsScanner(provider),
+                primary.Provider, primary.CacheService, settings, syncPanelViewModel, releaseFeed: new CliReleaseFeed(),
+                metricsStore: primary.MetricsStore,
+                statsScanner: new FolderStatsScanner(primary.Provider),
                 providerCatalog: catalog,
-                previewLoader: new TextFilePreviewService(provider.Operations),
-                imagePreviewLoader: new ImageFilePreviewService(provider.Operations));
+                previewLoader: new TextFilePreviewService(primary.Provider.Operations),
+                imagePreviewLoader: new ImageFilePreviewService(primary.Provider.Operations));
+
+            // The browser only ever shows the primary account, but the console shows every active
+            // account's activity — background sync on an account you're not currently looking at
+            // is still something you'd want to see happening.
+            foreach (var other in others)
+            {
+                mainWindowViewModel.ObserveAdditionalProviderActivity(other.DisplayName, other.Provider);
+            }
 
             desktop.MainWindow = new MainWindow
             {
@@ -89,22 +76,64 @@ public partial class App : Application
             // appear, and a failed check only ever writes text into the settings view.
             _ = mainWindowViewModel.CheckForCliUpdateInBackgroundAsync();
 
-            // Stop the loop before the process exits, so a cycle isn't killed mid-transfer when it
-            // could just as easily finish — and so the next start has nothing to recover.
-            // Bounded on purpose. This blocks the UI thread, which is acceptable while the window is
-            // closing but not indefinitely: a cycle mid-transfer would otherwise hold the app open
-            // with a frozen window and no way out. Ten seconds is enough for the loop to observe
-            // cancellation and for the executor to kill an in-flight CLI process; past that, exiting
-            // anyway is safe because `SyncCrashRecovery` reclaims interrupted queue rows on startup.
+            // Stop every account's loop before the process exits, so a cycle isn't killed
+            // mid-transfer when it could just as easily finish — and so the next start has nothing
+            // to recover. Bounded on purpose, per scheduler: this blocks the UI thread, acceptable
+            // while the window is closing but not indefinitely — ten seconds each is enough for a
+            // loop to observe cancellation and for its executor to kill an in-flight CLI process;
+            // past that, exiting anyway is safe because SyncCrashRecovery reclaims interrupted
+            // queue rows on the next startup.
             desktop.ShutdownRequested += (_, _) =>
             {
-                if (!syncScheduler.StopAsync().Wait(TimeSpan.FromSeconds(10)))
+                foreach (var context in contexts)
                 {
-                    CrashLog.Write("Sync scheduler did not stop within 10s of shutdown; exiting anyway.");
+                    if (!context.Scheduler.StopAsync().Wait(TimeSpan.FromSeconds(10)))
+                    {
+                        CrashLog.Write($"{context.DisplayName} sync scheduler did not stop within 10s of shutdown; exiting anyway.");
+                    }
                 }
             };
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private static AccountSyncContext BuildAccountContext(ICloudDriveProvider provider, AppSettingsService settings)
+    {
+        // Lowercased provider id + ":default" — for Proton this is exactly "proton:default",
+        // matching what migration 6 backfilled every pre-existing row to (P4), so existing Proton
+        // installs see no change. ":default" rather than a real per-account identity either way —
+        // P7's own scope limit (at most one account per provider type) means it doesn't need to be
+        // yet; a real per-account key is P7's *general* form, not attempted here.
+        var accountKey = $"{provider.Id.ToString().ToLowerInvariant()}:default";
+        var dbPath = Path.Combine(settings.BaseFolder, "cache.db");
+        var cacheService = new DriveCacheService(dbPath, accountKey);
+        // Same underlying cache.db as cacheService above; SyncStateStore/FolderMetricsStore apply
+        // the same shared DriveDatabaseMigrations, so each can be constructed independently — and,
+        // per P7, once per active provider rather than once for the whole app.
+        var syncStateStore = new SyncStateStore(dbPath, accountKey);
+        var metricsStore = new FolderMetricsStore(dbPath, accountKey);
+
+        // One suppressor per context, shared only by that context's own executor/scheduler pair
+        // (which registers its own writes and deletions) and that pair's own watchers (which
+        // consult it). Two instances *within one account* would defeat it (docs/PLAN-LOCAL-SYNC.md
+        // §9) — one per account is correct, not a violation of that rule.
+        var echoSuppressor = new SyncEchoSuppressor();
+        // Which hasher/algorithm-tag pair matches this provider's own Capabilities.RemoteHash —
+        // SyncExecutor's own default (Sha1ContentHasher) is only correct for Proton
+        // (docs/PLAN-CLOUD-PROVIDERS.md P3/P6, and SyncExecutor's own doc comment on `hasher`).
+        var hasher = provider.Capabilities.RemoteHash == RemoteHashAlgorithm.QuickXor
+            ? (IContentHasher)new QuickXorHasher()
+            : new Sha1ContentHasher();
+        var syncExecutor = new SyncExecutor(
+            provider.Operations, syncStateStore, new LocalScanner(), new RemoteScanner(provider),
+            echoSuppressor: echoSuppressor, hasher: hasher, remoteHashAlgorithm: provider.Capabilities.RemoteHash);
+        var syncScheduler = new SyncScheduler(
+            syncStateStore, syncExecutor, echoSuppressor,
+            // The bool that actually matters is this provider's own — mirrors
+            // MainWindowViewModel's own IsAuthenticated field selection.
+            isAuthenticated: () => provider.Id == ProviderId.OneDrive ? settings.Load().IsOneDriveAuthenticated : settings.Load().IsAuthenticated);
+
+        return new AccountSyncContext(provider, accountKey, provider.DisplayName, cacheService, syncStateStore, metricsStore, syncExecutor, syncScheduler);
     }
 }

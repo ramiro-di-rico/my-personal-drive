@@ -20,12 +20,18 @@ public sealed class SyncPairViewModel : ObservableObject
     private int _conflictCount;
     private int _failedCount;
 
-    public SyncPairViewModel(SyncPair pair, SyncExecutor executor, SyncStateStore stateStore, Action<SyncPairViewModel> onRemoved)
+    /// <param name="accountLabel">
+    /// Which active account this pair belongs to (e.g. "Proton Drive"/"OneDrive") — empty for the
+    /// single-account case, where the panel shows only one account and a label would be noise.
+    /// Set once at construction: a pair's account never changes without recreating the row.
+    /// </param>
+    public SyncPairViewModel(SyncPair pair, SyncExecutor executor, SyncStateStore stateStore, Action<SyncPairViewModel> onRemoved, string accountLabel = "")
     {
         _pair = pair;
         _executor = executor;
         _stateStore = stateStore;
         _onRemoved = onRemoved;
+        AccountLabel = accountLabel;
 
         PreviewCommand = new AsyncCommand(PreviewAsync, () => !IsBusy, ReportError);
         SyncNowCommand = new AsyncCommand(RunAsync, () => !IsBusy, ReportError);
@@ -38,6 +44,10 @@ public sealed class SyncPairViewModel : ObservableObject
     }
 
     public int Id => _pair.Id;
+
+    public string AccountLabel { get; }
+
+    public bool HasAccountLabel => AccountLabel.Length > 0;
 
     public string RemotePath => _pair.RemotePath;
 

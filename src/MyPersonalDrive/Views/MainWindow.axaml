@@ -85,8 +85,8 @@
   <Grid RowDefinitions="Auto,Auto,*">
     <Border Grid.Row="0" Padding="16" Background="{DynamicResource PanelBackgroundBrush}">
       <StackPanel Spacing="8">
-        <TextBlock FontSize="20" Text="Proton Drive browser" />
-        <TextBlock Opacity="0.8" Text="Point the app at the Proton Drive CLI, then browse /my-files." />
+        <TextBlock FontSize="20" Text="{Binding BrowserHeaderTitle}" />
+        <TextBlock Opacity="0.8" Text="{Binding BrowserHeaderSubtitle}" />
       </StackPanel>
     </Border>
 
@@ -905,9 +905,23 @@
                     <TextBlock Text="Refresh" />
                   </StackPanel>
                 </Button>
-                <Button Content="{Binding AutomaticSyncLabel}"
-                        Command="{Binding ToggleAutomaticSyncCommand}"
-                        ToolTip.Tip="Watch local folders and poll Proton Drive automatically" />
+                <!-- One toggle per active account (P7 Phase A) — pausing OneDrive's automatic
+                     sync must not touch Proton's, and vice versa, so this replaces a single
+                     shared on/off button rather than sitting alongside it. -->
+                <ItemsControl ItemsSource="{Binding AccountSyncToggles}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <StackPanel Orientation="Horizontal" Spacing="8" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="syncVm:AccountSyncToggleViewModel">
+                      <Button Content="{Binding Label}"
+                              Command="{Binding ToggleCommand}"
+                              ToolTip.Tip="Watch local folders and poll this account automatically" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
               </StackPanel>
 
               <ItemsControl ItemsSource="{Binding Pairs}">
@@ -916,6 +930,11 @@
                     <Border Classes="hoverGroup" Padding="12" Margin="0,0,0,8" Background="{DynamicResource PanelBackgroundBrush}" CornerRadius="6">
                       <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
                         <StackPanel Grid.Column="0" Grid.Row="0" Spacing="4">
+                          <TextBlock FontSize="11"
+                                     Opacity="0.6"
+                                     FontWeight="Bold"
+                                     Text="{Binding AccountLabel}"
+                                     IsVisible="{Binding HasAccountLabel}" />
                           <TextBlock FontWeight="Bold" Text="{Binding RemotePath}" />
                           <TextBlock Opacity="0.7" TextWrapping="Wrap" Text="{Binding LocalPath}" />
                           <TextBlock Opacity="0.6" Text="{Binding DirectionText}" />

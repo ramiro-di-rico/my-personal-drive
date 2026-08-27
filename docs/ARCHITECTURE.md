@@ -257,7 +257,7 @@ the full request-by-request design; this is the as-built shape.
 | [`GraphErrorClassifier`](../src/MyPersonalDrive/Services/Providers/OneDrive/GraphErrorClassifier.cs) | Reads the structured `{"error":{"code":…}}` body → `DriveErrorKind`, instead of substring-matching like Proton's classifier has to |
 | [`OneDriveOperations`](../src/MyPersonalDrive/Services/Providers/OneDrive/OneDriveOperations.cs) | `IDriveOperations`. Paginated listing (follows `@odata.nextLink` to exhaustion), small vs. chunked upload (4 MiB single-shot ceiling, 320 KiB-multiple chunks), asynchronous copy (`202` + polled monitor URL), one `GET` per distinct move/copy target parent (cached per instance — `SupportsBatchMove = false`) |
 | [`OneDrivePathSyntax`](../src/MyPersonalDrive/Services/Providers/OneDrive/OneDrivePathSyntax.cs) | `Comparison = OrdinalIgnoreCase` (OneDrive is case-insensitive, unlike Proton/Linux); `IsLocalNameMappableRemotely` (§4.6/O6 reserved-name rule — new `IProviderPathSyntax` member this phase added, Proton implements it as always-true) |
-| [`QuickXorHasher`](../src/MyPersonalDrive/Services/Providers/OneDrive/QuickXorHasher.cs) | `IContentHasher` for `RemoteHashAlgorithm.QuickXor` — **implemented from Microsoft's published algorithm description, not yet verified against a real Graph-reported hash**; see its own doc comment |
+| [`QuickXorHasher`](../src/MyPersonalDrive/Services/Providers/OneDrive/QuickXorHasher.cs) | `IContentHasher` for `RemoteHashAlgorithm.QuickXor`. Live-verified (Appendix A #3) — its first version was wrong (a 192-bit accumulator storage detail leaking into what must be a genuinely circular 160-bit width), caught by comparing against Graph's own reported hash; fixed and confirmed matching on two separate uploads |
 
 **Hash tagging**: `OneDriveOperations.ToDriveItem` only ever reads `file.hashes.quickXorHash` —
 deliberately never falling back to `sha1Hash`/`sha256Hash` when a drive doesn't return it, because
@@ -275,7 +275,11 @@ the registered port-less `http://localhost` redirect URI, launches the system br
 in the console even if no browser could be launched, then blocks on the loopback listener for the
 redirect carrying the authorization code. `AppSettings.OneDriveClientId` (entered in Settings, not
 embedded in the binary) is the public-client application id; `Files.ReadWrite.All offline_access
-User.Read` is the fixed scope set.
+User.Read` is the fixed scope set. **Azure setup note (Appendix A #1):** the app registration needs
+its "Mobile and desktop applications" platform added explicitly (Authentication → Add a platform),
+registered with the port-less `http://localhost` redirect URI — without that specific platform,
+Microsoft rejects the loopback redirect with `invalid_request: redirect_uri is not valid` even
+though the registration itself exists.
 
 **Settings surface**: `AppSettings.OneDriveClientId` (string) and `IsOneDriveAuthenticated` (bool)
 sit alongside Proton's `CliPath`/`IsAuthenticated` rather than a shared provider-keyed structure —
@@ -285,10 +289,10 @@ whichever of the two backs the active provider, decided once at construction
 (`_provider.Id == ProviderId.OneDrive`) — switching providers requires a restart (§2.7 in the
 plan), so this never changes mid-session.
 
-**Unverified**: every request/response shape here comes from Microsoft's public Graph
-documentation, not a live capture — docs/PLAN-CLOUD-PROVIDERS.md's own R6 risk. Appendix A there is
-where confirmed captures land; check it before trusting a shape this table describes as
-"per docs" rather than "verified."
+**Verification status**: sign-in, `ListFolderAsync`, small-file upload, and `QuickXorHasher` are
+live-verified against a real account (docs/PLAN-CLOUD-PROVIDERS.md Appendix A). Pagination past one
+page, chunked upload, async copy, rate-limiting, and the exact O6 reserved-name list remain per
+Microsoft's documentation only, not yet captured live — R6 still applies to those specifically.
 
 ---
 

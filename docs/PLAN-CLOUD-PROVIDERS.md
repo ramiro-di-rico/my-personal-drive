@@ -164,7 +164,7 @@
       to capture despite a live X display); the binding itself is covered by
       `MainWindowProviderTests.ActiveProviderDisplayName_ReflectsTheInjectedProvider`, but an
       actual look at the running window is still owed before calling this fully done.
-- [x] **P6 (built, pending live verification)** — `OneDriveProvider` over Microsoft Graph, plus the
+- [x] **P6 (core paths live-verified)** — `OneDriveProvider` over Microsoft Graph, plus the
       P5 items that only made sense with a second real provider to build them against.
       Added `Services/Providers/OneDrive/`: `GraphAuthenticator` (authorization-code + PKCE via a
       loopback `HttpListener`, no MSAL, no device-code fallback — documented gap),
@@ -206,23 +206,22 @@
       remaining Proton-named string beyond the ones §5 item 3 named (e.g. context-menu labels) —
       cosmetic, parked via the `debt` skill rather than chased here.
 
-      **Unverified, explicitly (R6):** every Graph request/response shape in §4 above and in
-      `OneDriveOperations`/the DTOs under `Services/Providers/OneDrive/` comes from Microsoft's
-      published documentation, not a live capture. `QuickXorHasher` in particular is implemented
-      from the algorithm's public description and is *not yet* checked against a real
-      Graph-reported `quickXorHash` — its own doc comment says so, and its tests assert structural
-      properties (determinism, output shape, chunking-invariance), never a specific hash literal,
-      for exactly that reason. Appendix A below is still empty. **A live-verification session
-      (real sign-in, a real `ListFolderAsync`, a real small-file upload compared against Graph's
-      own `quickXorHash`) is the next step before this is used for real two-way sync against a live
-      account** — nothing here should be treated as confirmed until that lands as Appendix A
-      findings.
+      **Live-verified (R6), 2026-08-27 — see Appendix A for the full findings:** real sign-in
+      (after discovering the Azure app registration needs its "Mobile and desktop applications"
+      platform added explicitly — Appendix A #1), a real `ListFolderAsync("/")` against a live
+      personal account (#2), and a real small-file upload. `QuickXorHasher` was **wrong on its
+      first attempt** — an accumulator storage/wraparound bug that live verification caught: 18 of
+      20 output bytes matched Graph's own reported hash, the first byte didn't. Root cause and fix
+      in Appendix A #3; rewritten as a genuinely circular 160-bit bit array and **confirmed
+      matching Graph's real `quickXorHash` on two separate uploads** after the fix. Not yet
+      captured live: pagination past one page, chunked upload, async copy, rate-limiting, and the
+      exact O6 reserved-name list — still per Microsoft's docs only, per Appendix A's "not yet
+      captured" note.
 
-      Verified so far: 713 tests pass (74 new, `FakeHttpMessageHandler`-based — no real account
-      needed), 0 IL2xxx/IL3xxx trim/AOT warnings on a `linux-x64` self-contained publish (R4), the
-      published binary launches and stays up (crash.log unchanged from before this phase's
-      changes). Not yet verified: anything requiring a live Microsoft account or a real Azure app
-      registration — see the live-verification step above.
+      Verified: 715 tests pass, 6 skipped opt-in (75 new tests overall — `FakeHttpMessageHandler`-
+      based unit tests plus the live integration test above; no real account needed for the
+      unit-test count), 0 IL2xxx/IL3xxx trim/AOT warnings on a `linux-x64` self-contained publish
+      (R4), the published binary launches and stays up.
 - [ ] **P7** — *optional* multiple active accounts. Not started, deliberately last.
 - [ ] **P8** — *optional* delta-based remote scanning where the provider supports it. Not started.
 
@@ -890,10 +889,48 @@ should not imitate it.
 
 ## Appendix A — Verified OneDrive/Graph behavior
 
-*(Empty. Populate before or during P6 with real captured requests and responses, following the
-model of PLAN-LOCAL-SYNC.md Appendix A: one numbered finding each, with the actual payload and the
-date/version it was captured against. Nothing in §4 marked (unverified) should be implemented until
-the corresponding finding is recorded here.)*
+Captured 2026-08-27, live session against a real personal Microsoft account, via
+`tests/MyPersonalDrive.Tests/Integration/RealOneDriveAuthTests.cs`
+(`MYPERSONALDRIVE_ONEDRIVE_INTEGRATION=1`).
+
+1. **Loopback redirect URI needs the "Mobile and desktop applications" platform explicitly added
+   in the Azure app registration, registered as the port-less `http://localhost`.** The first
+   attempt failed with `invalid_request: The provided value for the input parameter 'redirect_uri'
+   is not valid` even though the app registration existed — the registration has to add that
+   specific platform (Authentication → Add a platform → Mobile and desktop applications) before
+   `http://localhost:{any port}` requests are accepted. Once added, sign-in worked immediately with
+   `redirect_uri=http://localhost:{dynamic port}/` (confirmed across three different dynamically
+   allocated ports on three separate runs) — confirms §4.2's design as built in
+   `GraphAuthenticator`, with this one prerequisite spelled out for anyone repeating the setup.
+2. **`ListFolderAsync("/")` against a real account's root**: returned successfully, 41 children,
+   ordinary names (`Documents`, `Desktop`, `.Trash-1000`, etc.) — no surprises in the response
+   shape versus §4.3's documented `$select` fields; `GraphDriveItem`'s mapping needed no changes.
+3. **`quickXorHash` — the first `QuickXorHasher` implementation was wrong**, confirmed by comparing
+   its local output against Graph's own reported hash for an uploaded file: 18 of the resulting 20
+   bytes matched exactly, but the first byte differed by a few bits. Root cause: that
+   implementation stored the accumulator as `ulong[3]` (192 bits of storage) and only handled
+   overflow across a 64-bit array-element boundary — it missed that the algorithm's accumulator is
+   circular over exactly **160 bits**, not 192, so a byte whose 8-bit span crosses the 160-bit
+   wraparound point while still sitting entirely inside one 64-bit array element (shift positions
+   154, 159, 153, 158 for short inputs, i.e. bytes 14/29/43/58 mod 160 at `Shift=11`) had its
+   overflow bits silently dropped into unused storage past byte 19 instead of folding back to bit
+   0. Rewritten as a genuinely circular 160-bit (20-byte) bit array with a per-bit XOR helper
+   (`QuickXorHasher.QuickXorState`, see its doc comment) — **confirmed matching Graph's own
+   `quickXorHash` on two separate real uploads** after the fix. `RemoteHashAlgorithm` field
+   present: `quickXorHash` was populated for every file checked; `sha1Hash`/`sha256Hash` were not
+   inspected on this personal account (§4.4's "unverified: which hashes a personal drive returns
+   today" note stays open for that specific sub-question, but is moot for this app either way since
+   `OneDriveOperations.ToDriveItem` only ever reads `quickXorHash`).
+4. **Upload (small-file path)**: `PUT .../content?@microsoft.graph.conflictBehavior=replace`
+   succeeded for a short text file and the resulting item's `quickXorHash` was readable on the very
+   next listing call with no propagation delay observed.
+5. **Trash**: `DELETE .../{path}:` on the uploaded test file succeeded with no error, run as
+   best-effort cleanup after the test's assertions.
+
+**Not yet captured**: pagination (`@odata.nextLink`) against a folder with more than `$top=200`
+children, chunked upload for a file over 4 MiB, async copy monitoring, 429/503 rate-limiting
+in practice, and the exact reserved-name list in §4.6/O6 (still per Microsoft's documentation, not
+tested against the live service). Each remains marked (unverified) until captured.
 
 ## Appendix B — File-by-file change inventory
 

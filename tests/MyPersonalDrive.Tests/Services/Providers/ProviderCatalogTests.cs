@@ -25,13 +25,22 @@ public class ProviderCatalogTests : IDisposable
     }
 
     [Fact]
-    public void Available_ListsExactlyProton()
+    public void Available_ListsProtonAndOneDrive()
     {
         var sut = new ProviderCatalog();
 
-        var descriptor = Assert.Single(sut.Available);
-        Assert.Equal(ProviderId.Proton, descriptor.Id);
-        Assert.Equal("Proton Drive", descriptor.DisplayName);
+        Assert.Collection(
+            sut.Available,
+            proton =>
+            {
+                Assert.Equal(ProviderId.Proton, proton.Id);
+                Assert.Equal("Proton Drive", proton.DisplayName);
+            },
+            oneDrive =>
+            {
+                Assert.Equal(ProviderId.OneDrive, oneDrive.Id);
+                Assert.Equal("OneDrive", oneDrive.DisplayName);
+            });
     }
 
     [Fact]
@@ -47,27 +56,41 @@ public class ProviderCatalogTests : IDisposable
     }
 
     [Fact]
+    public void Create_OneDrive_ReturnsAWorkingOneDriveProvider()
+    {
+        var sut = new ProviderCatalog();
+        var settings = new AppSettingsService();
+
+        var provider = sut.Create(ProviderId.OneDrive, settings);
+
+        Assert.Equal(ProviderId.OneDrive, provider.Id);
+        Assert.IsType<MyPersonalDrive.Services.Providers.OneDrive.OneDriveProvider>(provider);
+    }
+
+    [Fact]
     public void Create_UnknownProvider_ThrowsRatherThanGuessing()
     {
         var sut = new ProviderCatalog();
         var settings = new AppSettingsService();
 
-        Assert.Throws<NotSupportedException>(() => sut.Create(ProviderId.OneDrive, settings));
+        Assert.Throws<NotSupportedException>(() => sut.Create((ProviderId)99, settings));
     }
 
     /// <summary>
-    /// Regression test for the P1-P5 adversarial review: `ProviderId.OneDrive` is a real,
-    /// already-defined enum value (added in P1, ahead of P6's implementation), so
-    /// `AppSettings.ActiveProviderOrDefault`'s `Enum.TryParse` alone can't catch it — it parses
-    /// fine. Without `ResolveOrDefault`, a settings.json with `"ActiveProvider": "OneDrive"`
-    /// would reach `Create` and crash the app at startup instead of degrading to Proton.
+    /// Regression test for the P1-P5 adversarial review, updated for P6: the original gap was
+    /// `ProviderId.OneDrive` being a real, already-defined enum value (added in P1, ahead of P6's
+    /// implementation) with no catalog entry, so `AppSettings.ActiveProviderOrDefault`'s
+    /// `Enum.TryParse` alone couldn't catch it — it parsed fine, and `Create` crashed the app at
+    /// startup instead of degrading. Now that OneDrive is genuinely registered, the same coverage
+    /// is exercised with a synthetic out-of-range value instead: `ResolveOrDefault` must still
+    /// degrade to the catalog's default for any id `Create` can't build, not only OneDrive.
     /// </summary>
     [Fact]
     public void ResolveOrDefault_ARealButUnbuildableId_DegradesToTheCatalogsDefault()
     {
         var sut = new ProviderCatalog();
 
-        Assert.Equal(ProviderId.Proton, sut.ResolveOrDefault(ProviderId.OneDrive));
+        Assert.Equal(ProviderId.Proton, sut.ResolveOrDefault((ProviderId)99));
     }
 
     [Fact]
@@ -76,5 +99,6 @@ public class ProviderCatalogTests : IDisposable
         var sut = new ProviderCatalog();
 
         Assert.Equal(ProviderId.Proton, sut.ResolveOrDefault(ProviderId.Proton));
+        Assert.Equal(ProviderId.OneDrive, sut.ResolveOrDefault(ProviderId.OneDrive));
     }
 }

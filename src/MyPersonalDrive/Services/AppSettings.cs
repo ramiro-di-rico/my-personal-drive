@@ -36,6 +36,17 @@ public sealed class AppSettings
     /// </summary>
     public string ActiveProvider { get; set; } = nameof(Providers.ProviderId.Proton);
 
+    /// <summary>
+    /// The Azure app registration's (public client) application id, entered in Settings rather
+    /// than embedded in the binary — kept separate from Proton's fields entirely rather than
+    /// generalized into a provider-keyed settings shape: OneDrive's connection card (sign-in/out +
+    /// account label) has no field this could double up with. See docs/PLAN-CLOUD-PROVIDERS.md P6.
+    /// </summary>
+    public string OneDriveClientId { get; set; } = string.Empty;
+
+    /// <summary>Cached hint mirroring <see cref="IsAuthenticated"/> for OneDrive — the actual token lives in <c>onedrive-token.json</c>, not here.</summary>
+    public bool IsOneDriveAuthenticated { get; set; }
+
     public Models.DriveSortKey SortKeyOrDefault()
         => Enum.TryParse<Models.DriveSortKey>(SortKey, ignoreCase: true, out var key)
             ? key

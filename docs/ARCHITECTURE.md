@@ -119,30 +119,42 @@ AppSettingsService ────────────────────�
                                                                                                  └─► MainWindow.DataContext
 ```
 
-`ProviderCatalog` (`Services/Providers/ProviderCatalog.cs`) is the one place that still knows how
-to build a Proton chain (`ProtonDriveCliLocator` → `ProtonDriveCliExecutor` → `ProtonDriveService`
-→ `ProtonDriveProvider`); it also exposes `Available` — today exactly one `ProviderDescriptor`,
-Proton — which `MainWindowViewModel.AvailableProviders` surfaces for the settings view's provider
-label. `SyncExecutor`, `RemoteScanner`, `FolderStatsScanner` and `SyncPanelViewModel`'s
-`GetRemoteFolderChildren` delegate are all built from `provider`/`provider.Operations`, never from
-a Proton-specific type; adding a second backend means a case in `ProviderCatalog.Create`, not a
-change to any of those consumers. See docs/PLAN-CLOUD-PROVIDERS.md for the full plan — still open:
-`AppSettings.CliPath`/`IsAuthenticated` are still flat (not provider-scoped) and there is no UI to
-actually switch providers yet, both deliberately deferred to P6 until there is a second provider
-to build that against; path syntax and content hashing are behind interfaces (P3) but only Proton
-implements them; persisted state is account-scoped (P4) but every row's account key is still the
-`'proton:default'` sentinel.
+`ProviderCatalog` (`Services/Providers/ProviderCatalog.cs`) is the one place that knows how to
+build either provider's construction chain (Proton: `ProtonDriveCliLocator` →
+`ProtonDriveCliExecutor` → `ProtonDriveService` → `ProtonDriveProvider`; OneDrive:
+`OneDriveTokenStore` → `GraphAuthenticator` → `GraphHttpClient` → `OneDriveProvider`); it exposes
+`Available` — both `ProviderDescriptor`s, since P6 — which `MainWindowViewModel.AvailableProviders`
+surfaces for the settings view's provider picker. `SyncExecutor`, `RemoteScanner`,
+`FolderStatsScanner` and `SyncPanelViewModel`'s `GetRemoteFolderChildren` delegate are all built
+from `provider`/`provider.Operations`, never from a provider-specific type — adding OneDrive meant
+a case in `ProviderCatalog.Create`, not a change to any of those consumers. The composition root
+also picks `SyncExecutor`'s content hasher from `provider.Capabilities.RemoteHash`
+(`Sha1ContentHasher` vs `QuickXorHasher`) rather than hardcoding Proton's — the one piece of
+provider-specific wiring `SyncExecutor` itself can't do (its own doc comment on the `hasher`
+parameter flagged this as owed to the composition root once a second provider existed).
+The composition root also computes `accountKey` as `{provider.Id}:default` lowercased (`"proton:
+default"`/`"onedrive:default"`) and passes it to `DriveCacheService`/`SyncStateStore`/
+`FolderMetricsStore` — without this, every store's own `"proton:default"` constructor default
+would apply regardless of which provider is active, and switching providers would let OneDrive's
+cache/sync-pair rows collide with Proton's under the same sentinel. See docs/PLAN-CLOUD-PROVIDERS.md
+P6 for what's still open: `AppSettings.CliPath`/`IsAuthenticated` are flat rather than a shared
+provider-keyed structure (deliberately — see §5.4's "Settings surface" note, now deferred further
+to P7); a switch confirms and asks for a restart but does not warn about affected sync pairs;
+`":default"` is still a fixed suffix, not a real per-account identity — P7's job once multiple
+accounts of the same provider can be active together.
 
 Nothing is a container singleton; they're single instances created by hand.
 
 ---
 
-## 5. The Proton provider (CLI execution layer)
+## 5. The providers
 
-Everything in this section lives under `Services/Providers/Proton/` and is reached only through
-`ICloudDriveProvider` (§4) — nothing outside that folder should name these types directly except
-the composition root and the doc-flagged P3 follow-ups in `RemoteScanner`/`MainWindowViewModel`
-(path-syntax calls not yet behind an interface).
+Two backends exist behind `ICloudDriveProvider` (§4): Proton (a CLI process) and, since P6,
+OneDrive (Microsoft Graph over HTTP). Everything in §5.1–§5.3 lives under
+`Services/Providers/Proton/` and is reached only through `ICloudDriveProvider` — nothing outside
+that folder should name these types directly except the composition root and the doc-flagged P3
+follow-ups in `RemoteScanner`/`MainWindowViewModel` (path-syntax calls not yet behind an
+interface). §5.4 covers OneDrive, under `Services/Providers/OneDrive/`, on the same rule.
 
 ### 5.1 `ProtonDriveCliLocator`
 
@@ -231,6 +243,52 @@ Forwards all three executor events upward.
 `Quote(v)` = double quotes with `"` escaped. Arguments are concatenated as a string, not as an
 array; quoting is the only defense (`LoadFolderAsync` even interpolates the quotes by hand
 instead of using `Quote`).
+
+### 5.4 The OneDrive provider (Microsoft Graph)
+
+No CLI to shell out to — this provider talks HTTP directly. docs/PLAN-CLOUD-PROVIDERS.md §4 has
+the full request-by-request design; this is the as-built shape.
+
+| Piece | Role |
+|---|---|
+| [`GraphAuthenticator`](../src/MyPersonalDrive/Services/Providers/OneDrive/GraphAuthenticator.cs) | `IDriveAuthenticator`. Authorization-code + PKCE via a loopback `HttpListener` (no MSAL, no device-code fallback — a documented gap); exchanges/refreshes tokens against `login.microsoftonline.com`; `GetValidAccessTokenAsync`/`ForceRefreshAsync` are what `GraphHttpClient` calls before/after a 401 |
+| [`OneDriveTokenStore`](../src/MyPersonalDrive/Services/Providers/OneDrive/OneDriveTokenStore.cs) | Persists the refresh/access token pair to `onedrive-token.json` under `AppSettingsService.BaseFolder`, chmod 600 — at-rest plaintext, an accepted risk (R3) matching where Proton's own CLI keeps its session |
+| [`GraphHttpClient`](../src/MyPersonalDrive/Services/Providers/OneDrive/GraphHttpClient.cs) | Attaches the bearer token, retries once on 401 after forcing a refresh, honors `Retry-After` on 429/503, raises `Activity` events per request so the console shows Graph calls the same way it shows a Proton CLI command |
+| [`GraphErrorClassifier`](../src/MyPersonalDrive/Services/Providers/OneDrive/GraphErrorClassifier.cs) | Reads the structured `{"error":{"code":…}}` body → `DriveErrorKind`, instead of substring-matching like Proton's classifier has to |
+| [`OneDriveOperations`](../src/MyPersonalDrive/Services/Providers/OneDrive/OneDriveOperations.cs) | `IDriveOperations`. Paginated listing (follows `@odata.nextLink` to exhaustion), small vs. chunked upload (4 MiB single-shot ceiling, 320 KiB-multiple chunks), asynchronous copy (`202` + polled monitor URL), one `GET` per distinct move/copy target parent (cached per instance — `SupportsBatchMove = false`) |
+| [`OneDrivePathSyntax`](../src/MyPersonalDrive/Services/Providers/OneDrive/OneDrivePathSyntax.cs) | `Comparison = OrdinalIgnoreCase` (OneDrive is case-insensitive, unlike Proton/Linux); `IsLocalNameMappableRemotely` (§4.6/O6 reserved-name rule — new `IProviderPathSyntax` member this phase added, Proton implements it as always-true) |
+| [`QuickXorHasher`](../src/MyPersonalDrive/Services/Providers/OneDrive/QuickXorHasher.cs) | `IContentHasher` for `RemoteHashAlgorithm.QuickXor` — **implemented from Microsoft's published algorithm description, not yet verified against a real Graph-reported hash**; see its own doc comment |
+
+**Hash tagging**: `OneDriveOperations.ToDriveItem` only ever reads `file.hashes.quickXorHash` —
+deliberately never falling back to `sha1Hash`/`sha256Hash` when a drive doesn't return it, because
+this provider's `Capabilities.RemoteHash` is the fixed value `QuickXor`; tagging a sha1-only item's
+hash as QuickXor would silently mislabel it, exactly the "hash-algorithm mismatch is silent and
+destructive" failure P3's `IsAlgorithmMismatch` guard exists to prevent. A file with no
+quickXorHash just gets no content hash, a safe degrade (RemoteScanner already treats a null hash
+as "unknown algorithm, don't compare").
+
+**Auth flow, mechanically**: `AuthenticateAsync` reserves a loopback port (a throwaway
+`TcpListener` on port 0, then handed to `HttpListener` by exact port number — `HttpListener` has
+no "any free port" mode of its own), builds the `login.microsoftonline.com` authorize URL against
+the registered port-less `http://localhost` redirect URI, launches the system browser
+(`Process.Start(UseShellExecute: true)`) and also emits the URL through `Activity` so it's visible
+in the console even if no browser could be launched, then blocks on the loopback listener for the
+redirect carrying the authorization code. `AppSettings.OneDriveClientId` (entered in Settings, not
+embedded in the binary) is the public-client application id; `Files.ReadWrite.All offline_access
+User.Read` is the fixed scope set.
+
+**Settings surface**: `AppSettings.OneDriveClientId` (string) and `IsOneDriveAuthenticated` (bool)
+sit alongside Proton's `CliPath`/`IsAuthenticated` rather than a shared provider-keyed structure —
+the two providers' connection cards are structurally different (CLI path + version vs. sign-in/out
++ account label), so there was nothing to share. `MainWindowViewModel.IsAuthenticated` reads/writes
+whichever of the two backs the active provider, decided once at construction
+(`_provider.Id == ProviderId.OneDrive`) — switching providers requires a restart (§2.7 in the
+plan), so this never changes mid-session.
+
+**Unverified**: every request/response shape here comes from Microsoft's public Graph
+documentation, not a live capture — docs/PLAN-CLOUD-PROVIDERS.md's own R6 risk. Appendix A there is
+where confirmed captures land; check it before trusting a shape this table describes as
+"per docs" rather than "verified."
 
 ---
 
@@ -433,11 +491,12 @@ compose into three reachable crashes documented there.
 
 ---
 
-## 10. CLI self-update (the one outbound network call)
+## 10. CLI self-update (Proton's one outbound network call)
 
 Everything else in this app reaches Proton by launching `proton-drive`. **This is the single
-exception**, and it is deliberately narrow: it reads one public static file and never touches the
-Drive API.
+exception on the Proton side**, and it is deliberately narrow: it reads one public static file and
+never touches the Drive API. (OneDrive has no such distinction to draw — every OneDrive operation
+is itself an HTTP call to Microsoft Graph; see §5.4.)
 
 | Piece | Role |
 |---|---|

@@ -17,16 +17,25 @@ public sealed class SyncPanelViewModel : ObservableObject
     private readonly SyncExecutor _executor;
     private readonly SyncCrashRecovery _crashRecovery;
     private readonly SyncScheduler? _scheduler;
-    private string _statusMessage = "Add a folder to start syncing it from Proton Drive.";
+    private readonly string _providerDisplayName;
+    private string _statusMessage;
     private bool _isBusy;
     private bool _hasRecovered;
 
-    public SyncPanelViewModel(SyncStateStore stateStore, SyncExecutor executor, SyncCrashRecovery crashRecovery, SyncScheduler? scheduler = null)
+    /// <param name="providerDisplayName">
+    /// Named in a couple of user-facing strings ("Add a folder to start syncing it from…").
+    /// Defaults to "Proton Drive" so every existing call site (tests above all) keeps working
+    /// unchanged; the composition root passes the active provider's real name
+    /// (docs/PLAN-CLOUD-PROVIDERS.md §5 item 3).
+    /// </param>
+    public SyncPanelViewModel(SyncStateStore stateStore, SyncExecutor executor, SyncCrashRecovery crashRecovery, SyncScheduler? scheduler = null, string providerDisplayName = "Proton Drive")
     {
         _stateStore = stateStore;
         _executor = executor;
         _crashRecovery = crashRecovery;
         _scheduler = scheduler;
+        _providerDisplayName = providerDisplayName;
+        _statusMessage = $"Add a folder to start syncing it from {_providerDisplayName}.";
         Pairs = new ObservableCollection<SyncPairViewModel>();
 
         AddPairCommand = new AsyncCommand(AddPairAsync, () => !IsBusy, ReportError);
@@ -278,7 +287,7 @@ public sealed class SyncPanelViewModel : ObservableObject
 
         return await confirm(
             $"'{request.LocalPath}' already contains more than {LocalFolderInspector.BusyFolderThreshold} items. " +
-            "Syncing it in this direction will upload all of them to Proton Drive. Continue?");
+            $"Syncing it in this direction will upload all of them to {_providerDisplayName}. Continue?");
     }
 
     private static string DirectionArrow(SyncDirection direction) => direction switch

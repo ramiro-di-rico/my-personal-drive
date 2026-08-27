@@ -7,6 +7,7 @@ using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
+using MyPersonalDrive.Services.Providers.OneDrive;
 using Avalonia.Threading;
 
 namespace MyPersonalDrive.ViewModels;
@@ -39,6 +40,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly List<string> _pendingCommandLines = new();
     private bool _commandLogFlushScheduled;
     private string _cliPath;
+    private string _oneDriveClientId;
     private string _currentPath = "/my-files";
     private string _statusMessage = "Select a Proton Drive CLI executable to begin.";
     private bool _isWarning;
@@ -92,16 +94,25 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isCliUpdateBusy;
 
     /// <summary>
-    /// What the settings view's provider picker would list — see docs/PLAN-CLOUD-PROVIDERS.md P5.
-    /// Only Proton exists today, so there is nothing to switch <em>to</em> yet: this surfaces the
-    /// active provider's name, but does not yet expose a way to change it. That "switch with
-    /// confirmation, warn about affected sync pairs" flow the plan describes is deferred to P6,
-    /// when there is a second real provider to build and test it against — building it now would
-    /// mean unreachable UI and tests against a provider that doesn't exist.
+    /// What the settings view's provider picker lists — see docs/PLAN-CLOUD-PROVIDERS.md P5/P6.
     /// </summary>
     public IReadOnlyList<ProviderDescriptor> AvailableProviders { get; }
 
     public string ActiveProviderDisplayName => _provider.DisplayName;
+
+    /// <summary>Which connection-card block the settings view shows — Proton's (CLI path, version, update) or OneDrive's (sign-in/out, account label).</summary>
+    public bool IsProtonActive => _provider.Id == ProviderId.Proton;
+
+    public bool IsOneDriveActive => _provider.Id == ProviderId.OneDrive;
+
+    /// <summary>Whether the active provider has a version/self-update story to show — false for a provider with no external binary (docs/PLAN-CLOUD-PROVIDERS.md §5 item 2).</summary>
+    public bool HasDiagnostics => _provider.Diagnostics is not null;
+
+    /// <summary>The signed-in OneDrive account's label (email/name), or a "not signed in" placeholder for the card.</summary>
+    public string OneDriveAccountLabel
+        => _provider is OneDriveProvider oneDrive && oneDrive.Auth is GraphAuthenticator { AccountLabel: { } label }
+            ? label
+            : "Not signed in.";
 
     public MainWindowViewModel(
         ICloudDriveProvider provider,
@@ -143,7 +154,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var appSettings = settings.Load();
         _cliPath = appSettings.CliPath;
-        _isAuthenticated = appSettings.IsAuthenticated;
+        _oneDriveClientId = appSettings.OneDriveClientId;
+        // Which AppSettings field backs this VM's single IsAuthenticated flag depends on which
+        // provider is active — the two providers have entirely different connection cards (CLI
+        // path + version vs. sign-in/out), so there is one bool per provider in AppSettings but
+        // only ever one "the active provider is signed in" flag in the VM at a time. Switching
+        // providers requires a restart (§2.7), so which field to use never changes mid-session.
+        _isAuthenticated = _provider.Id == ProviderId.OneDrive ? appSettings.IsOneDriveAuthenticated : appSettings.IsAuthenticated;
         // Set through the field, not the property: the property persists, and the constructor has
         // no business writing settings.json back on every launch.
         _viewMode = appSettings.ViewModeOrDefault();
@@ -182,6 +199,8 @@ public sealed class MainWindowViewModel : ObservableObject
         ShowSettingsCommand = new AsyncCommand(ShowSettingsAsync, onError: HandleUnexpectedError);
         CheckCliVersionCommand = new AsyncCommand(CheckCliVersionAsync, CanCheckCliVersion, HandleUnexpectedError);
         CheckForCliUpdateCommand = new AsyncCommand(CheckForCliUpdateAsync, CanCheckForCliUpdate, HandleUnexpectedError);
+        SwitchToProtonCommand = new AsyncCommand(() => SwitchProviderAsync(ProviderId.Proton), () => !IsLoading && !IsProtonActive, HandleUnexpectedError);
+        SwitchToOneDriveCommand = new AsyncCommand(() => SwitchProviderAsync(ProviderId.OneDrive), () => !IsLoading && !IsOneDriveActive, HandleUnexpectedError);
         InstallCliUpdateCommand = new AsyncCommand(InstallCliUpdateAsync, CanInstallCliUpdate, HandleUnexpectedError);
         ViewSelectedFileCommand = new AsyncCommand(ViewSelectedFileAsync, CanViewSelectedFile, HandleUnexpectedError);
         CloseViewerCommand = new AsyncCommand(CloseViewerAsync, onError: HandleUnexpectedError);
@@ -275,6 +294,10 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     public AsyncCommand CheckForCliUpdateCommand { get; }
+
+    public AsyncCommand SwitchToProtonCommand { get; }
+
+    public AsyncCommand SwitchToOneDriveCommand { get; }
 
     public AsyncCommand InstallCliUpdateCommand { get; }
 
@@ -452,6 +475,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public Func<Task<string?>>? RequestSaveActivityAsync { get; set; }
 
+    /// <summary>Asked before switching the active provider — same "question in, yes/no out" shape as <c>SyncPanelViewModel.RequestConfirmationAsync</c>.</summary>
+    public Func<string, Task<bool>>? RequestSwitchProviderConfirmationAsync { get; set; }
+
     public string CliPath
     {
         get => _cliPath;
@@ -466,6 +492,19 @@ public sealed class MainWindowViewModel : ObservableObject
                 IsCliUpdateAvailable = false;
                 CliUpdateStatus = "Not checked yet.";
                 PersistSettings();
+                RaiseCommandStates();
+            }
+        }
+    }
+
+    public string OneDriveClientId
+    {
+        get => _oneDriveClientId;
+        set
+        {
+            if (SetProperty(ref _oneDriveClientId, value))
+            {
+                _settings.Update(settings => settings.OneDriveClientId = value);
                 RaiseCommandStates();
             }
         }
@@ -721,18 +760,23 @@ public sealed class MainWindowViewModel : ObservableObject
             QueueCommandLine($"[warn] Sync startup recovery failed: {ex.Message}");
         }
 
-        if (!string.IsNullOrWhiteSpace(CliPath) && IsAuthenticated)
+        var needsCliPath = _provider.Id != ProviderId.OneDrive;
+        if ((!needsCliPath || !string.IsNullOrWhiteSpace(CliPath)) && IsAuthenticated)
         {
             await GoToRootAsync();
             return;
         }
 
-        StatusMessage = string.IsNullOrWhiteSpace(CliPath)
-            ? "Select a Proton Drive CLI executable to begin."
-            : "Authenticate to load /my-files.";
+        StatusMessage = needsCliPath && string.IsNullOrWhiteSpace(CliPath)
+            ? $"Select a {_provider.DisplayName} CLI executable to begin."
+            : $"Authenticate to load /my-files.";
     }
 
-    private bool CanAuthenticate() => !IsLoading && !IsAuthenticated && !string.IsNullOrWhiteSpace(CliPath);
+    private bool CanAuthenticate() => !IsLoading && !IsAuthenticated && _provider.Id switch
+    {
+        ProviderId.OneDrive => !string.IsNullOrWhiteSpace(OneDriveClientId),
+        _ => !string.IsNullOrWhiteSpace(CliPath),
+    };
 
     private bool CanLogout() => !IsLoading && IsAuthenticated;
 
@@ -855,7 +899,7 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = "Opening Proton Drive authentication in your browser...";
+            StatusMessage = $"Opening {_provider.DisplayName} authentication in your browser...";
             await _provider.Auth.AuthenticateAsync();
             IsAuthenticated = true;
             await GoToRootAsync();
@@ -875,7 +919,7 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = "Logging out from Proton Drive...";
+            StatusMessage = $"Logging out from {_provider.DisplayName}...";
             await _provider.Auth.LogoutAsync();
             IsAuthenticated = false;
             ResetBrowserState();
@@ -889,6 +933,36 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = false;
         }
+    }
+
+    /// <summary>
+    /// Persists the chosen provider and tells the user to restart — no live hot-swap of the active
+    /// provider (docs/PLAN-CLOUD-PROVIDERS.md §2.7): every downstream service (cache, sync engine,
+    /// this view model itself) was constructed once, at startup, against the provider that was
+    /// active then.
+    /// </summary>
+    private async Task SwitchProviderAsync(ProviderId id)
+    {
+        if (id == _provider.Id)
+        {
+            return;
+        }
+
+        var confirm = RequestSwitchProviderConfirmationAsync;
+        if (confirm is null)
+        {
+            return;
+        }
+
+        var targetName = AvailableProviders.FirstOrDefault(descriptor => descriptor.Id == id)?.DisplayName ?? id.ToString();
+        var confirmed = await confirm($"Switching to {targetName} requires restarting the app. Continue?");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        _settings.Update(settings => settings.ActiveProvider = id.ToString());
+        StatusMessage = $"Provider switched to {targetName}. Restart the app to apply the change.";
     }
 
     private async Task GoToRootAsync()
@@ -1747,7 +1821,15 @@ public sealed class MainWindowViewModel : ObservableObject
         _settings.Update(settings =>
         {
             settings.CliPath = CliPath;
-            settings.IsAuthenticated = IsAuthenticated;
+            if (_provider.Id == ProviderId.OneDrive)
+            {
+                settings.IsOneDriveAuthenticated = IsAuthenticated;
+            }
+            else
+            {
+                settings.IsAuthenticated = IsAuthenticated;
+            }
+
             settings.ViewMode = ViewMode.ToString();
             settings.SortKey = SortKey.ToString();
             settings.SortDescending = SortDescending;
@@ -1768,6 +1850,8 @@ public sealed class MainWindowViewModel : ObservableObject
         CheckForCliUpdateCommand.RaiseCanExecuteChanged();
         InstallCliUpdateCommand.RaiseCanExecuteChanged();
         ViewSelectedFileCommand.RaiseCanExecuteChanged();
+        SwitchToProtonCommand.RaiseCanExecuteChanged();
+        SwitchToOneDriveCommand.RaiseCanExecuteChanged();
     }
 
     private async Task ToggleCommandConsoleAsync()

@@ -164,7 +164,65 @@
       to capture despite a live X display); the binding itself is covered by
       `MainWindowProviderTests.ActiveProviderDisplayName_ReflectsTheInjectedProvider`, but an
       actual look at the running window is still owed before calling this fully done.
-- [ ] **P6** — `OneDriveProvider` over Microsoft Graph. Not started.
+- [x] **P6 (built, pending live verification)** — `OneDriveProvider` over Microsoft Graph, plus the
+      P5 items that only made sense with a second real provider to build them against.
+      Added `Services/Providers/OneDrive/`: `GraphAuthenticator` (authorization-code + PKCE via a
+      loopback `HttpListener`, no MSAL, no device-code fallback — documented gap),
+      `OneDriveTokenStore` (`onedrive-token.json`, chmod 600 — accepted plaintext risk, R3),
+      `GraphHttpClient` (bearer attach, 401-refresh-retry-once, `Retry-After` honored on 429/503),
+      `GraphErrorClassifier` (status + structured `error.code` → `DriveErrorKind`),
+      `OneDriveOperations` (paginated listing, small-vs-chunked upload, async copy + polling,
+      cached per-target move/copy id lookups), `OneDrivePathSyntax` (`OrdinalIgnoreCase`,
+      the O6 reserved-name rule), `QuickXorHasher`, `OneDriveProvider` (the facade). Extended
+      `IProviderPathSyntax` with `IsLocalNameMappableRemotely` (Proton: always true; OneDrive: the
+      real rule) — wiring it into the upload path itself (a `LocalScanner`/`SyncExecutor`
+      skip-with-reason) was **not** done: `LocalScanner` has no provider dependency to call it
+      through, and adding one was wider surgery than this pass — an OneDrive upload of an
+      unmappable local name still fails as a raw Graph 400 today rather than a clean skip; tracked
+      as follow-up, not silently dropped. `ProviderCatalog` now registers OneDrive
+      (`Available`/`Create`/`ResolveOrDefault`); `AppSettings` gained `OneDriveClientId` (entered
+      in Settings, not embedded — a public-client id isn't secret, but keeping it out of the repo
+      avoids tying the app to one person's app registration) and `IsOneDriveAuthenticated`, kept
+      **separate** from Proton's `CliPath`/`IsAuthenticated` rather than unified into a
+      provider-keyed structure — the two connection cards are structurally different enough that
+      there was nothing to share; a real per-provider settings shape stays deferred, now to P7.
+      Fixed a real gap this phase's own code surfaced: `App.axaml.cs` now computes `accountKey` as
+      `{provider.Id}:default` (lowercased) and passes it to `DriveCacheService`/`SyncStateStore`/
+      `FolderMetricsStore` — previously every store defaulted to `"proton:default"` unconditionally
+      (P4's own doc comment had flagged this as owed once a second provider existed), so switching
+      to OneDrive would have let its cache/sync-pair rows collide with Proton's under the same
+      sentinel. UI: a provider picker in Settings → Connection (confirm + restart, §2.7 — no live
+      hot-swap), Proton's and OneDrive's connection cards each `IsVisible`-gated on the active
+      provider, the version/self-update rows gated on `HasDiagnostics` rather than a
+      Proton-specific flag.
+
+      `SyncPanelViewModel` gained an optional `providerDisplayName` constructor parameter
+      (defaulting to `"Proton Drive"`, so every existing call site — tests above all — keeps
+      working unchanged) and now interpolates it into its two Proton-named strings, per §5 item 3.
+
+      **Deliberately not done, and why:** device-code auth fallback (no browser-less machine to
+      support yet); the `IsLocalNameMappableRemotely` upload-path wiring above; a provider-keyed
+      settings structure (P7, once multi-account forces the issue anyway); a full sweep of every
+      remaining Proton-named string beyond the ones §5 item 3 named (e.g. context-menu labels) —
+      cosmetic, parked via the `debt` skill rather than chased here.
+
+      **Unverified, explicitly (R6):** every Graph request/response shape in §4 above and in
+      `OneDriveOperations`/the DTOs under `Services/Providers/OneDrive/` comes from Microsoft's
+      published documentation, not a live capture. `QuickXorHasher` in particular is implemented
+      from the algorithm's public description and is *not yet* checked against a real
+      Graph-reported `quickXorHash` — its own doc comment says so, and its tests assert structural
+      properties (determinism, output shape, chunking-invariance), never a specific hash literal,
+      for exactly that reason. Appendix A below is still empty. **A live-verification session
+      (real sign-in, a real `ListFolderAsync`, a real small-file upload compared against Graph's
+      own `quickXorHash`) is the next step before this is used for real two-way sync against a live
+      account** — nothing here should be treated as confirmed until that lands as Appendix A
+      findings.
+
+      Verified so far: 713 tests pass (74 new, `FakeHttpMessageHandler`-based — no real account
+      needed), 0 IL2xxx/IL3xxx trim/AOT warnings on a `linux-x64` self-contained publish (R4), the
+      published binary launches and stays up (crash.log unchanged from before this phase's
+      changes). Not yet verified: anything requiring a live Microsoft account or a real Azure app
+      registration — see the live-verification step above.
 - [ ] **P7** — *optional* multiple active accounts. Not started, deliberately last.
 - [ ] **P8** — *optional* delta-based remote scanning where the provider supports it. Not started.
 

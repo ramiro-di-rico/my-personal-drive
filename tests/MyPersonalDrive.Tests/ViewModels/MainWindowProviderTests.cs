@@ -12,9 +12,8 @@ using MyPersonalDrive.Tests;
 namespace MyPersonalDrive.Tests.ViewModels;
 
 /// <summary>
-/// docs/PLAN-CLOUD-PROVIDERS.md P5: the settings view surfaces which provider is active. Only
-/// Proton exists today, so there is nothing to switch to yet — see the doc comment on
-/// <see cref="MainWindowViewModel.AvailableProviders"/> for why the switch flow is deferred.
+/// docs/PLAN-CLOUD-PROVIDERS.md P5/P6: the settings view surfaces which provider is active and,
+/// since P6, lets the user switch to the other one.
 /// </summary>
 [Collection(AppDataCollection.Name)]
 public class MainWindowProviderTests : IDisposable
@@ -71,8 +70,7 @@ public class MainWindowProviderTests : IDisposable
     {
         var sut = Build();
 
-        var descriptor = Assert.Single(sut.AvailableProviders);
-        Assert.Equal(ProviderId.Proton, descriptor.Id);
+        Assert.Equal([ProviderId.Proton, ProviderId.OneDrive], sut.AvailableProviders.Select(descriptor => descriptor.Id));
     }
 
     [Fact]

@@ -4,9 +4,9 @@ namespace MyPersonalDrive.Services.Providers;
 /// A provider's rules for building and comparing remote paths — the pieces of
 /// <c>Providers.Proton.ProtonDriveService.CombinePath</c>/<c>HasUnmappableName</c> that were
 /// hard-coded Proton assumptions everywhere else in the app. See docs/PLAN-CLOUD-PROVIDERS.md P3
-/// and §2.4 for the fuller design (<c>Root</c>, <c>GetParent</c> and
-/// <c>IsLocalNameMappableRemotely</c> are deferred to P6, when OneDrive's upload path is what
-/// actually needs them — adding them now would be untested surface).
+/// and §2.4 for the fuller design (<c>Root</c>/<c>GetParent</c> stay deferred — nothing needs them
+/// yet; <see cref="IsLocalNameMappableRemotely"/> landed in P6, once OneDrive's upload path was the
+/// thing that actually needed it).
 /// </summary>
 public interface IProviderPathSyntax
 {
@@ -15,6 +15,18 @@ public interface IProviderPathSyntax
 
     /// <summary>True when a remote node's name contains a character that makes it unrepresentable as a local file.</summary>
     bool IsRemoteNameMappableLocally(string name);
+
+    /// <summary>
+    /// True when a local file's name can be uploaded under that exact name — the upload-side
+    /// counterpart to <see cref="IsRemoteNameMappableLocally"/>. Proton accepts anything a local
+    /// filesystem already allowed to exist, so its implementation is <c>true</c> unconditionally;
+    /// OneDrive rejects a real set of reserved characters and names (docs/PLAN-CLOUD-PROVIDERS.md
+    /// §4.6). Not yet consulted anywhere in the sync engine — <c>LocalScanner</c> has no provider
+    /// dependency to call it through — so today an unmappable local name uploaded to OneDrive still
+    /// surfaces as a raw Graph error rather than a clean skip; tracked as follow-up work rather than
+    /// widening this change to restructure <c>LocalScanner</c>.
+    /// </summary>
+    bool IsLocalNameMappableRemotely(string name);
 
     /// <summary>
     /// How this provider compares node names. Proton and Linux filenames are both

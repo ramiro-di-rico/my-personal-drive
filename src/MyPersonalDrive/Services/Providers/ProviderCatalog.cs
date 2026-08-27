@@ -9,12 +9,16 @@ namespace MyPersonalDrive.Services.Providers;
 public sealed class ProviderCatalog : IProviderCatalog
 {
     public IReadOnlyList<ProviderDescriptor> Available { get; } =
-        [new ProviderDescriptor(ProviderId.Proton, "Proton Drive")];
+    [
+        new ProviderDescriptor(ProviderId.Proton, "Proton Drive"),
+        new ProviderDescriptor(ProviderId.OneDrive, "OneDrive"),
+    ];
 
     public ICloudDriveProvider Create(ProviderId id, AppSettingsService settings)
         => id switch
         {
             ProviderId.Proton => CreateProton(settings),
+            ProviderId.OneDrive => CreateOneDrive(settings),
             _ => throw new NotSupportedException($"Provider '{id}' is not available yet.")
         };
 
@@ -27,5 +31,14 @@ public sealed class ProviderCatalog : IProviderCatalog
         var executor = new Proton.ProtonDriveCliExecutor(locator);
         var service = new Proton.ProtonDriveService(executor, settings.Load().StrictListingParsing);
         return new Proton.ProtonDriveProvider(service);
+    }
+
+    private static OneDrive.OneDriveProvider CreateOneDrive(AppSettingsService settings)
+    {
+        var appSettings = settings.Load();
+        var tokenStore = new OneDrive.OneDriveTokenStore(settings.BaseFolder);
+        var authenticator = new OneDrive.GraphAuthenticator(appSettings.OneDriveClientId, tokenStore);
+        var http = new OneDrive.GraphHttpClient(authenticator);
+        return new OneDrive.OneDriveProvider(authenticator, http);
     }
 }

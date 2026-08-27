@@ -772,7 +772,21 @@
       <StackPanel Margin="16" Spacing="24">
         <StackPanel Spacing="10">
           <TextBlock FontSize="18" FontWeight="Bold" Text="Conexión" />
-          <Border Padding="16" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
+
+          <!-- Provider picker: which backend is active. Switching writes AppSettings.ActiveProvider
+               and asks for a restart rather than hot-swapping — every downstream service (cache,
+               sync engine, this window's own view model) was built once, at startup, against
+               whichever provider was active then (docs/PLAN-CLOUD-PROVIDERS.md §2.7). -->
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Classes.primary="{Binding IsProtonActive}" Content="Proton Drive" Command="{Binding SwitchToProtonCommand}" />
+            <Button Classes.primary="{Binding IsOneDriveActive}" Content="OneDrive" Command="{Binding SwitchToOneDriveCommand}" />
+          </StackPanel>
+
+          <!-- Proton's card: CLI path, auth, version, self-update. -->
+          <Border Padding="16"
+                  Background="{DynamicResource CardBackgroundBrush}"
+                  CornerRadius="6"
+                  IsVisible="{Binding IsProtonActive}">
             <StackPanel Spacing="10">
               <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
               <TextBlock Text="Ruta al ejecutable de proton-drive:" />
@@ -794,7 +808,11 @@
                 </Button>
               </StackPanel>
 
-              <StackPanel Orientation="Horizontal" Spacing="8">
+              <!-- Version/self-update rows: gated on HasDiagnostics rather than a Proton-specific
+                   flag, so a third provider with no external binary needs no XAML change here
+                   (docs/PLAN-CLOUD-PROVIDERS.md §5 item 2) — for now that's every non-Proton
+                   provider, but the binding itself doesn't know that. -->
+              <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding HasDiagnostics}">
                 <TextBlock VerticalAlignment="Center" Text="Versión del CLI:" />
                 <TextBlock VerticalAlignment="Center"
                            MaxWidth="420"
@@ -806,7 +824,7 @@
                 </Button>
               </StackPanel>
 
-              <StackPanel Orientation="Horizontal" Spacing="8">
+              <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding HasDiagnostics}">
                 <TextBlock VerticalAlignment="Center" Text="Actualización:" />
                 <TextBlock VerticalAlignment="Center"
                            MaxWidth="420"
@@ -822,6 +840,41 @@
                         IsVisible="{Binding IsCliUpdateAvailable}"
                         ToolTip.Tip="Download, verify the published SHA-512, and replace the executable"
                         Command="{Binding InstallCliUpdateCommand}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- OneDrive's card: client id, sign-in/out, account label. No CLI path, no version row
+               — there is no external binary to point at or version (Diagnostics is null). -->
+          <Border Padding="16"
+                  Background="{DynamicResource CardBackgroundBrush}"
+                  CornerRadius="6"
+                  IsVisible="{Binding IsOneDriveActive}">
+            <StackPanel Spacing="10">
+              <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
+              <TextBlock Text="Azure app registration client ID:" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBox Width="420"
+                         PlaceholderText="Public client application (client) ID"
+                         Text="{Binding OneDriveClientId, Mode=TwoWay}" />
+                <Button Classes="primary" ToolTip.Tip="Sign in to OneDrive" Command="{Binding AuthenticateCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconKey}" />
+                </Button>
+                <Button ToolTip.Tip="Sign out of OneDrive" Command="{Binding LogoutCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconLogout}" />
+                </Button>
+                <Button ToolTip.Tip="Refresh folder content" Command="{Binding RefreshCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+                </Button>
+              </StackPanel>
+
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock VerticalAlignment="Center" Text="Cuenta:" />
+                <TextBlock VerticalAlignment="Center"
+                           MaxWidth="420"
+                           TextWrapping="Wrap"
+                           Opacity="0.8"
+                           Text="{Binding OneDriveAccountLabel}" />
               </StackPanel>
             </StackPanel>
           </Border>

@@ -32,5 +32,6 @@ public sealed class CaseInsensitivePathsDecorator : ICloudDriveProvider
         public StringComparison Comparison { get; }
         public string Combine(string parentPath, string name) => ProtonDriveService.CombinePath(parentPath, name);
         public bool IsRemoteNameMappableLocally(string name) => !ProtonDriveService.HasUnmappableName(name);
+        public bool IsLocalNameMappableRemotely(string name) => true;
     }
 }

@@ -1,8 +1,10 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Providers;
+using MyPersonalDrive.Services.Providers.OneDrive;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.ViewModels;
@@ -29,31 +31,46 @@ public partial class App : Application
             // throws for exactly that case — resolving first is what keeps a stale/edited
             // settings.json from crashing the app at startup instead of degrading to Proton.
             var provider = catalog.Create(catalog.ResolveOrDefault(settings.Load().ActiveProviderOrDefault()), settings);
-            // 'proton:default' — matching exactly what migration 6 backfilled every pre-existing
-            // row to (docs/PLAN-CLOUD-PROVIDERS.md P4) — never computed from `provider.Id`
-            // here: ProviderId.Proton.ToString() is "Proton" (capital P), which would silently
-            // stop matching those rows. A real per-provider/account key mapping is P6's job, once
-            // there is a second account whose rows must not collide with these.
-            var cacheService = new DriveCacheService(Path.Combine(settings.BaseFolder, "cache.db"));
+            // Lowercased provider id + ":default" — for Proton this is exactly "proton:default",
+            // matching what migration 6 backfilled every pre-existing row to (P4), so existing
+            // Proton installs see no change. For OneDrive it's "onedrive:default": the real
+            // per-provider key mapping P4's own doc comment flagged as owed once a second provider
+            // existed (P6) — without this, every store below defaults to "proton:default"
+            // regardless of which provider is active, and a user who switches providers would see
+            // OneDrive's cache/sync-pair rows collide with Proton's under the same sentinel.
+            // ":default" rather than a real per-account identity either way — P7's job once
+            // multiple accounts of the same provider can be active together.
+            var accountKey = $"{provider.Id.ToString().ToLowerInvariant()}:default";
+            var cacheService = new DriveCacheService(Path.Combine(settings.BaseFolder, "cache.db"), accountKey);
 
             // Same underlying cache.db as cacheService above; SyncStateStore applies the same
             // shared DriveDatabaseMigrations, so either can be constructed independently.
-            var syncStateStore = new SyncStateStore(Path.Combine(settings.BaseFolder, "cache.db"));
+            var syncStateStore = new SyncStateStore(Path.Combine(settings.BaseFolder, "cache.db"), accountKey);
             // One suppressor shared by the executor (which registers its own writes and deletions)
             // and the scheduler's watchers (which consult it). Two instances would defeat it —
             // see docs/PLAN-LOCAL-SYNC.md §9.
             var echoSuppressor = new SyncEchoSuppressor();
-            var syncExecutor = new SyncExecutor(provider.Operations, syncStateStore, new LocalScanner(), new RemoteScanner(provider), echoSuppressor: echoSuppressor);
+            // Which hasher/algorithm-tag pair matches the active provider's Capabilities.RemoteHash
+            // — SyncExecutor's own default (Sha1ContentHasher) is only correct for Proton
+            // (docs/PLAN-CLOUD-PROVIDERS.md P3/P6, and SyncExecutor's own doc comment on `hasher`).
+            var hasher = provider.Capabilities.RemoteHash == RemoteHashAlgorithm.QuickXor
+                ? (IContentHasher)new QuickXorHasher()
+                : new Sha1ContentHasher();
+            var syncExecutor = new SyncExecutor(
+                provider.Operations, syncStateStore, new LocalScanner(), new RemoteScanner(provider),
+                echoSuppressor: echoSuppressor, hasher: hasher, remoteHashAlgorithm: provider.Capabilities.RemoteHash);
             var syncScheduler = new SyncScheduler(
                 syncStateStore, syncExecutor, echoSuppressor,
-                isAuthenticated: () => settings.Load().IsAuthenticated);
-            var syncPanelViewModel = new SyncPanelViewModel(syncStateStore, syncExecutor, new SyncCrashRecovery(syncStateStore), syncScheduler)
+                // The bool that actually matters depends on which provider is active — mirrors
+                // MainWindowViewModel's own IsAuthenticated field selection.
+                isAuthenticated: () => provider.Id == ProviderId.OneDrive ? settings.Load().IsOneDriveAuthenticated : settings.Load().IsAuthenticated);
+            var syncPanelViewModel = new SyncPanelViewModel(syncStateStore, syncExecutor, new SyncCrashRecovery(syncStateStore), syncScheduler, provider.DisplayName)
             {
                 GetRemoteFolderChildren = provider.Operations.ListFolderAsync,
             };
 
             // Same cache.db again, same shared migrations - see the note above.
-            var metricsStore = new FolderMetricsStore(Path.Combine(settings.BaseFolder, "cache.db"));
+            var metricsStore = new FolderMetricsStore(Path.Combine(settings.BaseFolder, "cache.db"), accountKey);
 
             var mainWindowViewModel = new MainWindowViewModel(
                 provider, cacheService, settings, syncPanelViewModel, releaseFeed: new CliReleaseFeed(),

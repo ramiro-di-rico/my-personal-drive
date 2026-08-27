@@ -14,6 +14,9 @@ public sealed class ProtonPathSyntax : IProviderPathSyntax
 
     public bool IsRemoteNameMappableLocally(string name) => !ProtonDriveService.HasUnmappableName(name);
 
+    /// <summary>Proton has no reserved-name rule of its own; anything a local filesystem allowed to exist is uploadable.</summary>
+    public bool IsLocalNameMappableRemotely(string name) => true;
+
     /// <summary>Proton and Linux filenames are both case-sensitive.</summary>
     public StringComparison Comparison => StringComparison.Ordinal;
 }

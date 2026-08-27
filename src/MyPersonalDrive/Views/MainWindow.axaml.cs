@@ -91,6 +91,7 @@ public partial class MainWindow : Window
         viewModel.RequestCreateFolderAsync = PromptForNewFolderNameAsync;
         viewModel.RequestDownloadFolderAsync = PickDownloadFolderAsync;
         viewModel.RequestSaveActivityAsync = PickSaveActivityAsync;
+        viewModel.RequestSwitchProviderConfirmationAsync = AskAsync;
 
         viewModel.BreadcrumbItems.CollectionChanged -= ScrollBreadcrumbToEnd;
         viewModel.BreadcrumbItems.CollectionChanged += ScrollBreadcrumbToEnd;

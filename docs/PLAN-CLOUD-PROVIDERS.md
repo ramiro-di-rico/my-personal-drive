@@ -15,7 +15,7 @@
 > [P7](#p7--optional-more-than-one-account-active-at-once), but every schema and settings change in
 > P1–P6 is designed so P7 is additive and needs no second migration of user data.
 >
-> Companions: [ARCHITECTURE.md](ARCHITECTURE.md) (current state, commit `a1e85d5`),
+> Companions: [ARCHITECTURE.md](ARCHITECTURE.md) (current state, commit `dc09cea`),
 > [PLAN-LOCAL-SYNC.md](PLAN-LOCAL-SYNC.md) (the sync engine this seam sits under; **Appendix A** is
 > the verified Proton CLI behavior that several of the abstractions below exist to contain),
 > [PLAN-BROWSER-VIEWS.md](PLAN-BROWSER-VIEWS.md) (the metrics scanners that also hold a service),

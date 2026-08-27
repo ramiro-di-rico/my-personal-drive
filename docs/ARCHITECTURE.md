@@ -1,7 +1,7 @@
 # MyPersonalDrive — Technical Reference
 
 > Reference document describing the current state of the application (branch
-> `feature/cloud-providers-seam`, commit `a82b0a8`).
+> `feature/cloud-providers-seam`, commit `8637915`).
 > Meant to give full context to any future chat/session without having to re-read all the code.
 
 ---

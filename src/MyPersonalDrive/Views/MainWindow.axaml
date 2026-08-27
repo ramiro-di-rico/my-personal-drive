@@ -853,6 +853,10 @@
             <StackPanel Spacing="10">
               <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
               <TextBlock Text="Azure app registration client ID:" />
+              <TextBlock Opacity="0.6"
+                         FontSize="12"
+                         TextWrapping="Wrap"
+                         Text="Needs its own Azure app registration with the &quot;Mobile and desktop applications&quot; platform and a http://localhost redirect URI — see README.md § OneDrive setup." />
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBox Width="420"
                          PlaceholderText="Public client application (client) ID"

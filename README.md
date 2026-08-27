@@ -5,7 +5,8 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
 ## Requirements
 
 - .NET SDK 10
-- Proton Drive CLI installed and configured
+- Proton Drive CLI installed and configured (for the Proton provider)
+- An Azure app registration (for the OneDrive provider — see [OneDrive setup](#onedrive-setup))
 - Linux, Windows, or macOS
 
 ## Features
@@ -38,6 +39,29 @@ dotnet run
 
 On first launch, point the app to the `proton-drive` executable. After authentication, the app stores the CLI path and auth state locally so it can reopen in the same state next time.
 
+## OneDrive setup
+
+OneDrive needs its own Azure app registration — the app has no client ID of its own baked in, so
+each install brings its own (a public client ID isn't secret, but it's still *your* Azure
+resource, with your own rate limits and audit trail; embedding one in a shared binary would put
+everyone who runs it through the same registration).
+
+1. In the [Azure portal](https://portal.azure.com), go to **Azure Active Directory → App
+   registrations → New registration**. Any name; **Personal Microsoft accounts and organizational
+   accounts** (or whichever account types you need) as the supported account type.
+2. Open the registration → **Authentication → Add a platform → Mobile and desktop applications**.
+   This step is easy to miss and the app won't sign in without it: without this specific platform,
+   Microsoft rejects the login with `invalid_request: redirect_uri is not valid`, even though the
+   registration itself exists.
+3. Under that platform, register the redirect URI exactly as `http://localhost` (no port, no
+   trailing slash) — the app requests `http://localhost:{a random free port}` at sign-in time, and
+   Microsoft matches that against the port-less registration.
+4. Copy the registration's **Application (client) ID** from the Overview page.
+5. In the app, go to **Settings → Connection → OneDrive** and paste it into "Azure app
+   registration client ID", then click the sign-in button.
+
+No client secret is needed — this is a public client (PKCE), and the app never asks for one.
+
 ## Linux Build and Installation
 
 To build and package the application for Linux:
@@ -58,6 +82,8 @@ The app will be installed to `~/.local/share/MyPersonalDrive`.
 
 ## Notes
 
-- The app is currently centered on `/my-files`.
-- File operations are delegated to the Proton Drive CLI.
-- The UI shows the current CLI command and live output in the bottom console panel.
+- Browsing starts at the active provider's own root — `/my-files` for Proton Drive, `/` for
+  OneDrive.
+- File operations are delegated to the Proton Drive CLI (Proton) or Microsoft Graph (OneDrive).
+- The UI shows the current CLI command / Graph request and live output in the bottom console
+  panel.

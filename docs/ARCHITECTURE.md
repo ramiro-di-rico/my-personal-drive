@@ -322,6 +322,29 @@ RequestSaveActivityAsync     : Func<Task<string?>>
 
 This is **the pattern to follow** for any new dialog (e.g. picking a local folder to sync).
 
+**In-app viewer (text and images).** `PreviewItemAsync`/`ViewSelectedFileCommand`/
+`CloseViewerCommand` open a panel (`IsViewerVisible` + `ViewerTitle/Path/Note`, `IsViewerLoading`,
+plus `ViewerText`/`HasViewerText` or `ViewerImageBytes`/`HasViewerImage` depending on what's shown)
+reachable from a row's eye button, a tile's context menu, or the "Visor" nav button.
+`PreviewItemAsync` routes to one of two independent flows by file kind and policy:
+
+- Text: `Services.TextPreviewPolicy` decides which files qualify (text/code kinds, delimited
+  spreadsheets, extensionless files; capped at 1 MB), and `Services.TextFilePreviewService`
+  (behind `ITextFilePreviewLoader`) downloads, reads and decodes up to the policy's byte/line
+  limits (UTF-8 first, Latin-1 fallback, binary sniffed by a NUL byte).
+- Images: `Services.ImagePreviewPolicy` narrows `FileKind.Image` down to formats
+  `Avalonia.Media.Imaging.Bitmap` (SkiaSharp) actually decodes — png/jpg/jpeg/gif/bmp/webp/ico,
+  excluding RAW formats, .psd and .svg despite those sharing the same `FileKind` — capped at 25 MB.
+  `Services.ImageFilePreviewService` (behind `IImageFilePreviewLoader`) downloads and hands back
+  the raw bytes undecoded; `Views.Converters.BytesToBitmapConverter` turns them into a `Bitmap` in
+  the View, since view models never touch Avalonia types (AGENTS.md).
+
+Both loaders are optional VM dependencies with the same shape: the CLI has no "read a file"
+command, so each downloads into a private temp folder and deletes it again — a preview never
+leaves a copy on disk. The row's `DriveNodeViewModel.CanPreview` (true when either policy accepts
+the file) drives the eye button/context-menu entry's visibility; the actual routing decision is
+made again, from the same policies, in `PreviewItemAsync`.
+
 ### 7.3 Folder-loading flow (cache-first)
 
 [`LoadFolderAsync`](../src/MyPersonalDrive/ViewModels/MainWindowViewModel.cs#L655):

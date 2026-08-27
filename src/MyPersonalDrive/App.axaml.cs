@@ -59,7 +59,9 @@ public partial class App : Application
                 provider, cacheService, settings, syncPanelViewModel, releaseFeed: new CliReleaseFeed(),
                 metricsStore: metricsStore,
                 statsScanner: new FolderStatsScanner(provider),
-                providerCatalog: catalog);
+                providerCatalog: catalog,
+                previewLoader: new TextFilePreviewService(provider.Operations),
+                imagePreviewLoader: new ImageFilePreviewService(provider.Operations));
 
             desktop.MainWindow = new MainWindow
             {

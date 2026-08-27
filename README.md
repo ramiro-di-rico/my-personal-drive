@@ -16,6 +16,9 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
 - Go back to parent folders without leaving `/my-files`
 - Show file and folder metadata in the status pane
 - Download files
+- View plain-text files and common image formats (JPEG, PNG, GIF, BMP, WebP, ICO) in the app,
+  without downloading them to disk — from a row action, a context menu entry, or the "Visor"
+  menu button
 - Upload files to the current folder
 - Move files to trash
 - Sync a Proton Drive folder with a local folder — download-only, upload-only, or two-way,

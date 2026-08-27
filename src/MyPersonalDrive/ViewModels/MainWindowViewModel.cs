@@ -19,6 +19,9 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly FolderMetricsStore? _metricsStore;
     private readonly FolderStatsScanner? _statsScanner;
     private CancellationTokenSource? _deepScanCts;
+    private readonly ITextFilePreviewLoader? _previewLoader;
+    private readonly IImageFilePreviewLoader? _imagePreviewLoader;
+    private CancellationTokenSource? _previewCts;
     private readonly Stack<string> _navigationHistory = new();
     private readonly TimeProvider _timeProvider;
     private readonly RemoteViewFreshnessPolicy _remoteViewFreshness = new();
@@ -58,6 +61,13 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _selectedShared = "None";
     private bool _hasSelection;
     private bool _isSettingsView;
+    private bool _isViewerVisible;
+    private bool _isViewerLoading;
+    private string _viewerTitle = "Visor";
+    private string _viewerPath = string.Empty;
+    private string _viewerText = string.Empty;
+    private string _viewerNote = string.Empty;
+    private byte[]? _viewerImageBytes;
     private DriveViewMode _viewMode = DriveViewMode.List;
     private bool _isDeepScanRunning;
     private DriveSortKey _sortKey = DriveSortKey.Name;
@@ -104,7 +114,9 @@ public sealed class MainWindowViewModel : ObservableObject
         Func<bool>? isSyncInProgress = null,
         FolderMetricsStore? metricsStore = null,
         FolderStatsScanner? statsScanner = null,
-        IProviderCatalog? providerCatalog = null)
+        IProviderCatalog? providerCatalog = null,
+        ITextFilePreviewLoader? previewLoader = null,
+        IImageFilePreviewLoader? imagePreviewLoader = null)
     {
         // Optional so the many existing view-model tests don't all have to build a database and a
         // scanner to exercise unrelated behavior. When either is absent the deep-scan command
@@ -112,6 +124,10 @@ public sealed class MainWindowViewModel : ObservableObject
         // feature on a machine with no CLI configured.
         _metricsStore = metricsStore;
         _statsScanner = statsScanner;
+        // Optional for the same reason: a test that never opens the viewer shouldn't have to supply
+        // a loader, and when it's absent the viewer simply can't open (see CanOpenViewer).
+        _previewLoader = previewLoader;
+        _imagePreviewLoader = imagePreviewLoader;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _releaseFeed = releaseFeed;
         _updateInstaller = updateInstaller ?? new CliUpdateInstaller();
@@ -167,6 +183,8 @@ public sealed class MainWindowViewModel : ObservableObject
         CheckCliVersionCommand = new AsyncCommand(CheckCliVersionAsync, CanCheckCliVersion, HandleUnexpectedError);
         CheckForCliUpdateCommand = new AsyncCommand(CheckForCliUpdateAsync, CanCheckForCliUpdate, HandleUnexpectedError);
         InstallCliUpdateCommand = new AsyncCommand(InstallCliUpdateAsync, CanInstallCliUpdate, HandleUnexpectedError);
+        ViewSelectedFileCommand = new AsyncCommand(ViewSelectedFileAsync, CanViewSelectedFile, HandleUnexpectedError);
+        CloseViewerCommand = new AsyncCommand(CloseViewerAsync, onError: HandleUnexpectedError);
     }
 
     public ObservableCollection<DriveNodeViewModel> RootItems { get; }
@@ -226,6 +244,11 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand ShowExplorerCommand { get; }
 
     public AsyncCommand ShowSettingsCommand { get; }
+
+    /// <summary>Opens the text viewer on the row currently selected in the listing.</summary>
+    public AsyncCommand ViewSelectedFileCommand { get; }
+
+    public AsyncCommand CloseViewerCommand { get; }
 
     public AsyncCommand CheckCliVersionCommand { get; }
 
@@ -552,6 +575,82 @@ public sealed class MainWindowViewModel : ObservableObject
         get => _selectedShared;
         private set => SetProperty(ref _selectedShared, value);
     }
+
+    /// <summary>
+    /// Whether the in-app text viewer is open over the listing. The viewer is a panel and not a
+    /// separate window so it can't get lost behind the main one, and so closing it needs no
+    /// window plumbing in code-behind.
+    /// </summary>
+    public bool IsViewerVisible
+    {
+        get => _isViewerVisible;
+        private set => SetProperty(ref _isViewerVisible, value);
+    }
+
+    /// <summary>True while the file is being downloaded for the viewer — a preview costs a real CLI download.</summary>
+    public bool IsViewerLoading
+    {
+        get => _isViewerLoading;
+        private set => SetProperty(ref _isViewerLoading, value);
+    }
+
+    /// <summary>The previewed file's name, shown as the viewer's heading.</summary>
+    public string ViewerTitle
+    {
+        get => _viewerTitle;
+        private set => SetProperty(ref _viewerTitle, value);
+    }
+
+    /// <summary>The previewed file's remote path, shown under the heading.</summary>
+    public string ViewerPath
+    {
+        get => _viewerPath;
+        private set => SetProperty(ref _viewerPath, value);
+    }
+
+    /// <summary>The text on screen. Empty while loading, and for a file that turned out to be binary.</summary>
+    public string ViewerText
+    {
+        get => _viewerText;
+        private set
+        {
+            if (SetProperty(ref _viewerText, value))
+            {
+                OnPropertyChanged(nameof(HasViewerText));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The line under the viewer's toolbar: size, encoding, and — when it applies — that what's on
+    /// screen is only the beginning of the file. Never silently truncate.
+    /// </summary>
+    public string ViewerNote
+    {
+        get => _viewerNote;
+        private set => SetProperty(ref _viewerNote, value);
+    }
+
+    public bool HasViewerText => _viewerText.Length > 0;
+
+    /// <summary>
+    /// The previewed image's raw bytes, undecoded — decoding is a view concern (view models never
+    /// touch Avalonia types, AGENTS.md), so the view turns this into a <c>Bitmap</c> via
+    /// <c>Views.Converters.BytesToBitmapConverter</c>.
+    /// </summary>
+    public byte[]? ViewerImageBytes
+    {
+        get => _viewerImageBytes;
+        private set
+        {
+            if (SetProperty(ref _viewerImageBytes, value))
+            {
+                OnPropertyChanged(nameof(HasViewerImage));
+            }
+        }
+    }
+
+    public bool HasViewerImage => _viewerImageBytes is { Length: > 0 };
 
     /// <summary>Whether the Status panel's per-item fields (as opposed to the current-folder ones) have anything to show.</summary>
     public bool HasSelection
@@ -992,6 +1091,206 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Opens the viewer on <paramref name="item"/> — as text or as an image, whichever
+    /// <see cref="ImagePreviewPolicy"/>/<see cref="TextPreviewPolicy"/> say it is. Images are
+    /// checked first: an image's <see cref="FileKind"/> never also qualifies as text, so the order
+    /// only matters for the refusal message when neither policy accepts the file.
+    /// </summary>
+    public async Task PreviewItemAsync(DriveItem item)
+    {
+        if (!item.IsFolder && FileKindClassifier.Classify(item.Name, isFolder: false) == FileKind.Image && ImagePreviewPolicy.CanPreview(item))
+        {
+            await PreviewImageAsync(item);
+            return;
+        }
+
+        if (TextPreviewPolicy.CanPreview(item))
+        {
+            await PreviewTextAsync(item);
+            return;
+        }
+
+        StatusMessage = $"{item.Name} no se puede abrir en el visor: solo texto (hasta {TextPreviewPolicy.MaxPreviewBytes / 1024} KB) o imágenes (hasta {ImagePreviewPolicy.MaxPreviewBytes / (1024 * 1024)} MB).";
+        IsWarning = true;
+    }
+
+    /// <summary>
+    /// The text half of <see cref="PreviewItemAsync"/>. The CLI can only download, so this pays for
+    /// a real download of the file into a temp folder that the loader deletes again.
+    /// </summary>
+    private async Task PreviewTextAsync(DriveItem item)
+    {
+        if (_previewLoader is null)
+        {
+            StatusMessage = "El visor de texto no está disponible.";
+            IsWarning = true;
+            return;
+        }
+
+        var cts = BeginPreview(item);
+
+        try
+        {
+            var preview = await _previewLoader.LoadAsync(item, cts.Token);
+            if (cts.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (preview.IsBinary)
+            {
+                ViewerText = string.Empty;
+                ViewerNote = $"{preview.ByteCount:n0} bytes — no parece ser un archivo de texto, así que no se muestra su contenido.";
+                StatusMessage = $"{item.Name} no es un archivo de texto.";
+                IsWarning = true;
+                return;
+            }
+
+            ViewerText = preview.Text;
+            ViewerNote = FormatViewerNote(preview);
+            StatusMessage = $"Mostrando {item.Name} en el visor.";
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded or closed; whoever did that already owns the panel's state.
+        }
+        catch (InvalidOperationException ex)
+        {
+            ViewerNote = "No se pudo abrir el archivo.";
+            StatusMessage = FormatDriveError(item.Path, ex);
+            IsWarning = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ViewerNote = "No se pudo leer el archivo descargado.";
+            StatusMessage = $"No se pudo abrir {item.Name} en el visor: {ex.Message}";
+            IsWarning = true;
+        }
+        finally
+        {
+            EndPreview(cts);
+        }
+    }
+
+    /// <summary>The image half of <see cref="PreviewItemAsync"/> — same download-then-show shape as the text one.</summary>
+    private async Task PreviewImageAsync(DriveItem item)
+    {
+        if (_imagePreviewLoader is null)
+        {
+            StatusMessage = "El visor de imágenes no está disponible.";
+            IsWarning = true;
+            return;
+        }
+
+        var cts = BeginPreview(item);
+
+        try
+        {
+            var preview = await _imagePreviewLoader.LoadAsync(item, cts.Token);
+            if (cts.IsCancellationRequested)
+            {
+                return;
+            }
+
+            ViewerImageBytes = preview.Bytes;
+            ViewerNote = $"{preview.ByteCount:n0} bytes";
+            StatusMessage = $"Mostrando {item.Name} en el visor.";
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded or closed; whoever did that already owns the panel's state.
+        }
+        catch (InvalidOperationException ex)
+        {
+            ViewerNote = "No se pudo abrir el archivo.";
+            StatusMessage = FormatDriveError(item.Path, ex);
+            IsWarning = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ViewerNote = "No se pudo leer el archivo descargado.";
+            StatusMessage = $"No se pudo abrir {item.Name} en el visor: {ex.Message}";
+            IsWarning = true;
+        }
+        finally
+        {
+            EndPreview(cts);
+        }
+    }
+
+    /// <summary>
+    /// Shared setup for both preview flows: supersede any in-flight download and reset the panel to
+    /// a clean loading state for <paramref name="item"/>, clearing whichever content type the
+    /// previous preview left behind.
+    /// </summary>
+    private CancellationTokenSource BeginPreview(DriveItem item)
+    {
+        _previewCts?.Cancel();
+        _previewCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _previewCts = cts;
+
+        IsViewerVisible = true;
+        IsViewerLoading = true;
+        ViewerTitle = item.Name;
+        ViewerPath = item.Path;
+        ViewerText = string.Empty;
+        ViewerImageBytes = null;
+        ViewerNote = "Descargando el archivo…";
+        StatusMessage = $"Abriendo {item.Name} en el visor…";
+        return cts;
+    }
+
+    private void EndPreview(CancellationTokenSource cts)
+    {
+        if (ReferenceEquals(_previewCts, cts))
+        {
+            IsViewerLoading = false;
+            _previewCts = null;
+            cts.Dispose();
+        }
+    }
+
+    private static string FormatViewerNote(TextFilePreview preview)
+    {
+        // "más de" when the read stopped at the byte limit: ByteCount is what was read, not the
+        // file's size, and printing it as the size would be a lie of exactly one byte.
+        var size = preview.ByteCount > TextPreviewPolicy.MaxPreviewBytes
+            ? $"más de {TextPreviewPolicy.MaxPreviewBytes:n0} bytes"
+            : $"{preview.ByteCount:n0} bytes";
+        var note = $"{preview.LineCount:n0} líneas · {size} · {preview.EncodingName}";
+        return preview.IsTruncated
+            ? note + " · vista parcial: el archivo es más largo de lo que muestra el visor"
+            : note;
+    }
+
+    private bool CanViewSelectedFile()
+        => _selectedNode is { CanPreview: true } && (_previewLoader is not null || _imagePreviewLoader is not null);
+
+    private async Task ViewSelectedFileAsync()
+    {
+        if (_selectedNode is not { } node)
+        {
+            StatusMessage = "Seleccioná un archivo para verlo.";
+            IsWarning = true;
+            return;
+        }
+
+        await PreviewItemAsync(node.Item);
+    }
+
+    private async Task CloseViewerAsync()
+    {
+        _previewCts?.Cancel();
+        IsViewerVisible = false;
+        IsViewerLoading = false;
+        ViewerImageBytes = null;
+        ViewerText = string.Empty;
+        ViewerNote = string.Empty;
+        await Task.CompletedTask;
+    }
+
     public async Task RenameItemAsync(DriveItem item)
     {
         var requester = RequestRenameAsync;
@@ -1129,6 +1428,8 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             node.IsSelected = true;
         }
+
+        ViewSelectedFileCommand.RaiseCanExecuteChanged();
     }
 
     private async Task LoadFolderAsync(string path, bool clearSelection, bool forceFreshRemoteView = false)
@@ -1316,7 +1617,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RootItems.Clear();
         foreach (var item in DriveItemSorter.Sort(visible, SortKey, SortDescending))
         {
-            var node = new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, HandleUnexpectedError);
+            var node = new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, PreviewItemAsync, HandleUnexpectedError);
             if (previouslySelectedPath is not null && item.Path == previouslySelectedPath)
             {
                 node.IsSelected = true;
@@ -1429,6 +1730,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectedOwner = "None";
         SelectedShared = "None";
         HasSelection = false;
+        ViewSelectedFileCommand.RaiseCanExecuteChanged();
     }
 
     private void ResetBrowserState()
@@ -1465,6 +1767,7 @@ public sealed class MainWindowViewModel : ObservableObject
         CheckCliVersionCommand.RaiseCanExecuteChanged();
         CheckForCliUpdateCommand.RaiseCanExecuteChanged();
         InstallCliUpdateCommand.RaiseCanExecuteChanged();
+        ViewSelectedFileCommand.RaiseCanExecuteChanged();
     }
 
     private async Task ToggleCommandConsoleAsync()

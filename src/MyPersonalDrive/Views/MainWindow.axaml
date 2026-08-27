@@ -105,6 +105,18 @@
           <TextBlock Text="Explorador" />
         </StackPanel>
       </Button>
+      <!-- Opens the viewer on whatever row is selected. A menu entry and not only a per-row action,
+           so it's discoverable without hovering a row or opening a context menu; it stays disabled
+           until the selection is something the viewer can actually show (TextPreviewPolicy /
+           ImagePreviewPolicy). -->
+      <Button Command="{Binding ViewSelectedFileCommand}"
+              Classes.active="{Binding IsViewerVisible}"
+              ToolTip.Tip="Ver el contenido del archivo seleccionado">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Path Classes="icon" Data="{StaticResource IconEye}" />
+          <TextBlock Text="Visor" />
+        </StackPanel>
+      </Button>
       <Button Command="{Binding ShowSettingsCommand}"
               Classes.active="{Binding IsSettingsView}">
         <StackPanel Orientation="Horizontal" Spacing="8">
@@ -277,7 +289,7 @@
               <DataTemplate x:DataType="vm:DriveNodeViewModel">
                 <Grid Classes="hoverGroup"
                       Classes.selected="{Binding IsSelected}"
-                      ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto"
+                      ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto"
                       Margin="0,0,0,6">
                   <Button Grid.Column="0"
                           Command="{Binding RowCommand}"
@@ -304,13 +316,22 @@
 
                   <Button Grid.Column="2"
                           Classes="rowAction"
+                          ToolTip.Tip="Ver el contenido"
+                          Margin="8,0,0,0"
+                          Command="{Binding PreviewCommand}"
+                          IsVisible="{Binding CanPreview}">
+                    <Path Classes="icon" Data="{StaticResource IconEye}" />
+                  </Button>
+
+                  <Button Grid.Column="3"
+                          Classes="rowAction"
                           ToolTip.Tip="Create a copy"
                           Margin="8,0,0,0"
                           Command="{Binding CopyCommand}">
                     <Path Classes="icon" Data="{StaticResource IconCopy}" />
                   </Button>
 
-                  <Button Grid.Column="3"
+                  <Button Grid.Column="4"
                           Classes="rowAction"
                           ToolTip.Tip="Rename item"
                           Margin="8,0,0,0"
@@ -318,7 +339,7 @@
                     <Path Classes="icon" Data="{StaticResource IconPencil}" />
                   </Button>
 
-                  <Button Grid.Column="4"
+                  <Button Grid.Column="5"
                           Classes="rowAction"
                           ToolTip.Tip="Download file"
                           Margin="8,0,0,0"
@@ -327,7 +348,7 @@
                     <Path Classes="icon" Data="{StaticResource IconDownload}" />
                   </Button>
 
-                  <Button Grid.Column="5"
+                  <Button Grid.Column="6"
                           Classes="rowAction"
                           ToolTip.Tip="Move to trash"
                           Margin="8,0,0,0"
@@ -360,6 +381,7 @@
                   <Border.ContextMenu>
                     <ContextMenu>
                       <MenuItem Header="Abrir / seleccionar" Command="{Binding RowCommand}" />
+                      <MenuItem Header="Ver el contenido" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
                       <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
                       <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
                       <MenuItem Header="Descargar" Command="{Binding DownloadCommand}" IsVisible="{Binding IsFile}" />
@@ -408,6 +430,7 @@
                   <Border.ContextMenu>
                     <ContextMenu>
                       <MenuItem Header="Abrir / seleccionar" Command="{Binding RowCommand}" />
+                      <MenuItem Header="Ver el contenido" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
                       <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
                       <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
                       <MenuItem Header="Descargar" Command="{Binding DownloadCommand}" IsVisible="{Binding IsFile}" />
@@ -668,6 +691,79 @@
             </ScrollViewer>
           </Border>
         </StackPanel>
+      </Border>
+
+      <!--
+        The text viewer, as a panel over the listing rather than a separate window: it can't get
+        lost behind the main window, and closing it is a view-model flag instead of window plumbing
+        in code-behind. Covers row 1 only, so the breadcrumbs above and the CLI activity log below
+        stay visible while a file is open.
+      -->
+      <Border Grid.Row="1"
+              Margin="16,0,16,16"
+              Padding="16"
+              CornerRadius="6"
+              Background="{DynamicResource PanelBackgroundBrush}"
+              IsVisible="{Binding IsViewerVisible}">
+        <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="8">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+            <StackPanel Spacing="2">
+              <TextBlock FontSize="18" FontWeight="Bold" Text="{Binding ViewerTitle}" TextTrimming="CharacterEllipsis" />
+              <TextBlock FontSize="12" Opacity="0.7" Text="{Binding ViewerPath}" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            <Button Grid.Column="1"
+                    VerticalAlignment="Top"
+                    Command="{Binding CloseViewerCommand}"
+                    ToolTip.Tip="Cerrar el visor">
+              <Path Classes="icon" Data="{StaticResource IconClear}" />
+            </Button>
+          </Grid>
+
+          <TextBlock Grid.Row="1"
+                     FontSize="12"
+                     Opacity="0.8"
+                     TextWrapping="Wrap"
+                     Text="{Binding ViewerNote}"
+                     IsVisible="{Binding ViewerNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+          <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsViewerLoading}">
+            <ProgressBar Width="120" IsIndeterminate="True" />
+            <TextBlock VerticalAlignment="Center" Text="Descargando el archivo para verlo…" />
+          </StackPanel>
+
+          <!-- NoWrap with horizontal scrolling, for the same reason as the CLI console above:
+               wrapping re-shapes the whole text on every change, and a preview can be a megabyte.
+               SelectableTextBlock rather than a read-only TextBox so the text can be copied without
+               dragging a full editor into the view. -->
+          <Border Grid.Row="3"
+                  Padding="12"
+                  CornerRadius="4"
+                  Background="{DynamicResource ConsoleBackgroundBrush}"
+                  IsVisible="{Binding HasViewerText}">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+              <SelectableTextBlock FontFamily="monospace"
+                                   FontSize="13"
+                                   TextWrapping="NoWrap"
+                                   Text="{Binding ViewerText}" />
+            </ScrollViewer>
+          </Border>
+
+          <!-- The image counterpart: Stretch="Uniform" so a huge photo fits the panel instead of
+               overflowing it, and the ScrollViewer stays available for the rare image bigger than
+               the panel even at that scale (a very tall panorama, say). -->
+          <Border Grid.Row="3"
+                  Padding="12"
+                  CornerRadius="4"
+                  Background="{DynamicResource ConsoleBackgroundBrush}"
+                  IsVisible="{Binding HasViewerImage}">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+              <Image Source="{Binding ViewerImageBytes, Converter={x:Static conv:BytesToBitmapConverter.Instance}}"
+                     Stretch="Uniform"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center" />
+            </ScrollViewer>
+          </Border>
+        </Grid>
       </Border>
     </Grid>
 

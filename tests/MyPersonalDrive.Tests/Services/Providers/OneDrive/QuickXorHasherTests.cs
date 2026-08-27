@@ -19,6 +19,24 @@ public class QuickXorHasherTests : IDisposable
 
     public void Dispose() => File.Delete(_tempFile);
 
+    /// <summary>
+    /// A real ground-truth value, not a self-consistency check: this exact content was uploaded to
+    /// a real OneDrive account during this phase's live-verification session, and this is the
+    /// `quickXorHash` Graph reported back for it (docs/PLAN-CLOUD-PROVIDERS.md Appendix A #3). This
+    /// is the test that would have caught the original wraparound bug (18 of 20 bytes matched,
+    /// this pins all 20) — unlike the rest of this file's structural checks, which by design can't
+    /// prove the implementation agrees with the real algorithm, only with itself.
+    /// </summary>
+    [Fact]
+    public async Task KnownGoldenVector_MatchesGraphsRealQuickXorHash()
+    {
+        File.WriteAllText(_tempFile, QuickXorGoldenVector.Content);
+
+        var hash = await new QuickXorHasher().ComputeAsync(_tempFile);
+
+        Assert.Equal("Z2oww8eE1gMrxFl6/Q7x+ahQPvM=", hash);
+    }
+
     [Fact]
     public void Algorithm_IsQuickXor()
     {

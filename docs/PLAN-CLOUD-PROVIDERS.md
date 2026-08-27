@@ -916,7 +916,10 @@ Captured 2026-08-27, live session against a real personal Microsoft account, via
    overflow bits silently dropped into unused storage past byte 19 instead of folding back to bit
    0. Rewritten as a genuinely circular 160-bit (20-byte) bit array with a per-bit XOR helper
    (`QuickXorHasher.QuickXorState`, see its doc comment) — **confirmed matching Graph's own
-   `quickXorHash` on two separate real uploads** after the fix. `RemoteHashAlgorithm` field
+   `quickXorHash` on three separate real uploads** after the fix, one of them with fixed,
+   known content (`QuickXorGoldenVector.Content`, 81 bytes) pinned as a permanent unit test
+   (`QuickXorHasherTests.KnownGoldenVector_MatchesGraphsRealQuickXorHash`) so this exact bug class
+   can never silently regress without a live account. `RemoteHashAlgorithm` field
    present: `quickXorHash` was populated for every file checked; `sha1Hash`/`sha256Hash` were not
    inspected on this personal account (§4.4's "unverified: which hashes a personal drive returns
    today" note stays open for that specific sub-question, but is moot for this app either way since

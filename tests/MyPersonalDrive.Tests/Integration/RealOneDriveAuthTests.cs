@@ -1,6 +1,7 @@
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.OneDrive;
+using MyPersonalDrive.Tests.Services.Providers.OneDrive;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -69,7 +70,12 @@ public sealed class RealOneDriveAuthTests : IDisposable
         // Finding #2: QuickXorHasher's local computation vs. what Graph reports for the same file.
         var fileName = $"mypersonaldrive-p6-verification-{Guid.NewGuid():N}.txt";
         var localPath = Path.Combine(_tempDir, fileName);
-        await File.WriteAllTextAsync(localPath, $"MyPersonalDrive P6 live verification — {DateTimeOffset.UtcNow:O}");
+        // Fixed, not timestamp-based: deliberately the same content
+        // QuickXorHasherTests.KnownGoldenVector pins as a literal, captured from this exact test
+        // against a real account (docs/PLAN-CLOUD-PROVIDERS.md Appendix A #3) — 81 bytes, long
+        // enough to exercise every wraparound-boundary byte index (14/29/43/58 mod 160 at
+        // Shift=11) the original bug silently dropped.
+        await File.WriteAllTextAsync(localPath, QuickXorGoldenVector.Content);
 
         try
         {

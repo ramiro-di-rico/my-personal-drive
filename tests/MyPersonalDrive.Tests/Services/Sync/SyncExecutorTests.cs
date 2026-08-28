@@ -168,7 +168,7 @@ public class SyncExecutorTests : IDisposable
 
         Assert.Equal(1, plan.Stats.FilesToUpload);
         var upload = Assert.Single(executor.Calls, c => c.Arguments.Contains("upload"));
-        Assert.Equal(["filesystem", "upload", "-c", "replace", Path.Combine(_localRoot, "notes.txt"), RemoteRoot], upload.Arguments);
+        Assert.Equal(["filesystem", "upload", "-f", "replace", "-d", "replace", Path.Combine(_localRoot, "notes.txt"), RemoteRoot], upload.Arguments);
     }
 
     [Fact]
@@ -1020,7 +1020,7 @@ public class SyncExecutorTests : IDisposable
         await sut.ResolveConflictAsync(pair, conflict, ConflictResolution.KeepLocal);
 
         var upload = Assert.Single(cli.Calls, c => c.Arguments.Contains("upload"));
-        Assert.Contains("-c", upload.Arguments);
+        Assert.Contains("-f", upload.Arguments);
         Assert.Contains("replace", upload.Arguments);
         Assert.Equal("my local version", await File.ReadAllTextAsync(Path.Combine(_localRoot, "a.txt")));
         Assert.Empty(await store.GetConflictActionsAsync(pair.Id));

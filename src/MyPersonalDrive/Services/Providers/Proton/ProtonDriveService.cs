@@ -131,18 +131,28 @@ public sealed class ProtonDriveService
     public Task UploadFilesAsync(IReadOnlyList<string> localPaths, string parentPath, UploadConflictStrategy strategy = UploadConflictStrategy.None, CancellationToken cancellationToken = default)
     {
         var arguments = new List<string> { "filesystem", "upload" };
-        var strategyFlag = strategy switch
+        // cli-drive 0.8.0 replaced the single `-c STRATEGY` flag this used to send with two
+        // separate ones, `-f`/`--file-conflict-strategy` and `-d`/`--folder-conflict-strategy`,
+        // and renamed "keep-both" to "rename" ("filesystem upload --help", verified against a
+        // real 0.8.0 install). The old `-c` is now simply unrecognized, which made every upload
+        // that specified a strategy fail outright — including this app's own default
+        // Replace-strategy retry for a plain changed-file upload (SyncExecutor.UploadFileAsync),
+        // so this wasn't limited to conflict resolution. This app has no reason to resolve files
+        // and folders differently, so the same value is sent for both flags.
+        var strategyValue = strategy switch
         {
-            UploadConflictStrategy.KeepBoth => "keep-both",
+            UploadConflictStrategy.KeepBoth => "rename",
             UploadConflictStrategy.Replace => "replace",
             UploadConflictStrategy.Skip => "skip",
             _ => null
         };
 
-        if (strategyFlag is not null)
+        if (strategyValue is not null)
         {
-            arguments.Add("-c");
-            arguments.Add(strategyFlag);
+            arguments.Add("-f");
+            arguments.Add(strategyValue);
+            arguments.Add("-d");
+            arguments.Add(strategyValue);
         }
 
         arguments.AddRange(localPaths);

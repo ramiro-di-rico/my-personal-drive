@@ -110,7 +110,19 @@ public class ProtonDriveServiceCommandTests
         await service.UploadFilesAsync(["/local/a.txt", "/local/b.txt"], "/my-files/target", UploadConflictStrategy.KeepBoth);
 
         var call = Assert.Single(executor.Calls);
-        Assert.Equal(["filesystem", "upload", "-c", "keep-both", "/local/a.txt", "/local/b.txt", "/my-files/target"], call.Arguments);
+        Assert.Equal(["filesystem", "upload", "-f", "rename", "-d", "rename", "/local/a.txt", "/local/b.txt", "/my-files/target"], call.Arguments);
+    }
+
+    [Fact]
+    public async Task Upload_WithReplaceStrategy_SendsBothConflictFlags()
+    {
+        var (service, executor) = CreateSut();
+        executor.EnqueueOutput("");
+
+        await service.UploadFilesAsync(["/local/a.txt"], "/my-files/target", UploadConflictStrategy.Replace);
+
+        var call = Assert.Single(executor.Calls);
+        Assert.Equal(["filesystem", "upload", "-f", "replace", "-d", "replace", "/local/a.txt", "/my-files/target"], call.Arguments);
     }
 
     [Fact]

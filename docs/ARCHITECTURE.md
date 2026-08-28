@@ -221,15 +221,26 @@ operation to a command line. **This is the catalog of what's currently known abo
 | `RenameItemAsync` | `filesystem rename "<path>" "<newName>"` |
 | `CreateFolderAsync` | `filesystem create-folder "<parent>" "<name>"` |
 | `CopyItemAsync` | `filesystem copy [-n "<newName>"] "<src>" "<targetParent>"` |
-| `UploadFilesAsync` | `filesystem upload [-c keep-both\|replace\|skip] "<f1>" "<f2>"… "<parent>"` |
+| `UploadFilesAsync` | `filesystem upload [-f rename\|replace\|skip] [-d rename\|replace\|skip] "<f1>" "<f2>"… "<parent>"` |
 | `GetCliVersionAsync` | `--version` |
 
-`--version` is the one command here that is not a subcommand. Captured from `cli-drive@0.6.0`:
+`--version` is the one command here that is not a subcommand. Captured from `cli-drive@0.8.0`:
 
 ```
-Proton Drive CLI cli-drive@0.6.0+f8e16aac
-Proton Drive SDK js@0.19.2+f8e16aac
+Proton Drive CLI cli-drive@0.8.0+06e8c605
+Proton Drive SDK js@0.21.0+06e8c605
 ```
+
+**Regression found live (2026-08-28):** `cli-drive` 0.8.0 replaced the single `-c keep-both|replace|skip`
+flag `filesystem upload` used to take with two separate ones (`-f`/`--file-conflict-strategy` and
+`-d`/`--folder-conflict-strategy`), and renamed `keep-both` to `rename`. The old `-c` is simply
+unrecognized now, which silently broke every upload that specified a strategy — including this
+app's own default `Replace`-strategy retry for a plain changed-file upload
+(`SyncExecutor.UploadFileAsync`), not just conflict resolution. A sync pair with any file edited on
+both sides would upload the initial version fine, then fail every subsequent update forever, always
+landing back in "Conflict"/"Failed" no matter how many times the user retried or resolved it by
+hand — because the retry and the resolution both route through the same broken upload call. Fixed
+in `ProtonDriveService.UploadFilesAsync` to send both new flags with the same resolved value.
 
 The service returns the first line verbatim and parses nothing — the app only displays it, and
 splitting `cli-drive@0.6.0+f8e16aac` into fields would assume a format the CLI hasn't promised.

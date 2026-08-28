@@ -1851,15 +1851,28 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         BreadcrumbItems.Clear();
 
-        var segments = path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var currentPath = string.Empty;
+        // The root always gets its own leading, always-clickable segment. Proton's root is a
+        // real named folder ("/my-files"), so splitting the path on '/' always produced at
+        // least one segment to click back to. OneDrive's root is bare "/", which splits into
+        // *zero* segments — so browsing into a folder left the breadcrumb bar showing only that
+        // folder's name, with nothing before it to get back to root: it looked like the folder
+        // itself was the root. Labeling this segment with the provider's name when the root has
+        // no real name of its own (OneDrive) keeps Proton's own label ("my-files") unchanged.
+        var rootLabel = _rootPath == "/" ? _provider.DisplayName : _rootPath.TrimEnd('/').Split('/').Last();
+        BreadcrumbItems.Add(new BreadcrumbSegmentViewModel(rootLabel, _rootPath, path == _rootPath, NavigateIntoAsync, HandleUnexpectedError));
+
+        if (path == _rootPath)
+        {
+            return;
+        }
+
+        var relative = path[_rootPath.Length..].Trim('/');
+        var segments = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var currentPath = _rootPath;
 
         foreach (var segment in segments)
         {
-            currentPath = string.IsNullOrEmpty(currentPath)
-                ? "/" + segment
-                : currentPath + "/" + segment;
-
+            currentPath = currentPath.TrimEnd('/') + "/" + segment;
             BreadcrumbItems.Add(new BreadcrumbSegmentViewModel(segment, currentPath, currentPath == path, NavigateIntoAsync, HandleUnexpectedError));
         }
     }

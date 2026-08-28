@@ -924,7 +924,41 @@
                 </ItemsControl>
               </StackPanel>
 
-              <ItemsControl ItemsSource="{Binding Pairs}">
+              <!-- Filter by account (docs/PLAN-CLOUD-PROVIDERS.md P9) — same chip idiom as the
+                   browser's own "filter by type" row. Hidden with a single account, where every
+                   pair obviously belongs to it already. -->
+              <ItemsControl ItemsSource="{Binding ProviderFilters}"
+                            IsVisible="{Binding HasProviderFilters}"
+                            Margin="0,8,0,0">
+                <ItemsControl.Styles>
+                  <Style Selector="Button.providerChip">
+                    <Setter Property="Padding" Value="8,3" />
+                    <Setter Property="FontSize" Value="12" />
+                    <Setter Property="Margin" Value="0,0,6,6" />
+                  </Style>
+                  <Style Selector="Button.providerChip.active">
+                    <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                    <Setter Property="FontWeight" Value="Bold" />
+                  </Style>
+                </ItemsControl.Styles>
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <WrapPanel />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="syncVm:ProviderFilterViewModel">
+                    <Button Classes="providerChip"
+                            Classes.active="{Binding IsActive}"
+                            Command="{Binding ApplyCommand}"
+                            Content="{Binding LabelWithCount}"
+                            ToolTip.Tip="Filtrar por esta cuenta" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <ItemsControl ItemsSource="{Binding VisiblePairs}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="syncVm:SyncPairViewModel">
                     <Border Classes="hoverGroup" Padding="12" Margin="0,0,0,8" Background="{DynamicResource PanelBackgroundBrush}" CornerRadius="6">

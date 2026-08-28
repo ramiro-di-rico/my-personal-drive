@@ -26,6 +26,7 @@ public sealed class SyncPanelViewModel : ObservableObject
     private string _statusMessage;
     private bool _isBusy;
     private bool _hasRecovered;
+    private string? _providerFilter;
 
     private AccountSlot Primary => _slots[0];
 
@@ -39,7 +40,9 @@ public sealed class SyncPanelViewModel : ObservableObject
     {
         _statusMessage = $"Add a folder to start syncing it from {providerDisplayName}.";
         Pairs = new ObservableCollection<SyncPairViewModel>();
+        Pairs.CollectionChanged += (_, _) => RebuildProviderFilters();
         AccountSyncToggles = new ObservableCollection<AccountSyncToggleViewModel>();
+        ProviderFilters = new ObservableCollection<ProviderFilterViewModel>();
 
         AddPairCommand = new AsyncCommand(AddPairAsync, () => !IsBusy, ReportError);
         RefreshCommand = new AsyncCommand(LoadPairsAsync, () => !IsBusy, ReportError);
@@ -87,6 +90,25 @@ public sealed class SyncPanelViewModel : ObservableObject
 
     /// <summary>One entry per active account (including the primary), for the per-account automatic-sync toggles — see <see cref="AccountSyncToggleViewModel"/>.</summary>
     public ObservableCollection<AccountSyncToggleViewModel> AccountSyncToggles { get; }
+
+    /// <summary>
+    /// The Sync window's "filter by account" chips (docs/PLAN-CLOUD-PROVIDERS.md P9) — empty (and
+    /// hidden by the view) with a single account, where every pair obviously belongs to it already,
+    /// same rule <see cref="SyncPairViewModel.AccountLabel"/> itself already follows.
+    /// </summary>
+    public ObservableCollection<ProviderFilterViewModel> ProviderFilters { get; }
+
+    /// <summary>Whether the filter row has anything worth showing — false with a single account.</summary>
+    public bool HasProviderFilters => ProviderFilters.Count > 0;
+
+    /// <summary>
+    /// <see cref="Pairs"/> narrowed to the active <see cref="ProviderFilters"/> chip, or every pair
+    /// when none is active. <see cref="Pairs"/> itself stays the unfiltered source of truth every
+    /// existing caller (including every test) already reads — this is purely a view of it, the same
+    /// relationship <c>MainWindowViewModel.RootItems</c> has to its own unfiltered <c>_loadedItems</c>.
+    /// </summary>
+    public IEnumerable<SyncPairViewModel> VisiblePairs
+        => _providerFilter is null ? Pairs : Pairs.Where(pair => pair.AccountLabel == _providerFilter);
 
     public AsyncCommand AddPairCommand { get; }
 
@@ -268,6 +290,66 @@ public sealed class SyncPanelViewModel : ObservableObject
     }
 
     private void RemovePairViewModel(SyncPairViewModel viewModel) => Pairs.Remove(viewModel);
+
+    /// <summary>
+    /// Rebuilds the chip row from whatever is currently in <see cref="Pairs"/> — called whenever
+    /// that collection changes (a load, an add, a remove), so the counts and the set of accounts
+    /// offered never drift from what's actually shown.
+    /// </summary>
+    private void RebuildProviderFilters()
+    {
+        ProviderFilters.Clear();
+
+        // Single-account labels are blank (SyncPairViewModel.AccountLabel's own rule) — grouping by
+        // that would produce one useless "" chip. _slots.Count > 1 is the same "more than one
+        // account" gate AccountLabel itself uses, so this stays consistent with what the rows
+        // already display.
+        if (_slots.Count <= 1)
+        {
+            _providerFilter = null;
+            OnPropertyChanged(nameof(VisiblePairs));
+            OnPropertyChanged(nameof(HasProviderFilters));
+            return;
+        }
+
+        if (_providerFilter is not null && Pairs.All(pair => pair.AccountLabel != _providerFilter))
+        {
+            // The account this filter pointed at no longer has any pairs loaded (e.g. its last pair
+            // was removed) — falling back to "Todos" keeps the list from silently going empty.
+            _providerFilter = null;
+        }
+
+        ProviderFilters.Add(new ProviderFilterViewModel(null, Pairs.Count, ApplyProviderFilterAsync, ReportError)
+        {
+            IsActive = _providerFilter is null,
+        });
+
+        foreach (var slot in _slots)
+        {
+            var count = Pairs.Count(pair => pair.AccountLabel == slot.DisplayName);
+            ProviderFilters.Add(new ProviderFilterViewModel(slot.DisplayName, count, ApplyProviderFilterAsync, ReportError)
+            {
+                IsActive = _providerFilter == slot.DisplayName,
+            });
+        }
+
+        OnPropertyChanged(nameof(VisiblePairs));
+        OnPropertyChanged(nameof(HasProviderFilters));
+    }
+
+    private Task ApplyProviderFilterAsync(string? accountLabel)
+    {
+        // Clicking the active chip clears it, so the filter can always be undone from where it was
+        // applied, not only from "Todos" — same behavior MainWindowViewModel's own kind filter has.
+        _providerFilter = _providerFilter == accountLabel ? null : accountLabel;
+        foreach (var chip in ProviderFilters)
+        {
+            chip.IsActive = chip.AccountLabel == _providerFilter;
+        }
+
+        OnPropertyChanged(nameof(VisiblePairs));
+        return Task.CompletedTask;
+    }
 
     private async Task AddPairAsync()
     {

@@ -277,7 +277,21 @@
 - [ ] **P7, general form** — *optional* true multiple accounts of the same provider (needs Proton
       CLI config-directory isolation). Not started, deliberately last, and likely never needed
       given Phase A's scope already covers "different providers active together."
-- [ ] **P8** — *optional* delta-based remote scanning where the provider supports it. Not started.
+- [ ] **P7, Phase B** — the account-switcher *browsing* UI Phase A deliberately deferred: change
+      which account `MainWindowViewModel` browses live, no restart. Not started — see
+      [§P7 Phase B](#p7-phase-b--live-account-switch-for-the-browser).
+- [x] **P8 (implementation landed, live verification pending)** — delta-based remote scanning for
+      OneDrive (`IDeltaSource`, `DeltaRemoteScanner`, per-pair delta tokens); Proton has no
+      delta/events command and stays on the full walk, same as a one-way pair of any provider
+      (never populates the baseline a delta scanner needs to merge onto). See
+      [the P8 phase entry below](#p8--optional-delta-based-remote-scanning--implemented-pending-live-verification)
+      for the shipped shape. **Not yet
+      done:** live verification against a real Graph account (sign in, run a delta cycle, make a
+      real change, confirm the next call reports exactly it and a two-way pair picks it up) —
+      still pending that session.
+- [ ] **P9** — filter the Sync window's pair list by account/provider, using the same filter-chip
+      idiom the folder browser already uses for file kinds. Not started, independent of Phase B —
+      see [§P9](#p9--filter-sync-pairs-by-provider).
 
 ### Adversarial review of P1–P5 — 5 confirmed bugs fixed
 
@@ -745,6 +759,103 @@ keyed collection; `SyncScheduler` gets a per-account authentication gate; the br
 account switcher and a per-account `CurrentPath`; `SyncPanelViewModel` groups pairs by account.
 The genuinely new problems are the ones no schema column solves: a global concurrency budget across
 providers, and one console feed carrying two providers' activity. Not scoped here.
+
+### P7 Phase B — live account switch for the browser
+
+Phase A deliberately deferred this (see its own "Deliberately not done (Phase B)" note above):
+switching which account `MainWindowViewModel` *browses* still persists `AppSettings.ActiveProvider`
+and asks for a restart (`MainWindowViewModel.SwitchProviderAsync`) — even though, since Phase A,
+both accounts' sync engines and console activity already run all the time regardless of which one
+is on screen. The restart is a pure browsing-UI limitation, not a sync one.
+
+**Root cause, concretely.** `MainWindowViewModel` is constructed once, at startup, against a single
+provider's whole toolchain — not just `_provider` itself, but `_cacheService`, `_statsScanner`,
+`_previewLoader`, `_imagePreviewLoader`, and browsing state (`_navigationHistory`, `_currentPath`,
+`_loadedItems`, `KindFilters`, selection). `_isAuthenticated` is worse: it's read once from
+`AppSettingsService` at construction (`_provider.Id == ProviderId.OneDrive ? settings...IsOneDriveAuthenticated : settings...IsAuthenticated`)
+and never revisited, so even today it can go stale if the user (dis)connects the *non-browsed*
+account's auth from the Conexión cards without restarting. `App.axaml.cs` builds one
+`AccountSyncContext` per provider already (for the sync engine); this phase's job is to build the
+browsing-side equivalent per account too, and let `MainWindowViewModel` hold all of them instead of
+just the primary's.
+
+**Design.**
+
+1. New `BrowserAccountSession` (`ViewModels/BrowserAccountSession.cs` or similar) bundling exactly
+   the per-account browsing resources listed above: `Provider`, `CacheService`, `StatsScanner`,
+   `PreviewLoader`, `ImagePreviewLoader`, plus mutable `CurrentPath`/`NavigationHistory` so a
+   session's own place is preserved *within one run* even before this phase adds the ability to
+   restore it (see scope note below). `App.axaml.cs`'s `BuildAccountContext` gains a sibling (or is
+   extended) to also produce one of these per `AccountSyncContext`.
+2. `MainWindowViewModel`'s constructor takes the full `IReadOnlyList<BrowserAccountSession>` instead
+   of one provider + its four resources. A new `_activeSession` field replaces the fixed `_provider`
+   field as the source of truth; every existing `_provider.X` call site becomes `_activeSession.Provider.X`
+   (mechanical, but touches most of the file — see the P1 call-site swap for precedent on scale).
+3. New `SwitchBrowserAccountAsync(ProviderId id)` (replacing `SwitchProviderAsync`'s current body,
+   keeping its name/command wiring since `SwitchToProtonCommand`/`SwitchToOneDriveCommand` already
+   exist): cancels any in-flight folder load (`_cts`), swaps `_activeSession`, re-reads
+   `IsAuthenticated` fresh from `AppSettingsService` for the new session's provider (fixing the
+   staleness bug above as a side effect), resets `_navigationHistory`/selection, reloads
+   `KindFilters` from that session's own `FolderMetricsStore`, and calls the existing
+   `LoadFolderAsync` against the session's root. No confirmation dialog, no restart message — the
+   whole point is that this becomes as cheap as it already is for the sync engine.
+4. **Decouple the Conexión tabs from browsing.** Today `IsProtonActive`/`IsOneDriveActive` (i.e.
+   "which account `_provider` currently is") gates *both* the browser's active account *and* which
+   provider's connection card is visible in Settings (`MainWindow.axaml:781-852`). Once switching
+   accounts is cheap, that conflation stops making sense — you should be able to check/edit
+   OneDrive's client id while still browsing Proton. Recommendation: stop hiding either card;
+   Settings shows both providers' connection sections always (each already has independent state —
+   `_cliPath` and `_oneDriveClientId` are already separate fields, this needs no new plumbing), and
+   the account switcher moves to the browser toolbar itself as its own compact control, distinct
+   from Settings entirely.
+5. `AppSettings.ActiveProvider` keeps being written (as "last browsed account", read by
+   `App.axaml.cs` to pick the initial session) but a live switch no longer needs to touch it at all
+   during the run — only on the next cold start does it matter.
+
+**Scope, this phase only:** switching resets the target session to its root path (`CurrentPath`
+returns to `/` or `/my-files`), not to wherever you last left it. Remembering each session's own
+`CurrentPath`/breadcrumbs/selection across switches (the "real" per-account browsing state Phase
+A's own note flagged) is a small additive follow-up once `BrowserAccountSession` exists to hold it
+— deliberately not bundled here to keep this phase's diff reviewable.
+
+**Explicitly not done:** same-provider multiple accounts (still P7 general form, unaffected by this
+phase since it only re-groups existing per-provider sessions); a global concurrency budget across
+providers' `SyncScheduler`s (Phase A's own note: doesn't currently apply, since at most one session
+per provider type exists); any change to `ProviderCatalog`/`AccountSyncContext` — those already
+support this, Phase B only adds a browsing-side sibling of what P7 A already did for syncing.
+
+**Testing.** `MainWindowViewModel` has a large existing test suite constructing it with one
+provider — a compatibility constructor overload (single session, wrapped as a one-element list)
+avoids rewriting every existing call site, matching how `SyncPanelViewModel`'s own
+`AddAccount`/primary-slot split stayed additive in Phase A. New coverage: switching resets
+navigation/selection, re-reads `IsAuthenticated` for the target provider, cancels an in-flight load
+rather than racing it, and needs no restart (no write to `AppSettings.ActiveProvider` mid-run).
+
+### P9 — Filter sync pairs by provider
+
+Small, independent of Phase B — the Sync window already labels each row with its account
+(`SyncPairViewModel.AccountLabel`, blank when there's only one account) once
+`SyncPanelViewModel.AddAccount` is used; this phase only adds a way to narrow the list to one
+account at a time when there's more than one, following the same filter-chip idiom the folder
+browser already established for file kinds (`ViewModels/KindFilterViewModel.cs` — `Label`/`Count`/
+`IsActive`/`ApplyCommand`, a `null`/"Todos" chip always present) rather than inventing a new pattern.
+
+- New `SyncPanelViewModel.ProviderFilters` (`ObservableCollection` of the same chip shape, or a
+  reused/generalized `KindFilterViewModel`-style type), rebuilt whenever `AccountSyncToggles`
+  changes: one "Todos" chip plus one chip per distinct account label currently registered via
+  `_slots`, each counting how many of `Pairs` belong to it.
+- `Pairs` stays exactly as it is today — the authoritative, unfiltered collection every existing
+  test (`SyncPanelMultiAccountTests` et al.) already reads. A new `VisiblePairs` property (or an
+  `ICollectionView`-style wrapper) is what the Sync window's `ItemsControl` binds to instead;
+  recomputed on `Pairs.CollectionChanged` and on the active filter changing, same as `KindFilters`
+  today drives `RootItems` without the browser ever losing `_loadedItems`.
+- Only shown when `AccountSyncToggles.Count > 1` — with a single account every pair already belongs
+  to it, so the row would be pure noise (same rule `AccountLabel`'s own blank-when-one-account
+  already follows).
+
+**Explicitly not done:** filtering by direction/status/conflict state — provider is the one axis
+asked for; a general filter/sort bar for the Sync window is a separate, larger feature if ever
+wanted.
 
 ### P8 — *Optional:* delta-based remote scanning — implemented, pending live verification
 

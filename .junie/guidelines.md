@@ -15,6 +15,7 @@ plain Markdown procedures, not Claude-specific — they apply to you unchanged.
 |---|---|
 | Add/change a `proton-drive` command | [`.claude/skills/cli-command/SKILL.md`](../.claude/skills/cli-command/SKILL.md) |
 | Add a UI feature (MVVM) | [`.claude/skills/add-feature/SKILL.md`](../.claude/skills/add-feature/SKILL.md) |
+| Add a new cloud storage provider | [`.claude/skills/add-cloud-provider/SKILL.md`](../.claude/skills/add-cloud-provider/SKILL.md) |
 | Cut a Linux release | [`.claude/skills/release-linux/SKILL.md`](../.claude/skills/release-linux/SKILL.md) |
 | Check Native AOT / trim safety | [`.claude/skills/aot-check/SKILL.md`](../.claude/skills/aot-check/SKILL.md) |
 | Run the app locally | [`.claude/skills/run-app/SKILL.md`](../.claude/skills/run-app/SKILL.md) |

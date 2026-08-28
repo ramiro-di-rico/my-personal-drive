@@ -214,6 +214,36 @@ public class SyncStateStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdatePairSettings_ChangesDirectionAndConflictPolicy()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+
+        await sut.UpdatePairSettingsAsync(pair.Id, SyncDirection.TwoWay, ConflictPolicy.PreferLocal);
+
+        var updated = await sut.GetPairAsync(pair.Id);
+        Assert.Equal(SyncDirection.TwoWay, updated!.Direction);
+        Assert.Equal(ConflictPolicy.PreferLocal, updated.ConflictPolicy);
+    }
+
+    [Fact]
+    public async Task UpdatePairSettings_LeavesEverythingElseUnchanged()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask, ["*.tmp"]);
+        await sut.UpdatePairStatusAsync(pair.Id, T0, SyncPairStatus.Ok, null);
+
+        await sut.UpdatePairSettingsAsync(pair.Id, SyncDirection.LocalToRemote, ConflictPolicy.KeepBoth);
+
+        var updated = await sut.GetPairAsync(pair.Id);
+        Assert.Equal("/my-files/A", updated!.RemotePath);
+        Assert.Equal("/home/user/A", updated.LocalPath);
+        Assert.Equal(["*.tmp"], updated.ExcludeGlobs);
+        Assert.Equal(SyncPairStatus.Ok, updated.LastStatus);
+        Assert.Equal(T0, updated.LastSyncAt);
+    }
+
+    [Fact]
     public async Task DeletePair_CascadesToStateAndQueue()
     {
         var sut = CreateSut();

@@ -39,6 +39,7 @@ public sealed class SyncPairViewModel : ObservableObject
         ResolveConflictsCommand = new AsyncCommand(ResolveConflictsAsync, () => !IsBusy && HasConflicts, ReportError);
         RetryFailedCommand = new AsyncCommand(RetryFailedAsync, () => !IsBusy && HasFailures, ReportError);
         TogglePauseCommand = new AsyncCommand(TogglePauseAsync, () => !IsBusy, ReportError);
+        EditCommand = new AsyncCommand(EditAsync, () => !IsBusy, ReportError);
 
         UpdateStatusText();
     }
@@ -60,6 +61,10 @@ public sealed class SyncPairViewModel : ObservableObject
         _ => "Two-way",
     };
 
+    public SyncDirection Direction => _pair.Direction;
+
+    public ConflictPolicy ConflictPolicy => _pair.ConflictPolicy;
+
     public string StatusText
     {
         get => _statusText;
@@ -79,6 +84,7 @@ public sealed class SyncPairViewModel : ObservableObject
                 ResolveConflictsCommand.RaiseCanExecuteChanged();
                 RetryFailedCommand.RaiseCanExecuteChanged();
                 TogglePauseCommand.RaiseCanExecuteChanged();
+                EditCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -94,6 +100,8 @@ public sealed class SyncPairViewModel : ObservableObject
     public AsyncCommand RetryFailedCommand { get; }
 
     public AsyncCommand TogglePauseCommand { get; }
+
+    public AsyncCommand EditCommand { get; }
 
     /// <summary>
     /// Paused means "no automatic cycles". Preview and Sync now stay available on purpose: pausing
@@ -182,6 +190,9 @@ public sealed class SyncPairViewModel : ObservableObject
     /// "leave that one alone", so closing the dialog resolves nothing.
     /// </summary>
     public Func<IReadOnlyList<QueuedSyncAction>, Task<IReadOnlyDictionary<long, ConflictResolution>>>? RequestConflictResolutionsAsync { get; set; }
+
+    /// <summary>Shown this pair's current direction/conflict policy; returns the new values, or null if the user canceled.</summary>
+    public Func<SyncPairViewModel, Task<EditSyncPairRequest?>>? RequestEditAsync { get; set; }
 
     public Action<string>? OnError { get; set; }
 
@@ -329,6 +340,42 @@ public sealed class SyncPairViewModel : ObservableObject
         {
             IsBusy = false;
             await RefreshOutstandingAsync();
+        }
+    }
+
+    /// <summary>
+    /// Changes direction/conflict policy on the existing pair rather than recreating it — the
+    /// remote/local paths stay fixed, since changing those already has a working path (remove,
+    /// then add a new pair) and would need re-validating against every other pair.
+    /// </summary>
+    private async Task EditAsync()
+    {
+        var requester = RequestEditAsync;
+        if (requester is null)
+        {
+            StatusText = "Editing a pair is not available.";
+            return;
+        }
+
+        var request = await requester(this);
+        if (request is null)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            await _stateStore.UpdatePairSettingsAsync(_pair.Id, request.Direction, request.ConflictPolicy);
+            _pair = await _stateStore.GetPairAsync(_pair.Id) ?? _pair;
+            OnPropertyChanged(nameof(DirectionText));
+            OnPropertyChanged(nameof(Direction));
+            OnPropertyChanged(nameof(ConflictPolicy));
+            UpdateStatusText();
+        }
+        finally
+        {
+            IsBusy = false;
         }
     }
 

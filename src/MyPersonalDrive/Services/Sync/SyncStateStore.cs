@@ -204,6 +204,29 @@ public sealed class SyncStateStore
         await command.ExecuteNonQueryAsync(ct);
     });
 
+    /// <summary>
+    /// Changes an existing pair's direction/conflict policy — the two fields "Add sync pair"
+    /// itself asks for. Deliberately not remote/local path, which already has a working path
+    /// (remove, then add a new pair) and would need its own validation against every other pair;
+    /// this only ever updates a row that's already valid. Switching away from `TwoWay` doesn't
+    /// need to touch the baseline — <c>SyncExecutor.LoadBaselineAsync</c> already only ever
+    /// consults it for `TwoWay` pairs, so a stale baseline for a pair no longer in that direction
+    /// is simply never read again. Switching *into* `TwoWay` starts with no baseline, same as any
+    /// brand-new two-way pair.
+    /// </summary>
+    public Task UpdatePairSettingsAsync(int id, SyncDirection direction, ConflictPolicy conflictPolicy, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync(async () =>
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+        command.CommandText = "UPDATE SyncPairs SET Direction = @Direction, ConflictPolicy = @ConflictPolicy WHERE AccountKey = @AccountKey AND Id = @Id";
+        command.Parameters.AddWithValue("@Direction", direction.ToString());
+        command.Parameters.AddWithValue("@ConflictPolicy", conflictPolicy.ToString());
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
+        command.Parameters.AddWithValue("@Id", id);
+        await command.ExecuteNonQueryAsync(ct);
+    });
+
     public async Task SetPairEnabledAsync(int id, bool isEnabled, CancellationToken ct = default)
         => await SetPairFlagAsync(id, "IsEnabled", isEnabled, ct);
 

@@ -184,6 +184,9 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// <summary>Shown the parked conflicts; returns a decision per queue row. Forwarded to every row.</summary>
     public Func<IReadOnlyList<QueuedSyncAction>, Task<IReadOnlyDictionary<long, ConflictResolution>>>? RequestConflictResolutionsAsync { get; set; }
 
+    /// <summary>Shown a pair's current direction/conflict policy; returns the new values, or null if canceled. Forwarded to every row.</summary>
+    public Func<SyncPairViewModel, Task<EditSyncPairRequest?>>? RequestEditPairAsync { get; set; }
+
     /// <summary>
     /// A yes/no question. Returns false if no handler is attached — an unanswerable question must
     /// not be treated as consent.
@@ -304,6 +307,7 @@ public sealed class SyncPanelViewModel : ObservableObject
         {
             RequestPreviewConfirmationAsync = RequestPreviewConfirmationAsync,
             RequestConflictResolutionsAsync = RequestConflictResolutionsAsync,
+            RequestEditAsync = RequestEditPairAsync,
             OnError = message => StatusMessage = message,
         };
         Pairs.Add(viewModel);

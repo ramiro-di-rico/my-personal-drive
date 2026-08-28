@@ -990,6 +990,9 @@
                           <Button Classes="rowAction" ToolTip.Tip="Preview changes before syncing" Command="{Binding PreviewCommand}">
                             <Path Classes="icon" Data="{StaticResource IconEye}" />
                           </Button>
+                          <Button Classes="rowAction" ToolTip.Tip="Edit direction / conflict policy" Command="{Binding EditCommand}">
+                            <Path Classes="icon" Data="{StaticResource IconPencil}" />
+                          </Button>
                           <Button Classes="rowAction" ToolTip.Tip="Sync now" Command="{Binding SyncNowCommand}">
                             <Path Classes="icon" Data="{StaticResource IconPlay}" />
                           </Button>

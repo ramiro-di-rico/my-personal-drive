@@ -74,6 +74,22 @@ public sealed class DeltaRemoteScanner : IRemoteScanner
                 continue;
             }
 
+            if (relativePath.Length == 0)
+            {
+                // The delta enumerates every item in the whole drive, including the pair's own
+                // root folder as an item in its own right — something a full-walk RemoteScanner's
+                // BFS can never report, since it starts *at* the root and only ever visits its
+                // children. PathMapper.ToRelativeFromRemote maps that item to "", the same key
+                // ToRemoteAbsolute/ToLocalAbsolute treat as "the sync root itself". Left unfiltered,
+                // that key ends up in the merged dictionary as an ordinary syncable node, and the
+                // reconciler — which never expects an entry for the root — can queue a real
+                // TrashRemote/DeleteLocal action against relativePath "", which resolves to the
+                // pair's entire root folder. Confirmed live: this is exactly how a fresh OneDrive
+                // pair ended up trashing its own root folder on the very first delta cycle
+                // (docs/PLAN-CLOUD-PROVIDERS.md P8's own "pending live verification" note).
+                continue;
+            }
+
             if (change.IsDeleted)
             {
                 merged.Remove(relativePath);

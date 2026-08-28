@@ -922,6 +922,28 @@ loud `DriveException` after `MaxDeltaPages` (5,000) instead of paging forever, s
 recurrence fails visibly instead of hanging the scheduler again. Next time this happens, the
 per-page activity log is what should pin the exact root cause.
 
+**A second, far more serious bug found live, root-caused this time:** a whole-drive delta
+enumerates *every* item in the drive, including the pair's own root folder as an item in its own
+right — something a full-walk `RemoteScanner`'s BFS can never report, since it starts *at* the
+root and only ever visits children. `DeltaRemoteScanner` did not filter that item out:
+`PathMapper.ToRelativeFromRemote` maps it to `""` (the same key `ToRemoteAbsolute`/`ToLocalAbsolute`
+treat as "the sync root itself"), which then landed in the merged dictionary as an ordinary
+syncable node. `SyncReconciler` was never built to see an entry for the root, and queued a real
+`TrashRemote` action against relative path `""` — which resolves to the pair's *entire* remote
+root folder. Confirmed via a real user's `SyncLog`: a fresh OneDrive pair's very first delta cycle
+trashed its own root folder on OneDrive (`TrashRemote` with an empty `RelativePath`), and because
+that pair's local folder was *also* the local side of a separate Proton pair (the user was trying
+to mirror one folder from both providers at once — see the "coexisting providers" discussion this
+finding prompted), the resulting local deletions cascaded into Proton trashing its own copies of
+the same files too. Fixed: `DeltaRemoteScanner.ScanAsync` now skips any change whose resolved
+relative path is empty, for both the upsert and delete branches, before it ever reaches the merged
+dictionary — the pair's own root can never again be treated as a child of itself.
+
+**Recovery note for the affected user:** both `TrashRemote` (Proton and OneDrive) and OneDrive's
+own delta-driven root deletion go to each service's own trash/recycle bin, not a hard delete —
+check Proton Drive's Trash and OneDrive's Recycle Bin (each provider's own web UI) before assuming
+anything is permanently gone.
+
 ---
 
 ## 4. OneDrive (O) — Microsoft Graph design

@@ -115,6 +115,50 @@ public class DeltaRemoteScannerTests : IDisposable
         Assert.Equal(["current.txt"], result.Keys);
     }
 
+    /// <summary>
+    /// Regression, confirmed live and destructive: a whole-drive delta enumerates every item in
+    /// the drive, including the pair's own root folder as an item in its own right — something a
+    /// full-walk RemoteScanner's BFS can never report, since it starts *at* the root and only ever
+    /// visits children. Left unfiltered, that item resolves to relativePath "" (PathMapper's own
+    /// convention for "the sync root itself") and pollutes the merged dictionary with an entry the
+    /// reconciler was never built to expect — which can turn into a real TrashRemote/DeleteLocal
+    /// action against the pair's entire root folder. This is exactly what happened to a real user:
+    /// a fresh OneDrive pair trashed its own root on its first delta cycle.
+    /// </summary>
+    [Fact]
+    public async Task ScanAsync_ThePairsOwnRootAppearingAsADeltaItem_IsNeverAddedToTheMergedDictionary()
+    {
+        var deltaSource = new FakeDeltaSource(new DeltaFetchResult(
+            [
+                new DeltaChange(Item("/my-files/Docs", "Docs", isFolder: true, contentHash: null), IsDeleted: false),
+                new DeltaChange(Item("/my-files/Docs/a.txt", "a.txt"), IsDeleted: false),
+            ],
+            NextToken: "cursor-7", WasFullResync: true));
+        var scanner = new DeltaRemoteScanner(new FakeCloudDriveProvider(deltaSource), CreateStateStore());
+
+        var result = await scanner.ScanAsync("/my-files/Docs", Mapper, new ExclusionMatcher(), baseline: null, pairId: 1);
+
+        Assert.Equal(["a.txt"], result.Keys);
+    }
+
+    /// <summary>Same hazard, via the delete path: a "deleted" event for the pair's own root must never reach Dictionary.Remove("").</summary>
+    [Fact]
+    public async Task ScanAsync_ADeletedChangeForThePairsOwnRoot_IsIgnored()
+    {
+        var baseline = new Dictionary<string, SyncBaselineEntry>
+        {
+            ["a.txt"] = new("a.txt", false, null, Fingerprint("a.txt")),
+        };
+        var deltaSource = new FakeDeltaSource(new DeltaFetchResult(
+            [new DeltaChange(Item("/my-files/Docs", "Docs", isFolder: true, contentHash: null), IsDeleted: true)],
+            NextToken: "cursor-8", WasFullResync: false));
+        var scanner = new DeltaRemoteScanner(new FakeCloudDriveProvider(deltaSource), CreateStateStore());
+
+        var result = await scanner.ScanAsync("/my-files/Docs", Mapper, new ExclusionMatcher(), baseline, pairId: 1);
+
+        Assert.Equal(["a.txt"], result.Keys); // untouched — the bogus root-delete was ignored
+    }
+
     [Fact]
     public async Task ScanAsync_TwoNamesCollidingOnlyByCase_AreBothDroppedAndReported()
     {

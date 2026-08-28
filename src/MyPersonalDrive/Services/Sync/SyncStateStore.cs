@@ -79,6 +79,26 @@ public sealed class SyncStateStore
     public async Task SetAutomaticSyncEnabledAsync(bool isEnabled, CancellationToken ct = default)
         => await SetSettingAsync(ScopedSettingKey(AutomaticSyncEnabledKey), isEnabled ? "1" : "0", ct);
 
+    /// <summary>
+    /// The delta cursor for one sync pair — scoped per-pair, not per-account: a single account-wide
+    /// token would mean whichever pair's sync runs first in a cycle "consumes" the diff and
+    /// advances the cursor, so a second pair sharing it would then see only the tiny diff since the
+    /// *first pair's* refresh and silently miss changes to its own subtree from before that. Reuses
+    /// the same account-scoped <see cref="ScopedSettingKey"/> mechanism as
+    /// <see cref="GetAutomaticSyncEnabledAsync"/> so two accounts never collide on the same
+    /// <c>cache.db</c>, then adds the pair id on top of that (docs/PLAN-CLOUD-PROVIDERS.md P8).
+    /// Null means "no cursor yet — enumerate the entire current tree."
+    /// </summary>
+    public Task<string?> GetDeltaTokenAsync(int pairId, CancellationToken ct = default)
+        => GetSettingAsync(ScopedSettingKey(DeltaTokenKey(pairId)), ct);
+
+    public Task SetDeltaTokenAsync(int pairId, string? token, CancellationToken ct = default)
+        => token is null
+            ? DeleteSettingAsync(ScopedSettingKey(DeltaTokenKey(pairId)), ct)
+            : SetSettingAsync(ScopedSettingKey(DeltaTokenKey(pairId)), token, ct);
+
+    private static string DeltaTokenKey(int pairId) => $"DeltaToken:{pairId}";
+
     private string ScopedSettingKey(string key) => $"{_accountKey}:{key}";
 
     private Task<string?> GetSettingAsync(string key, CancellationToken ct)
@@ -102,6 +122,16 @@ public sealed class SyncStateStore
             """;
         command.Parameters.AddWithValue("@Key", key);
         command.Parameters.AddWithValue("@Value", value);
+        await command.ExecuteNonQueryAsync(ct);
+    });
+
+    private Task DeleteSettingAsync(string key, CancellationToken ct)
+        => SqliteOffThread.RunAsync(async () =>
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM AppSettings WHERE Key = @Key";
+        command.Parameters.AddWithValue("@Key", key);
         await command.ExecuteNonQueryAsync(ct);
     });
 

@@ -60,6 +60,9 @@ public sealed class ProtonDriveProvider : ICloudDriveProvider, IDriveOperations,
 
     public IProviderDiagnostics? Diagnostics => this;
 
+    /// <summary>The CLI has no delta/events command (docs/PLAN-LOCAL-SYNC.md §6.2/Appendix A, docs/PLAN-CLOUD-PROVIDERS.md P8).</summary>
+    public IDeltaSource? DeltaSource => null;
+
     public event EventHandler<ProviderActivity>? Activity;
     public event EventHandler<string>? ListingParseWarning;
 

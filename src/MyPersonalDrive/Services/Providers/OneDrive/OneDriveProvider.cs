@@ -30,10 +30,10 @@ public sealed class OneDriveProvider : ICloudDriveProvider, IDisposable
     public string DisplayName => "OneDrive";
 
     /// <summary>
-    /// Per docs/PLAN-CLOUD-PROVIDERS.md §4.2–§4.5. <c>SupportsDelta</c> is false — P8, not this
-    /// phase, even though Graph does support it. <c>RemoteHash = QuickXor</c>: only quickXorHash
-    /// is trusted (see <see cref="OneDriveOperations.ToDriveItem"/>'s reasoning), unverified
-    /// against a live personal-drive account until the live-verification session runs.
+    /// Per docs/PLAN-CLOUD-PROVIDERS.md §4.2–§4.5. <c>SupportsDelta</c> is true as of P8 — Graph's
+    /// whole-drive delta query, exposed via <see cref="DeltaSource"/>. <c>RemoteHash = QuickXor</c>:
+    /// only quickXorHash is trusted (see <see cref="OneDriveOperations.ToDriveItem"/>'s reasoning),
+    /// unverified against a live personal-drive account until the live-verification session runs.
     /// </summary>
     public ProviderCapabilities Capabilities { get; } = new(
         RemoteHash: RemoteHashAlgorithm.QuickXor,
@@ -41,7 +41,7 @@ public sealed class OneDriveProvider : ICloudDriveProvider, IDisposable
         SupportsServerSideCopy: true,
         CopyIsAsynchronous: true,
         SupportsBatchMove: false,
-        SupportsDelta: false,
+        SupportsDelta: true,
         RequiresRemoteViewInvalidation: false,
         MaxSingleShotUploadBytes: 4L * 1024 * 1024,
         UploadChunkSizeBytes: 10 * 320 * 1024,
@@ -59,6 +59,9 @@ public sealed class OneDriveProvider : ICloudDriveProvider, IDisposable
 
     /// <summary>No external binary to version — there is nothing for this to report.</summary>
     public IProviderDiagnostics? Diagnostics => null;
+
+    /// <summary>Graph's whole-drive delta query — see docs/PLAN-CLOUD-PROVIDERS.md P8.</summary>
+    public IDeltaSource? DeltaSource => _operations;
 
     public event EventHandler<ProviderActivity>? Activity;
 

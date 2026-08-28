@@ -25,6 +25,9 @@ public interface ICloudDriveProvider
     /// <summary>Null when there is no external binary to version or update.</summary>
     IProviderDiagnostics? Diagnostics { get; }
 
+    /// <summary>Null when the backend has no delta/changes query of its own (Proton's CLI). See <see cref="IDeltaSource"/>, docs/PLAN-CLOUD-PROVIDERS.md P8.</summary>
+    IDeltaSource? DeltaSource { get; }
+
     /// <summary>The activity console feed — see <see cref="ProviderActivity"/>.</summary>
     event EventHandler<ProviderActivity>? Activity;
 

@@ -16,6 +16,7 @@ namespace MyPersonalDrive.Services;
 [JsonSerializable(typeof(GraphUser))]
 [JsonSerializable(typeof(GraphItemsPage))]
 [JsonSerializable(typeof(GraphDriveItem))]
+[JsonSerializable(typeof(GraphDeltaPage))]
 [JsonSerializable(typeof(GraphErrorEnvelope))]
 [JsonSerializable(typeof(GraphCopyMonitorStatus))]
 [JsonSerializable(typeof(GraphUploadSession))]

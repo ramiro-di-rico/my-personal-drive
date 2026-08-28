@@ -50,9 +50,22 @@ public sealed class GraphDriveItem
     [JsonPropertyName("shared")]
     public object? Shared { get; set; }
 
-    /// <summary>Present only on the top-level response of an upload/rename/create call, not on a listing entry.</summary>
+    /// <summary>
+    /// Present on a listing/upload/rename/create response only as an id (<see cref="GraphParentReference.Id"/>);
+    /// a delta page also populates <see cref="GraphParentReference.Path"/> (see <see cref="GraphParentReference"/>).
+    /// </summary>
     [JsonPropertyName("parentReference")]
     public GraphParentReference? ParentReference { get; set; }
+
+    /// <summary>Present (as an empty object) only on a delta page entry for an item that's gone — presence, not content, means deleted, same convention as <see cref="Folder"/>.</summary>
+    [JsonPropertyName("deleted")]
+    public GraphDeletedFacet? Deleted { get; set; }
+}
+
+public sealed class GraphDeletedFacet
+{
+    [JsonPropertyName("state")]
+    public string? State { get; set; }
 }
 
 public sealed class GraphFileFacet
@@ -113,6 +126,34 @@ public sealed class GraphParentReference
 {
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Only populated on a delta page entry — `/drive/root:/A/B`, URL-encoded segments. Deliberately
+    /// unused by <see cref="OneDriveOperations.ToDriveItem"/> for the listing path (the caller
+    /// already knows the parent there); delta has no alternative, since its items arrive in
+    /// arbitrary tree order with no ambient parent context — see
+    /// <see cref="OneDriveOperations"/>'s delta path-resolution logic, docs/PLAN-CLOUD-PROVIDERS.md P8.
+    /// </summary>
+    [JsonPropertyName("path")]
+    public string? Path { get; set; }
+}
+
+/// <summary>
+/// One page (possibly not the last) of `GET .../root/delta`. Value plus exactly one of
+/// <see cref="NextLink"/> (more pages remain) or <see cref="DeltaLink"/> (this page was the last —
+/// its value is the cursor to pass into the next call's <c>deltaToken</c>). See
+/// <see cref="IDeltaSource"/>, docs/PLAN-CLOUD-PROVIDERS.md P8.
+/// </summary>
+public sealed class GraphDeltaPage
+{
+    [JsonPropertyName("value")]
+    public List<GraphDriveItem> Value { get; set; } = [];
+
+    [JsonPropertyName("@odata.nextLink")]
+    public string? NextLink { get; set; }
+
+    [JsonPropertyName("@odata.deltaLink")]
+    public string? DeltaLink { get; set; }
 }
 
 /// <summary>The `/me` response — just enough to build the settings card's account label.</summary>

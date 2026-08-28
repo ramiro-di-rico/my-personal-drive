@@ -746,12 +746,25 @@ account switcher and a per-account `CurrentPath`; `SyncPanelViewModel` groups pa
 The genuinely new problems are the ones no schema column solves: a global concurrency budget across
 providers, and one console feed carrying two providers' activity. Not scoped here.
 
-### P8 — *Optional:* delta-based remote scanning
+### P8 — *Optional:* delta-based remote scanning — implemented, pending live verification
 
-`Capabilities.SupportsDelta` + `IDeltaSource { Task<DeltaPage> GetChangesAsync(string? token) }`,
-consumed by `RemoteScanner` when available, falling back to the full walk when the provider
-returns "token expired". Worth its own plan: it changes what a "scan" *is*, and the baseline
-correlation in `SyncReconciler` assumes a complete tree snapshot.
+`Capabilities.SupportsDelta` + `IDeltaSource.GetChangesAsync(string? deltaToken)`, consumed by the
+new `DeltaRemoteScanner : IRemoteScanner` for OneDrive's whole-drive Graph delta query
+(`/me/drive/root/delta`), falling back to the full-walk `RemoteScanner` for a one-way pair (which
+never populates a baseline to merge onto) and for Proton (no delta/events command exists —
+`DeltaSource => null`). `SyncReconciler` needed zero changes: the scanner's job is to still hand it
+a complete remote-tree dictionary, reconstructed by merging the delta's changes onto the persisted
+three-way baseline (`SyncBaselineEntry.RemoteAtSync`). Delta tokens are scoped **per sync pair**,
+not per account (`SyncStateStore.Get/SetDeltaTokenAsync`) — an account-wide token would let
+whichever pair syncs first in a cycle "consume" the diff and silently starve a second pair sharing
+it. See `Services/Providers/IDeltaSource.cs`, `Services/Sync/DeltaRemoteScanner.cs`,
+`Services/Providers/OneDrive/OneDriveOperations.cs`'s `IDeltaSource` implementation (including the
+`parentReference.path` parser delta items need, since they arrive with no ambient parent context
+unlike `ListFolderAsync`'s recursive walk).
+
+**Not yet done:** live verification against a real Graph account (sign in, run one delta cycle,
+make a real change, confirm the next delta call reports exactly that change and a two-way pair
+picks it up) — this phase's Appendix A entry is still pending that session.
 
 ---
 

@@ -125,9 +125,15 @@ public partial class App : Application
         var hasher = provider.Capabilities.RemoteHash == RemoteHashAlgorithm.QuickXor
             ? (IContentHasher)new QuickXorHasher()
             : new Sha1ContentHasher();
+        // Delta-based scanning only for a provider whose backend actually supports it (P8) — Proton
+        // has none, and stays on the full-walk RemoteScanner it always used.
+        var deltaScanner = provider.Capabilities.SupportsDelta && provider.DeltaSource is not null
+            ? new DeltaRemoteScanner(provider, syncStateStore)
+            : null;
         var syncExecutor = new SyncExecutor(
             provider.Operations, syncStateStore, new LocalScanner(), new RemoteScanner(provider),
-            echoSuppressor: echoSuppressor, hasher: hasher, remoteHashAlgorithm: provider.Capabilities.RemoteHash);
+            echoSuppressor: echoSuppressor, hasher: hasher, remoteHashAlgorithm: provider.Capabilities.RemoteHash,
+            deltaScanner: deltaScanner);
         var syncScheduler = new SyncScheduler(
             syncStateStore, syncExecutor, echoSuppressor,
             // The bool that actually matters is this provider's own — mirrors

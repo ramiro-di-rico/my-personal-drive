@@ -32,6 +32,7 @@ public sealed class SyncExecutor
     private readonly SyncStateStore _stateStore;
     private readonly ILocalScanner _localScanner;
     private readonly IRemoteScanner _remoteScanner;
+    private readonly IRemoteScanner? _deltaScanner;
     private readonly TimeProvider _timeProvider;
     private readonly SyncEchoSuppressor _echoSuppressor;
 
@@ -44,6 +45,14 @@ public sealed class SyncExecutor
     /// Tags fingerprints built from remote data — see the mismatch guard in
     /// <see cref="SyncReconciler"/>. Defaults to <see cref="RemoteHashAlgorithm.Sha1"/>, Proton's algorithm.
     /// </param>
+    /// <param name="deltaScanner">
+    /// A delta-based scanner (<see cref="DeltaRemoteScanner"/>) for providers whose
+    /// <c>Capabilities.SupportsDelta</c> is true, used only for <see cref="SyncDirection.TwoWay"/>
+    /// pairs — a one-way pair never populates a baseline (<see cref="LoadBaselineAsync"/> returns an
+    /// empty dictionary for it), so a delta scanner has nothing to merge onto and would be unsound.
+    /// Null falls back to <paramref name="remoteScanner"/> for every pair, same as before P8
+    /// (docs/PLAN-CLOUD-PROVIDERS.md P8).
+    /// </param>
     public SyncExecutor(
         IDriveOperations operations,
         SyncStateStore stateStore,
@@ -52,7 +61,8 @@ public sealed class SyncExecutor
         TimeProvider? timeProvider = null,
         SyncEchoSuppressor? echoSuppressor = null,
         IContentHasher? hasher = null,
-        RemoteHashAlgorithm remoteHashAlgorithm = RemoteHashAlgorithm.Sha1)
+        RemoteHashAlgorithm remoteHashAlgorithm = RemoteHashAlgorithm.Sha1,
+        IRemoteScanner? deltaScanner = null)
     {
         _operations = operations;
         _hasher = hasher ?? new Sha1ContentHasher();
@@ -60,6 +70,7 @@ public sealed class SyncExecutor
         _stateStore = stateStore;
         _localScanner = localScanner;
         _remoteScanner = remoteScanner;
+        _deltaScanner = deltaScanner;
         _timeProvider = timeProvider ?? TimeProvider.System;
 
         // Shared across runs by design: the whole point is to remember a deletion from the run
@@ -79,9 +90,10 @@ public sealed class SyncExecutor
     /// </summary>
     public async Task<SyncPlan> PreviewAsync(SyncPair pair, CancellationToken cancellationToken = default)
     {
-        var (local, remote, _) = await ScanBothSidesAsync(pair, cancellationToken);
+        var baseline = await LoadBaselineAsync(pair, cancellationToken);
+        var (local, remote, _) = await ScanBothSidesAsync(pair, baseline, cancellationToken);
         var plan = SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote,
-            await LoadBaselineAsync(pair, cancellationToken), _timeProvider.GetUtcNow());
+            baseline, _timeProvider.GetUtcNow());
         await _stateStore.ClearStaleFailedActionsAsync(pair.Id, plan.Actions, cancellationToken);
         return plan;
     }
@@ -110,10 +122,11 @@ public sealed class SyncExecutor
         // — precisely the pair generating the most log noise.
         await PruneHousekeepingAsync(cancellationToken);
 
-        var (local, remote, mapper) = await ScanBothSidesAsync(pair, cancellationToken);
+        var baseline = await LoadBaselineAsync(pair, cancellationToken);
+        var (local, remote, mapper) = await ScanBothSidesAsync(pair, baseline, cancellationToken);
         var now = _timeProvider.GetUtcNow();
         var plan = SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote,
-            await LoadBaselineAsync(pair, cancellationToken), now);
+            baseline, now);
 
         await _stateStore.EnqueueActionsAsync(pair.Id, plan.Actions, now, cancellationToken);
 
@@ -354,7 +367,8 @@ public sealed class SyncExecutor
             _ => $"Skipped '{skip.Name}': it can't be represented locally."
         };
 
-    private async Task<(IReadOnlyDictionary<string, NodeFingerprint> Local, IReadOnlyDictionary<string, NodeFingerprint> Remote, PathMapper Mapper)> ScanBothSidesAsync(SyncPair pair, CancellationToken cancellationToken)
+    private async Task<(IReadOnlyDictionary<string, NodeFingerprint> Local, IReadOnlyDictionary<string, NodeFingerprint> Remote, PathMapper Mapper)> ScanBothSidesAsync(
+        SyncPair pair, IReadOnlyDictionary<string, SyncBaselineEntry> baseline, CancellationToken cancellationToken)
     {
         var mapper = new PathMapper(pair.RemotePath, pair.LocalPath);
         var exclusions = new ExclusionMatcher(pair.ExcludeGlobs);
@@ -362,19 +376,24 @@ public sealed class SyncExecutor
         Directory.CreateDirectory(pair.LocalPath);
         var local = await _localScanner.ScanAsync(pair.LocalPath, exclusions, cancellationToken);
 
+        // A one-way pair never populates a baseline (LoadBaselineAsync returns an empty dictionary
+        // for it), so a delta scanner has no merge base and would be unsound — it always falls back
+        // to the full-walk scanner regardless of what the provider supports.
+        var scanner = pair.Direction == SyncDirection.TwoWay ? _deltaScanner ?? _remoteScanner : _remoteScanner;
+
         // Subscribed per scan: a node the scanner had to leave out is only discoverable here, and a
         // file visible in Proton Drive but never in the synced folder needs an explanation.
         var skipped = new List<NodeSkip>();
         void OnSkipped(object? _, NodeSkip skip) => skipped.Add(skip);
-        _remoteScanner.NodeSkipped += OnSkipped;
+        scanner.NodeSkipped += OnSkipped;
         IReadOnlyDictionary<string, NodeFingerprint> remote;
         try
         {
-            remote = await _remoteScanner.ScanAsync(pair.RemotePath, mapper, exclusions, cancellationToken);
+            remote = await scanner.ScanAsync(pair.RemotePath, mapper, exclusions, baseline, pair.Id, cancellationToken);
         }
         finally
         {
-            _remoteScanner.NodeSkipped -= OnSkipped;
+            scanner.NodeSkipped -= OnSkipped;
         }
 
         foreach (var skip in skipped.DistinctBy(s => s.Name, StringComparer.Ordinal))

@@ -10,7 +10,7 @@ namespace MyPersonalDrive.Services.Providers.OneDrive;
 /// <c>Providers.Proton.ProtonDriveService</c> but a Graph request instead of a CLI process — see
 /// docs/PLAN-CLOUD-PROVIDERS.md §4.3 for the request-by-request mapping this follows.
 /// </summary>
-public sealed class OneDriveOperations : IDriveOperations
+public sealed class OneDriveOperations : IDriveOperations, IDeltaSource
 {
     private const string BaseUrl = "https://graph.microsoft.com/v1.0/me/drive";
 
@@ -296,6 +296,100 @@ public sealed class OneDriveOperations : IDriveOperations
         return item.Id;
     }
 
+    /// <summary>Same field list as <see cref="ListFolderAsync"/> plus `deleted`, which only a delta page ever populates.</summary>
+    private const string DeltaSelectFields = "id,name,size,file,folder,fileSystemInfo,parentReference,shared,createdBy,deleted";
+
+    /// <summary>
+    /// See <see cref="IDeltaSource"/>. A null <paramref name="deltaToken"/> means "enumerate the
+    /// entire current tree"; a non-null one is itself a full URL (Graph's
+    /// <c>@odata.nextLink</c>/<c>@odata.deltaLink</c> convention) and is used as-is.
+    /// </summary>
+    async Task<DeltaFetchResult> IDeltaSource.GetChangesAsync(string? deltaToken, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await FetchDeltaAsync(deltaToken, wasFullResync: deltaToken is null, cancellationToken);
+        }
+        catch (DriveException ex) when (ex.ExitCode == (int)HttpStatusCode.Gone && deltaToken is not null)
+        {
+            // The stored cursor expired. Graph's documented behavior for a fresh delta call (token:
+            // null) is to enumerate the entire current tree as adds, so this needs no separate
+            // full-walk fallback path — just a retry with no token.
+            return await FetchDeltaAsync(null, wasFullResync: true, cancellationToken);
+        }
+    }
+
+    private async Task<DeltaFetchResult> FetchDeltaAsync(string? deltaToken, bool wasFullResync, CancellationToken cancellationToken)
+    {
+        var url = deltaToken ?? $"{BaseUrl}/root/delta?$select={DeltaSelectFields}";
+        var changes = new List<DeltaChange>();
+        string? nextToken = null;
+
+        // Must be followed to exhaustion, same reasoning as ListFolderAsync's own paging loop: a
+        // page carries either @odata.nextLink (more to fetch) or @odata.deltaLink (this was the
+        // last page; its value is the cursor for the next call).
+        while (true)
+        {
+            using var response = await _http.SendAsync("GET /root/delta", () => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken);
+            var page = await response.Content.ReadFromJsonAsync(AppJsonContext.Default.GraphDeltaPage, cancellationToken)
+                ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, "OneDrive returned an empty delta page.", DriveErrorKind.Unknown);
+
+            foreach (var item in page.Value)
+            {
+                changes.Add(ToDeltaChange(item));
+            }
+
+            if (page.NextLink is not null)
+            {
+                url = page.NextLink;
+                continue;
+            }
+
+            nextToken = page.DeltaLink;
+            break;
+        }
+
+        return new DeltaFetchResult(changes, nextToken, wasFullResync);
+    }
+
+    private DeltaChange ToDeltaChange(GraphDriveItem item)
+    {
+        var path = ResolvePathFromParentReference(item);
+
+        if (item.Deleted is not null)
+        {
+            // A deleted item's DriveItem only needs enough for the caller to remove it by path —
+            // size/hash/etc. are irrelevant since the item is gone.
+            return new DeltaChange(new DriveItem(Path: path, Name: item.Name, IsFolder: item.Folder is not null, NodeId: item.Id), IsDeleted: true);
+        }
+
+        return new DeltaChange(BuildDriveItem(item, path), IsDeleted: false);
+    }
+
+    /// <summary>
+    /// Delta items arrive in arbitrary tree order with no ambient parent path (unlike
+    /// <see cref="ListFolderAsync"/>'s recursive walk, where the caller already knows it) — so the
+    /// path has to be built from Graph's own <c>parentReference.path</c>:
+    /// <c>/drive/root:/A/B</c>, URL-encoded segments. Strip the <c>root:</c> prefix, URL-decode
+    /// each segment, then append the item's own name via the same path syntax the rest of this
+    /// provider uses (docs/PLAN-CLOUD-PROVIDERS.md P8).
+    /// </summary>
+    private string ResolvePathFromParentReference(GraphDriveItem item)
+    {
+        const string marker = "root:";
+        var rawParentPath = item.ParentReference?.Path;
+        var afterMarker = rawParentPath is not null && rawParentPath.IndexOf(marker, StringComparison.Ordinal) is var idx && idx >= 0
+            ? rawParentPath[(idx + marker.Length)..]
+            : string.Empty;
+
+        var decodedSegments = afterMarker
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(Uri.UnescapeDataString);
+        var parentPath = string.Join('/', decodedSegments) is { Length: > 0 } joined ? $"/{joined}" : string.Empty;
+
+        return _paths.Combine(parentPath, item.Name);
+    }
+
     private static string ConflictBehaviorFor(UploadConflictStrategy strategy) => strategy switch
     {
         UploadConflictStrategy.Replace => "replace",
@@ -327,6 +421,9 @@ public sealed class OneDriveOperations : IDriveOperations
     /// `/drive/root:`, not this app's path convention).
     /// </summary>
     private DriveItem ToDriveItem(GraphDriveItem item, string parentPath)
+        => BuildDriveItem(item, _paths.Combine(parentPath, item.Name));
+
+    private static DriveItem BuildDriveItem(GraphDriveItem item, string path)
     {
         var isFolder = item.Folder is not null;
         // Only quickXorHash, deliberately never falling back to sha1Hash/sha256Hash: this
@@ -338,7 +435,7 @@ public sealed class OneDriveOperations : IDriveOperations
         // already handles by leaving RemoteHashAlgorithm null too — a safe degrade, not a mislabel.
         var contentHash = item.File?.Hashes?.QuickXorHash;
         return new DriveItem(
-            Path: _paths.Combine(parentPath, item.Name),
+            Path: path,
             Name: item.Name,
             IsFolder: isFolder,
             Size: isFolder ? null : item.Size,

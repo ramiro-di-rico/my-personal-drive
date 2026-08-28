@@ -106,6 +106,66 @@ public class SyncStateStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task DeltaToken_DefaultsToNull()
+    {
+        var sut = CreateSut();
+
+        Assert.Null(await sut.GetDeltaTokenAsync(pairId: 1));
+    }
+
+    [Fact]
+    public async Task DeltaToken_SetThenGet_RoundTrips()
+    {
+        var sut = CreateSut();
+
+        await sut.SetDeltaTokenAsync(1, "https://graph.microsoft.com/v1.0/cursor-abc");
+
+        Assert.Equal("https://graph.microsoft.com/v1.0/cursor-abc", await sut.GetDeltaTokenAsync(1));
+    }
+
+    [Fact]
+    public async Task DeltaToken_SetToNull_ClearsAPreviouslyStoredToken()
+    {
+        var sut = CreateSut();
+        await sut.SetDeltaTokenAsync(1, "https://graph.microsoft.com/v1.0/cursor-abc");
+
+        await sut.SetDeltaTokenAsync(1, null);
+
+        Assert.Null(await sut.GetDeltaTokenAsync(1));
+    }
+
+    /// <summary>
+    /// A token is scoped per *pair*, not per account: two pairs on the same account sharing one
+    /// token would mean whichever pair's sync runs first in a cycle "consumes" the diff and
+    /// advances the cursor, so a second pair sharing it would then silently miss changes to its own
+    /// subtree from before that (docs/PLAN-CLOUD-PROVIDERS.md P8).
+    /// </summary>
+    [Fact]
+    public async Task DeltaToken_IsScopedPerPair_NotSharedAcrossPairsOnTheSameAccount()
+    {
+        var sut = CreateSut();
+
+        await sut.SetDeltaTokenAsync(1, "cursor-for-pair-1");
+        await sut.SetDeltaTokenAsync(2, "cursor-for-pair-2");
+
+        Assert.Equal("cursor-for-pair-1", await sut.GetDeltaTokenAsync(1));
+        Assert.Equal("cursor-for-pair-2", await sut.GetDeltaTokenAsync(2));
+    }
+
+    [Fact]
+    public async Task DeltaToken_IsScopedPerAccountKey_NotSharedAcrossAccountsInTheSameDatabase()
+    {
+        var accountA = new SyncStateStore(_dbPath, "account-a");
+        var accountB = new SyncStateStore(_dbPath, "account-b");
+
+        await accountA.SetDeltaTokenAsync(1, "cursor-for-account-a");
+        await accountB.SetDeltaTokenAsync(1, "cursor-for-account-b");
+
+        Assert.Equal("cursor-for-account-a", await accountA.GetDeltaTokenAsync(1));
+        Assert.Equal("cursor-for-account-b", await accountB.GetDeltaTokenAsync(1));
+    }
+
+    [Fact]
     public async Task GetPair_ById_ReturnsMatchingPair()
     {
         var sut = CreateSut();

@@ -25,8 +25,22 @@ public interface IRemoteScanner
     /// </summary>
     event EventHandler<NodeSkip>? NodeSkipped;
 
+    /// <param name="baseline">
+    /// Last cycle's known-good three-way baseline, keyed by relative path — the merge base a
+    /// delta-based scanner needs to reconstruct a complete remote-tree dictionary from a partial
+    /// "what changed" page (see <see cref="DeltaRemoteScanner"/>). A full-walk scanner like
+    /// <see cref="RemoteScanner"/> ignores it: it always produces a complete dictionary on its own.
+    /// Null for a one-way pair, which never populates a baseline in the first place
+    /// (docs/PLAN-CLOUD-PROVIDERS.md P8).
+    /// </param>
+    /// <param name="pairId">
+    /// The sync pair's id — needed only by a scanner with its own per-pair persisted state (a
+    /// delta cursor); ignored by <see cref="RemoteScanner"/>.
+    /// </param>
     Task<IReadOnlyDictionary<string, NodeFingerprint>> ScanAsync(
-        string remoteRoot, PathMapper pathMapper, ExclusionMatcher exclusions, CancellationToken cancellationToken = default);
+        string remoteRoot, PathMapper pathMapper, ExclusionMatcher exclusions,
+        IReadOnlyDictionary<string, SyncBaselineEntry>? baseline = null, int pairId = 0,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -52,7 +66,9 @@ public sealed class RemoteScanner : IRemoteScanner
     }
 
     public async Task<IReadOnlyDictionary<string, NodeFingerprint>> ScanAsync(
-        string remoteRoot, PathMapper pathMapper, ExclusionMatcher exclusions, CancellationToken cancellationToken = default)
+        string remoteRoot, PathMapper pathMapper, ExclusionMatcher exclusions,
+        IReadOnlyDictionary<string, SyncBaselineEntry>? baseline = null, int pairId = 0,
+        CancellationToken cancellationToken = default)
     {
         // Once per scan, never per folder. `filesystem list` answers from the CLI's cache and never
         // revalidates a folder it has already listed (Appendix A #16), so a scan starting from a

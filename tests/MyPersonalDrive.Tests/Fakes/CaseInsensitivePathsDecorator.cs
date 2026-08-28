@@ -23,6 +23,7 @@ public sealed class CaseInsensitivePathsDecorator : ICloudDriveProvider
     public IProviderPathSyntax Paths { get; } = new FakePathSyntax(StringComparison.OrdinalIgnoreCase);
     public IRemoteViewInvalidator? RemoteView => _inner.RemoteView;
     public IProviderDiagnostics? Diagnostics => _inner.Diagnostics;
+    public IDeltaSource? DeltaSource => _inner.DeltaSource;
     public event EventHandler<ProviderActivity>? Activity { add => _inner.Activity += value; remove => _inner.Activity -= value; }
     public event EventHandler<string>? ListingParseWarning { add => _inner.ListingParseWarning += value; remove => _inner.ListingParseWarning -= value; }
 

@@ -411,6 +411,10 @@ public sealed class SyncExecutor
         {
             local = await HashLocalMoveCandidatesAsync(pair, mapper, local, cancellationToken);
         }
+        else if (pair.Direction == SyncDirection.LocalToRemote)
+        {
+            local = await HashAmbiguousUploadCandidatesAsync(mapper, local, remote, cancellationToken);
+        }
 
         return (local, remote, mapper);
     }
@@ -478,6 +482,66 @@ public sealed class SyncExecutor
 
         return hashed;
     }
+
+    /// <summary>
+    /// Fills in <see cref="NodeFingerprint.ContentHash"/> for local files whose size matches the
+    /// remote copy at the same path but whose modified time doesn't (within
+    /// <see cref="SyncReconciler.DefaultMtimeTolerance"/>) — the one case <c>SyncReconciler</c>'s
+    /// own equivalence check can't resolve on its own for a one-way <c>LocalToRemote</c> pair,
+    /// since <see cref="LocalScanner"/> never computes a hash and the remote's own timestamp isn't
+    /// guaranteed to reflect the local file's actual mtime.
+    ///
+    /// This matters most for exactly the case that motivated it: a file that already existed
+    /// independently on both sides before this pair was created (its local and remote copies were
+    /// never related by an upload this app did), so their timestamps have nothing to do with each
+    /// other and will essentially never agree — without this, such a file looks "changed" forever
+    /// and gets re-uploaded on every single cycle, never converging. The same is true for any
+    /// provider whose upload path doesn't preserve the source's claimed modification time.
+    ///
+    /// Narrowed to size-matching, mtime-ambiguous pairs for the same reason
+    /// <see cref="HashLocalMoveCandidatesAsync"/> narrows its own candidate set: hashing is the one
+    /// genuinely expensive thing here, and a file whose mtime already agrees needs no help.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, NodeFingerprint>> HashAmbiguousUploadCandidatesAsync(
+        PathMapper mapper, IReadOnlyDictionary<string, NodeFingerprint> local, IReadOnlyDictionary<string, NodeFingerprint> remote, CancellationToken cancellationToken)
+    {
+        var candidates = local
+            .Where(entry => !entry.Value.IsFolder
+                            && remote.TryGetValue(entry.Key, out var r)
+                            && !r.IsFolder
+                            && r.ContentHash is not null
+                            && r.HashAlgorithm == _hasher.Algorithm
+                            && entry.Value.Size == r.Size
+                            && !MtimesAgree(entry.Value.ModifiedAt, r.ModifiedAt))
+            .Select(entry => entry.Key)
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return local;
+        }
+
+        var hashed = new Dictionary<string, NodeFingerprint>(local, StringComparer.Ordinal);
+        foreach (var relativePath in candidates)
+        {
+            try
+            {
+                var hash = await _hasher.ComputeAsync(mapper.ToLocalAbsolute(relativePath), cancellationToken);
+                hashed[relativePath] = hashed[relativePath] with { ContentHash = hash, HashAlgorithm = _hasher.Algorithm };
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Unreadable right now: leave it hashless, which simply means the mtime mismatch
+                // stands and the ordinary "upload it" path handles it — the same safe default as
+                // before this method existed.
+            }
+        }
+
+        return hashed;
+    }
+
+    private static bool MtimesAgree(DateTimeOffset? a, DateTimeOffset? b)
+        => a is not null && b is not null && (a.Value - b.Value).Duration() <= SyncReconciler.DefaultMtimeTolerance;
 
     private async Task ExecuteOneAsync(RunContext context, QueuedSyncAction action, CancellationToken cancellationToken)
     {

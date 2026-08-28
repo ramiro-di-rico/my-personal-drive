@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
@@ -169,6 +171,61 @@ public class SyncExecutorTests : IDisposable
         Assert.Equal(1, plan.Stats.FilesToUpload);
         var upload = Assert.Single(executor.Calls, c => c.Arguments.Contains("upload"));
         Assert.Equal(["filesystem", "upload", "-f", "replace", "-d", "replace", Path.Combine(_localRoot, "notes.txt"), RemoteRoot], upload.Arguments);
+    }
+
+    /// <summary>
+    /// Regression, reported live: two providers both switched to LocalToRemote for a folder whose
+    /// files already existed independently on every side re-uploaded everything on every single
+    /// cycle instead of just the one file that actually needed it. Root cause: LocalScanner never
+    /// computes a content hash, so a file whose local/remote mtimes disagree (unrelated timestamps,
+    /// since the two copies were never actually related by an upload this app did) looked "changed"
+    /// forever by SyncReconciler's own size+mtime fallback — HashAmbiguousUploadCandidatesAsync now
+    /// fills in the local hash for exactly that ambiguous case, so a real content match is
+    /// recognized and the file is correctly left alone.
+    /// </summary>
+    [Fact]
+    public async Task PreviewAsync_LocalToRemote_APreExistingFileWithMismatchedMtimeButMatchingContent_IsNotReUploaded()
+    {
+        WriteSettledLocalFile("a.txt", "hello");
+        var realSha1 = Convert.ToHexStringLower(SHA1.HashData(Encoding.UTF8.GetBytes("hello")));
+
+        var executor = new FakeCliExecutor();
+        // The remote copy has the exact same content (so the same real sha1) but a completely
+        // unrelated modification time — exactly what "already existed independently on both
+        // sides" looks like, since no upload by this app ever related the two timestamps.
+        executor.EnqueueOutput($"[{FileEntry("a.txt", "hello", modifiedAt: "2020-01-01T00:00:00.000Z", hash: realSha1)}]");
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.LocalToRemote);
+        var service = new ProtonDriveService(executor);
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
+
+        var plan = await sut.PreviewAsync(pair);
+
+        Assert.Equal(0, plan.Stats.FilesToUpload);
+        Assert.Empty(plan.Actions);
+    }
+
+    /// <summary>A genuinely different file must still upload — the hash check isn't a blanket "never re-upload".</summary>
+    [Fact]
+    public async Task PreviewAsync_LocalToRemote_AFileThatActuallyChanged_StillUploads()
+    {
+        WriteSettledLocalFile("a.txt", "hello world!"); // same length (12) as "hello-remote", different content
+        var unrelatedSha1 = Convert.ToHexStringLower(SHA1.HashData(Encoding.UTF8.GetBytes("hello-remote")));
+
+        var executor = new FakeCliExecutor();
+        executor.EnqueueOutput($"[{FileEntry("a.txt", "hello-remote", modifiedAt: "2020-01-01T00:00:00.000Z", hash: unrelatedSha1)}]");
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.LocalToRemote);
+        var service = new ProtonDriveService(executor);
+        var provider = new ProtonDriveProvider(service);
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
+
+        var plan = await sut.PreviewAsync(pair);
+
+        Assert.Equal(1, plan.Stats.FilesToUpload);
     }
 
     [Fact]

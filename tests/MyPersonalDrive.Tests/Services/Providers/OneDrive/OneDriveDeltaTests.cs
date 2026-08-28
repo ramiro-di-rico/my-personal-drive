@@ -151,4 +151,27 @@ public class OneDriveDeltaTests : IDisposable
         Assert.True(result.WasFullResync);
         Assert.Equal("a.txt", Assert.Single(result.Changes).Item.Name);
     }
+
+    /// <summary>
+    /// Safety net for a pagination bug that would otherwise page forever without ever reaching a
+    /// terminal @odata.deltaLink — found live: a real account hung the sync scheduler for minutes
+    /// on a drive with only a few hundred items (docs/PLAN-CLOUD-PROVIDERS.md P8's own "pending
+    /// live verification" note). Must fail loudly well before that, not hang.
+    /// </summary>
+    [Fact]
+    public async Task GetChangesAsync_APageThatNeverReachesADeltaLink_AbortsInsteadOfLoopingForever()
+    {
+        var callCount = 0;
+        _handler.When(HttpMethod.Get, "/root/delta", _ =>
+        {
+            callCount++;
+            return FakeHttpMessageHandler.Json(HttpStatusCode.OK, $$"""
+                {"value":[],"@odata.nextLink":"https://graph.microsoft.com/v1.0/root/delta?page={{callCount}}"}
+                """);
+        });
+
+        var ex = await Assert.ThrowsAsync<DriveException>(() => _sut.GetChangesAsync(null));
+
+        Assert.Contains("did not terminate", ex.Message, StringComparison.Ordinal);
+    }
 }

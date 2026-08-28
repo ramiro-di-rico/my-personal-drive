@@ -319,18 +319,37 @@ public sealed class OneDriveOperations : IDriveOperations, IDeltaSource
         }
     }
 
+    /// <summary>
+    /// Hard ceiling on delta pages per call — never verified live before this shipped, so this is a
+    /// safety net against a pagination bug (a page whose <c>@odata.nextLink</c> never resolves to a
+    /// terminal <c>@odata.deltaLink</c>) hanging the sync scheduler forever instead of failing
+    /// loudly. 5,000 pages at Graph's default page size is roughly a million items — far more than
+    /// any legitimate single delta call should ever see.
+    /// </summary>
+    private const int MaxDeltaPages = 5000;
+
     private async Task<DeltaFetchResult> FetchDeltaAsync(string? deltaToken, bool wasFullResync, CancellationToken cancellationToken)
     {
-        var url = deltaToken ?? $"{BaseUrl}/root/delta?$select={DeltaSelectFields}";
+        // $top explicit rather than trusting Graph's server-side default, same as ListFolderAsync
+        // — a resumed call via a stored nextLink/deltaLink already encodes its own page size
+        // verbatim, so this only matters for the very first page of a fresh/full-resync call.
+        var url = deltaToken ?? $"{BaseUrl}/root/delta?$select={DeltaSelectFields}&$top=200";
         var changes = new List<DeltaChange>();
         string? nextToken = null;
 
         // Must be followed to exhaustion, same reasoning as ListFolderAsync's own paging loop: a
         // page carries either @odata.nextLink (more to fetch) or @odata.deltaLink (this was the
         // last page; its value is the cursor for the next call).
-        while (true)
+        for (var pageNumber = 1; ; pageNumber++)
         {
-            using var response = await _http.SendAsync("GET /root/delta", () => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken);
+            if (pageNumber > MaxDeltaPages)
+            {
+                throw new DriveException(url, 0, string.Empty, string.Empty,
+                    $"OneDrive's delta query did not terminate after {MaxDeltaPages} pages — aborting instead of looping forever.",
+                    DriveErrorKind.Unknown);
+            }
+
+            using var response = await _http.SendAsync($"GET /root/delta (page {pageNumber})", () => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken);
             var page = await response.Content.ReadFromJsonAsync(AppJsonContext.Default.GraphDeltaPage, cancellationToken)
                 ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, "OneDrive returned an empty delta page.", DriveErrorKind.Unknown);
 

@@ -901,9 +901,26 @@ it. See `Services/Providers/IDeltaSource.cs`, `Services/Sync/DeltaRemoteScanner.
 `parentReference.path` parser delta items need, since they arrive with no ambient parent context
 unlike `ListFolderAsync`'s recursive walk).
 
-**Not yet done:** live verification against a real Graph account (sign in, run one delta cycle,
-make a real change, confirm the next delta call reports exactly that change and a two-way pair
-picks it up) — this phase's Appendix A entry is still pending that session.
+**Not yet done:** full live verification against a real Graph account (sign in, run one delta
+cycle, make a real change, confirm the next delta call reports exactly that change and a two-way
+pair picks it up) — this phase's Appendix A entry is still pending that session.
+
+**A real bug found live, before that full session ran:** adding a new two-way OneDrive pair (a
+brand-new pair has no stored delta token, so its first cycle is a full-resync whole-drive delta
+call) hung the sync scheduler for minutes on a personal account with only a few hundred items
+total — reported by the user as the app appearing "stuck" doing `GET /root/delta` over and over,
+and confirmed in `crash.log` ("OneDrive sync scheduler did not stop within 10s of shutdown") and
+in `cache.db` (the new pair's `LastSyncAt`/`LastSyncStatus` never updated — the cycle never
+completed or failed, it just kept going). Root cause not fully isolated (candidates: Graph's
+default delta page size being much smaller than assumed, so "a few hundred items" still meant many
+pages; rate-limit backoff compounding across many pages) since the app wasn't running with the
+fix's own diagnostics yet when this was investigated. Mitigated defensively either way:
+`FetchDeltaAsync` now labels each page's `Activity` line with its real page number instead of a
+generic repeated string (`GET /root/delta (page N)`), sets an explicit `$top=200` on the first
+page instead of trusting Graph's server-side default, and — the actual safety net — aborts with a
+loud `DriveException` after `MaxDeltaPages` (5,000) instead of paging forever, so a future
+recurrence fails visibly instead of hanging the scheduler again. Next time this happens, the
+per-page activity log is what should pin the exact root cause.
 
 ---
 

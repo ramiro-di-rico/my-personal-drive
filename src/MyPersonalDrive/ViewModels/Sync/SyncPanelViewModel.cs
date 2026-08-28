@@ -27,8 +27,29 @@ public sealed class SyncPanelViewModel : ObservableObject
     private bool _isBusy;
     private bool _hasRecovered;
     private string? _providerFilter;
+    private AccountSlot? _activeSlotOverride;
 
     private AccountSlot Primary => _slots[0];
+
+    /// <summary>
+    /// Which account a newly-added pair targets — <see cref="Primary"/> (the account this panel
+    /// was constructed with) until <see cref="SetActiveAccount"/> says otherwise. P7 Phase B
+    /// (docs/PLAN-CLOUD-PROVIDERS.md) made which account the browser shows switchable at runtime;
+    /// before that, "Primary" and "whichever account the user is currently looking at" were always
+    /// the same account, so nothing here needed to track it separately. Falls back to
+    /// <see cref="Primary"/> if the requested account isn't (or is no longer) registered, rather
+    /// than throwing — a stale override must never crash "Add pair".
+    /// </summary>
+    private AccountSlot ActiveSlot => _activeSlotOverride ?? Primary;
+
+    /// <summary>
+    /// Called by <c>MainWindowViewModel.SwitchBrowserAccountAsync</c> whenever the browsed account
+    /// changes, so a pair added afterward is created against the account the user is actually
+    /// looking at — not always whichever account was "primary" at startup. A no-op for an unknown
+    /// label (falls back to <see cref="Primary"/> via <see cref="ActiveSlot"/>).
+    /// </summary>
+    public void SetActiveAccount(string displayName)
+        => _activeSlotOverride = _slots.FirstOrDefault(slot => slot.DisplayName == displayName);
 
     /// <param name="providerDisplayName">
     /// Named in a couple of user-facing strings ("Add a folder to start syncing it from…").
@@ -369,12 +390,13 @@ public sealed class SyncPanelViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            // A new pair always targets the primary account — GetRemoteFolderChildren (the "Add
-            // pair" dialog's remote picker) is wired to the primary provider, so that's whichever
-            // account's remote folder the user was actually looking at when they picked it.
-            // Validated against what's actually in the database, not the rows currently loaded in
-            // the panel — the scheduler and other windows can have added pairs since.
-            var validationError = SyncPairValidator.Validate(request.RemotePath, request.LocalPath, await Primary.StateStore.GetPairsAsync())
+            // Targets ActiveSlot — the account the user was actually browsing when they opened
+            // this dialog (MainWindowViewModel.SwitchBrowserAccountAsync keeps it in sync via
+            // SetActiveAccount), not always whichever account was "primary" at startup. Validated
+            // against what's actually in the database, not the rows currently loaded in the panel
+            // — the scheduler and other windows can have added pairs since.
+            var targetSlot = ActiveSlot;
+            var validationError = SyncPairValidator.Validate(request.RemotePath, request.LocalPath, await targetSlot.StateStore.GetPairsAsync())
                                   ?? LocalFolderInspector.CheckWritable(request.LocalPath);
             if (validationError is not null)
             {
@@ -382,14 +404,14 @@ public sealed class SyncPanelViewModel : ObservableObject
                 return;
             }
 
-            if (!await ConfirmBusyFolderAsync(request))
+            if (!await ConfirmBusyFolderAsync(request, targetSlot))
             {
                 StatusMessage = "Cancelled — no pair was created.";
                 return;
             }
 
-            var pair = await Primary.StateStore.CreatePairAsync(request.RemotePath, request.LocalPath, request.Direction, request.ConflictPolicy);
-            AddPairViewModel(pair, Primary);
+            var pair = await targetSlot.StateStore.CreatePairAsync(request.RemotePath, request.LocalPath, request.Direction, request.ConflictPolicy);
+            AddPairViewModel(pair, targetSlot);
             StatusMessage = $"Added: {pair.RemotePath} {DirectionArrow(pair.Direction)} {pair.LocalPath}";
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 19) // SQLITE_CONSTRAINT (the pair's UNIQUE(RemotePath, LocalPath))
@@ -409,7 +431,7 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// For the other two directions "Run now" can be pressed without ever opening the preview, so
     /// this is the only place the user would find out.
     /// </summary>
-    private async Task<bool> ConfirmBusyFolderAsync(NewSyncPairRequest request)
+    private async Task<bool> ConfirmBusyFolderAsync(NewSyncPairRequest request, AccountSlot targetSlot)
     {
         if (request.Direction == SyncDirection.RemoteToLocal)
         {
@@ -430,7 +452,7 @@ public sealed class SyncPanelViewModel : ObservableObject
 
         return await confirm(
             $"'{request.LocalPath}' already contains more than {LocalFolderInspector.BusyFolderThreshold} items. " +
-            $"Syncing it in this direction will upload all of them to {Primary.DisplayName}. Continue?");
+            $"Syncing it in this direction will upload all of them to {targetSlot.DisplayName}. Continue?");
     }
 
     private static string DirectionArrow(SyncDirection direction) => direction switch

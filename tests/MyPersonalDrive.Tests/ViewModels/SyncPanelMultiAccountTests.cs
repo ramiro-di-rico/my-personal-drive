@@ -157,4 +157,42 @@ public class SyncPanelMultiAccountTests : IDisposable
 
         await accountB.Scheduler.StopAsync();
     }
+
+    /// <summary>
+    /// P7 Phase B (docs/PLAN-CLOUD-PROVIDERS.md): once the browsed account can change live,
+    /// "Add pair" must target whichever account the user is actually looking at, not always
+    /// whichever was primary at startup — <c>MainWindowViewModel.SwitchBrowserAccountAsync</c>
+    /// calls <see cref="SyncPanelViewModel.SetActiveAccount"/> on every switch to keep this true.
+    /// </summary>
+    [Fact]
+    public async Task SetActiveAccount_MakesANewPairTargetThatAccountInstead_OfThePrimary()
+    {
+        var accountA = BuildAccount("account-a");
+        var accountB = BuildAccount("account-b");
+        var panel = new SyncPanelViewModel(accountA.Store, accountA.Executor, new SyncCrashRecovery(accountA.Store), accountA.Scheduler, "Account A");
+        panel.AddAccount(accountB.Store, accountB.Executor, new SyncCrashRecovery(accountB.Store), accountB.Scheduler, "Account B");
+        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(
+            new NewSyncPairRequest("/remote-b", _localRootB, SyncDirection.RemoteToLocal, ConflictPolicy.Ask));
+
+        panel.SetActiveAccount("Account B");
+        await panel.AddPairCommand.ExecuteAsync();
+
+        Assert.Empty(await accountA.Store.GetPairsAsync());
+        Assert.Single(await accountB.Store.GetPairsAsync());
+    }
+
+    /// <summary>A label that isn't (or is no longer) a registered account must not crash "Add pair" — it just keeps targeting the primary.</summary>
+    [Fact]
+    public async Task SetActiveAccount_WithAnUnknownLabel_FallsBackToThePrimary()
+    {
+        var accountA = BuildAccount("account-a");
+        var panel = new SyncPanelViewModel(accountA.Store, accountA.Executor, new SyncCrashRecovery(accountA.Store), accountA.Scheduler, "Account A");
+        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(
+            new NewSyncPairRequest("/remote-a", _localRootA, SyncDirection.RemoteToLocal, ConflictPolicy.Ask));
+
+        panel.SetActiveAccount("Some Account That Was Removed");
+        await panel.AddPairCommand.ExecuteAsync();
+
+        Assert.Single(await accountA.Store.GetPairsAsync());
+    }
 }

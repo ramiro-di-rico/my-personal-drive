@@ -1022,6 +1022,15 @@ public sealed class MainWindowViewModel : ObservableObject
         _previewLoader = session.PreviewLoader;
         _imagePreviewLoader = session.ImagePreviewLoader;
         _rootPath = _provider.Id == ProviderId.OneDrive ? "/" : "/my-files";
+
+        // Both of these used to be wired once at startup and never revisited — harmless before
+        // this phase, since the browsed account never changed. Left stale, "Add pair"'s remote
+        // folder browser would list the *previous* account's tree starting from the *new*
+        // account's root path (a real bug: navigating OneDrive, switching to Proton, then
+        // browsing for a remote folder to sync showed OneDrive's listing under a Proton-shaped
+        // path, mixing the two).
+        SyncPanel.GetRemoteFolderChildren = _provider.Operations.ListFolderAsync;
+        SyncPanel.SetActiveAccount(_provider.DisplayName);
         // Re-read fresh rather than trust the field left over from the previous account — it can
         // otherwise go stale the moment auth changes for the account not currently on screen (a
         // real gap this phase closes, not just the restart requirement).

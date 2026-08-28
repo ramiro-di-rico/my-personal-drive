@@ -140,11 +140,18 @@ public class MainWindowProviderTests : IDisposable
         var protonCache = new DriveCacheService(Path.Combine(_tempAppData, "proton-cache.db"));
         await protonCache.SyncItemsAsync("/my-files", [new DriveItem("/my-files/seed.txt", "seed.txt", IsFolder: false)]);
 
-        var protonService = new ProtonDriveService(new FakeCliExecutor());
+        var protonCli = new FakeCliExecutor();
+        protonCli.RespondForPath("/my-files", """
+            [{"uid":"u1","parentUid":"parent","name":{"ok":true,"value":"seed.txt"},"ownedBy":{"email":"a@b.com"},"type":"file","isShared":false,"modificationTime":"2026-01-01T00:00:00.000Z"}]
+            """);
+        var protonService = new ProtonDriveService(protonCli);
         var protonProvider = new ProtonDriveProvider(protonService);
         var protonStore = new SyncStateStore(_dbPath, "proton:default");
         var protonExecutor = new SyncExecutor(protonProvider.Operations, protonStore, new LocalScanner(), new RemoteScanner(protonProvider));
-        var panel = new SyncPanelViewModel(protonStore, protonExecutor, new SyncCrashRecovery(protonStore));
+        var panel = new SyncPanelViewModel(protonStore, protonExecutor, new SyncCrashRecovery(protonStore))
+        {
+            GetRemoteFolderChildren = protonProvider.Operations.ListFolderAsync, // App.axaml.cs's own composition-root wiring for the primary
+        };
         var settings = new AppSettingsService();
 
         var sut = new MainWindowViewModel(protonProvider, protonCache, settings, panel);
@@ -206,6 +213,29 @@ public class MainWindowProviderTests : IDisposable
         await sut.SwitchToOneDriveCommand.ExecuteAsync();
 
         Assert.True(sut.IsAuthenticated);
+    }
+
+    /// <summary>
+    /// Regression: <c>SyncPanel.GetRemoteFolderChildren</c> ("Add pair"'s remote folder browser)
+    /// used to be wired once at startup and never revisited. Left stale after a live switch, it
+    /// would list the *previous* account's remote tree starting from the *new* account's root
+    /// path — a real bug reported live: navigate OneDrive, switch to Proton, then browse for a
+    /// remote folder to sync, and it showed OneDrive's listing under a Proton-shaped path.
+    /// </summary>
+    [Fact]
+    public async Task SwitchToOneDrive_RePointsGetRemoteFolderChildrenAtTheNewProvider()
+    {
+        var (sut, _) = await BuildWithBothAccounts();
+        var protonChildren = await sut.SyncPanel.GetRemoteFolderChildren!("/my-files", CancellationToken.None);
+        Assert.Equal("seed.txt", Assert.Single(protonChildren).Name); // sanity: starts on Proton's own cache-seeded tree
+
+        await sut.SwitchToOneDriveCommand.ExecuteAsync();
+
+        // Still points at "/my-files" on purpose — proving it now resolves against OneDrive's
+        // operations (a Graph HTTP 404, since no route was registered for that path), not
+        // Proton's (which would fail a completely different way — no CLI response queued).
+        var ex = await Assert.ThrowsAsync<DriveException>(() => sut.SyncPanel.GetRemoteFolderChildren!("/my-files", CancellationToken.None));
+        Assert.Contains("OneDrive", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

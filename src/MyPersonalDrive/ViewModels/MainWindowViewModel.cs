@@ -14,21 +14,41 @@ namespace MyPersonalDrive.ViewModels;
 
 public sealed class MainWindowViewModel : ObservableObject
 {
-    private readonly ICloudDriveProvider _provider;
-    private readonly DriveCacheService _cacheService;
+    // Not readonly (P7 Phase B, docs/PLAN-CLOUD-PROVIDERS.md): SwitchBrowserAccountAsync reassigns
+    // these five plus _rootPath below when the browsed account changes, instead of the previous
+    // "persist a preference and ask for a restart" behavior. See _browserSessions.
+    private ICloudDriveProvider _provider;
+    private DriveCacheService _cacheService;
     private readonly AppSettingsService _settings;
-    private readonly FolderMetricsStore? _metricsStore;
-    private readonly FolderStatsScanner? _statsScanner;
+    private FolderMetricsStore? _metricsStore;
+    private FolderStatsScanner? _statsScanner;
     private CancellationTokenSource? _deepScanCts;
-    private readonly ITextFilePreviewLoader? _previewLoader;
-    private readonly IImageFilePreviewLoader? _imagePreviewLoader;
+    private ITextFilePreviewLoader? _previewLoader;
+    private IImageFilePreviewLoader? _imagePreviewLoader;
     private CancellationTokenSource? _previewCts;
     private readonly Stack<string> _navigationHistory = new();
     private readonly TimeProvider _timeProvider;
     private readonly RemoteViewFreshnessPolicy _remoteViewFreshness = new();
     private CancellationTokenSource? _cts;
     private DriveNodeViewModel? _selectedNode;
-    private readonly string _rootPath;
+    private string _rootPath;
+
+    /// <summary>
+    /// One browsable account's whole toolchain — everything <see cref="SwitchBrowserAccountAsync"/>
+    /// needs to swap live. The primary account (registered by the constructor) is always
+    /// <c>_browserSessions[0]</c>; <see cref="AddBrowsableAccount"/> only ever appends, mirroring
+    /// <c>SyncPanelViewModel.AddAccount</c>'s own additive shape (P7 Phase A) so existing call sites
+    /// and tests that never call it are unaffected.
+    /// </summary>
+    private sealed record BrowserAccountSession(
+        ICloudDriveProvider Provider,
+        DriveCacheService CacheService,
+        FolderMetricsStore? MetricsStore,
+        FolderStatsScanner? StatsScanner,
+        ITextFilePreviewLoader? PreviewLoader,
+        IImageFilePreviewLoader? ImagePreviewLoader);
+
+    private readonly List<BrowserAccountSession> _browserSessions = new();
     // Doubled from CommandLogBuffer's own default (200): with two provider sessions able to be
     // active at once (P7), one interleaved buffer now serves two sources, and a burst from one
     // must not push the other's entire recent history out.
@@ -221,12 +241,28 @@ public sealed class MainWindowViewModel : ObservableObject
         ShowSettingsCommand = new AsyncCommand(ShowSettingsAsync, onError: HandleUnexpectedError);
         CheckCliVersionCommand = new AsyncCommand(CheckCliVersionAsync, CanCheckCliVersion, HandleUnexpectedError);
         CheckForCliUpdateCommand = new AsyncCommand(CheckForCliUpdateAsync, CanCheckForCliUpdate, HandleUnexpectedError);
-        SwitchToProtonCommand = new AsyncCommand(() => SwitchProviderAsync(ProviderId.Proton), () => !IsLoading && !IsProtonActive, HandleUnexpectedError);
-        SwitchToOneDriveCommand = new AsyncCommand(() => SwitchProviderAsync(ProviderId.OneDrive), () => !IsLoading && !IsOneDriveActive, HandleUnexpectedError);
+        SwitchToProtonCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.Proton), () => !IsLoading && !IsProtonActive, HandleUnexpectedError);
+        SwitchToOneDriveCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.OneDrive), () => !IsLoading && !IsOneDriveActive, HandleUnexpectedError);
         InstallCliUpdateCommand = new AsyncCommand(InstallCliUpdateAsync, CanInstallCliUpdate, HandleUnexpectedError);
         ViewSelectedFileCommand = new AsyncCommand(ViewSelectedFileAsync, CanViewSelectedFile, HandleUnexpectedError);
         CloseViewerCommand = new AsyncCommand(CloseViewerAsync, onError: HandleUnexpectedError);
+
+        _browserSessions.Add(new BrowserAccountSession(_provider, _cacheService, _metricsStore, _statsScanner, _previewLoader, _imagePreviewLoader));
     }
+
+    /// <summary>
+    /// Registers a second (or later) account's browsing toolchain, so <see cref="SwitchBrowserAccountAsync"/>
+    /// can switch to it live — P7 Phase B. Additive only, same shape as <c>SyncPanelViewModel.AddAccount</c>:
+    /// existing callers/tests that never call this are completely unaffected.
+    /// </summary>
+    public void AddBrowsableAccount(
+        ICloudDriveProvider provider,
+        DriveCacheService cacheService,
+        FolderMetricsStore? metricsStore = null,
+        FolderStatsScanner? statsScanner = null,
+        ITextFilePreviewLoader? previewLoader = null,
+        IImageFilePreviewLoader? imagePreviewLoader = null)
+        => _browserSessions.Add(new BrowserAccountSession(provider, cacheService, metricsStore, statsScanner, previewLoader, imagePreviewLoader));
 
     public ObservableCollection<DriveNodeViewModel> RootItems { get; }
 
@@ -496,9 +532,6 @@ public sealed class MainWindowViewModel : ObservableObject
     public Func<Task<string?>>? RequestDownloadFolderAsync { get; set; }
 
     public Func<Task<string?>>? RequestSaveActivityAsync { get; set; }
-
-    /// <summary>Asked before switching the active provider — same "question in, yes/no out" shape as <c>SyncPanelViewModel.RequestConfirmationAsync</c>.</summary>
-    public Func<string, Task<bool>>? RequestSwitchProviderConfirmationAsync { get; set; }
 
     public string CliPath
     {
@@ -958,33 +991,62 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Persists the chosen provider and tells the user to restart — no live hot-swap of the active
-    /// provider (docs/PLAN-CLOUD-PROVIDERS.md §2.7): every downstream service (cache, sync engine,
-    /// this view model itself) was constructed once, at startup, against the provider that was
-    /// active then.
+    /// Switches which registered <see cref="BrowserAccountSession"/> the browser shows — live, no
+    /// restart (P7 Phase B, docs/PLAN-CLOUD-PROVIDERS.md; §2.7's original "requires a restart" note
+    /// only ever reflected that this hadn't been built yet, not a hard architectural limit). A
+    /// no-op if <paramref name="id"/> isn't registered (not authenticated/configured, or simply not
+    /// one of <see cref="_browserSessions"/> yet).
     /// </summary>
-    private async Task SwitchProviderAsync(ProviderId id)
+    private async Task SwitchBrowserAccountAsync(ProviderId id)
     {
         if (id == _provider.Id)
         {
             return;
         }
 
-        var confirm = RequestSwitchProviderConfirmationAsync;
-        if (confirm is null)
+        var session = _browserSessions.FirstOrDefault(candidate => candidate.Provider.Id == id);
+        if (session is null)
         {
+            StatusMessage = $"{id} isn't configured.";
             return;
         }
 
-        var targetName = AvailableProviders.FirstOrDefault(descriptor => descriptor.Id == id)?.DisplayName ?? id.ToString();
-        var confirmed = await confirm($"Switching to {targetName} requires restarting the app. Continue?");
-        if (!confirmed)
-        {
-            return;
-        }
+        // Whatever the previous account's browser was mid-loading, it no longer belongs on screen
+        // once the account underneath it has changed.
+        _cts?.Cancel();
+
+        _provider = session.Provider;
+        _cacheService = session.CacheService;
+        _metricsStore = session.MetricsStore;
+        _statsScanner = session.StatsScanner;
+        _previewLoader = session.PreviewLoader;
+        _imagePreviewLoader = session.ImagePreviewLoader;
+        _rootPath = _provider.Id == ProviderId.OneDrive ? "/" : "/my-files";
+        // Re-read fresh rather than trust the field left over from the previous account — it can
+        // otherwise go stale the moment auth changes for the account not currently on screen (a
+        // real gap this phase closes, not just the restart requirement).
+        IsAuthenticated = _provider.Id == ProviderId.OneDrive ? _settings.Load().IsOneDriveAuthenticated : _settings.Load().IsAuthenticated;
+
+        // A deep-scan histogram belongs to one specific folder on one specific account — carrying
+        // it over to a different account's (unrelated) folder would show buckets for content that
+        // isn't even on screen.
+        KindFilters.Clear();
+        _kindFilter = null;
+        FilterSummary = string.Empty;
+
+        OnPropertyChanged(nameof(ActiveProviderDisplayName));
+        OnPropertyChanged(nameof(BrowserHeaderTitle));
+        OnPropertyChanged(nameof(BrowserHeaderSubtitle));
+        OnPropertyChanged(nameof(IsProtonActive));
+        OnPropertyChanged(nameof(IsOneDriveActive));
+        OnPropertyChanged(nameof(HasDiagnostics));
+        OnPropertyChanged(nameof(OneDriveAccountLabel));
+        OnPropertyChanged(nameof(RootPath));
+        RaiseCommandStates();
 
         _settings.Update(settings => settings.ActiveProvider = id.ToString());
-        StatusMessage = $"Provider switched to {targetName}. Restart the app to apply the change.";
+        StatusMessage = $"Switched to {_provider.DisplayName}.";
+        await GoToRootAsync();
     }
 
     private async Task GoToRootAsync()

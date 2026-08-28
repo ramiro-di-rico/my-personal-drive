@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
@@ -118,6 +119,104 @@ public class MainWindowProviderTests : IDisposable
 
         Assert.Equal("/", sut.RootPath);
         Assert.Equal("/", sut.CurrentPath);
+    }
+
+    /// <summary>
+    /// Builds a Proton-primary view model with a second, OneDrive browsing session registered via
+    /// <see cref="MainWindowViewModel.AddBrowsableAccount"/> — the P7 Phase B setup
+    /// (docs/PLAN-CLOUD-PROVIDERS.md) needed to exercise a live account switch.
+    ///
+    /// Both accounts' caches are pre-seeded at their own root path. This isn't just tidiness: an
+    /// empty cache makes <c>LoadFolderAsync</c> *await* the CLI/Graph fetch inline, whose success
+    /// path (not just its error path) marshals through <c>Dispatcher.UIThread.InvokeAsync</c>
+    /// (<c>MainWindowViewModel.FetchFromCliAndUpdateCacheAsync</c>) — which never completes without
+    /// a running Avalonia dispatcher and hangs the test forever (the same headless-host limitation
+    /// <c>DisplayItems</c>'s own doc comment already flags). A non-empty cache makes that same
+    /// fetch fire-and-forget instead, so <c>SwitchBrowserAccountAsync</c>'s own <c>GoToRootAsync</c>
+    /// call returns without ever touching the dispatcher.
+    /// </summary>
+    private async Task<(MainWindowViewModel Sut, AppSettingsService Settings)> BuildWithBothAccounts()
+    {
+        var protonCache = new DriveCacheService(Path.Combine(_tempAppData, "proton-cache.db"));
+        await protonCache.SyncItemsAsync("/my-files", [new DriveItem("/my-files/seed.txt", "seed.txt", IsFolder: false)]);
+
+        var protonService = new ProtonDriveService(new FakeCliExecutor());
+        var protonProvider = new ProtonDriveProvider(protonService);
+        var protonStore = new SyncStateStore(_dbPath, "proton:default");
+        var protonExecutor = new SyncExecutor(protonProvider.Operations, protonStore, new LocalScanner(), new RemoteScanner(protonProvider));
+        var panel = new SyncPanelViewModel(protonStore, protonExecutor, new SyncCrashRecovery(protonStore));
+        var settings = new AppSettingsService();
+
+        var sut = new MainWindowViewModel(protonProvider, protonCache, settings, panel);
+
+        var tokenStore = new MyPersonalDrive.Services.Providers.OneDrive.OneDriveTokenStore(_tempAppData);
+        tokenStore.Save(new MyPersonalDrive.Services.Providers.OneDrive.StoredOneDriveToken
+        {
+            AccessToken = "token",
+            RefreshToken = "refresh",
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+        });
+        var authenticator = new MyPersonalDrive.Services.Providers.OneDrive.GraphAuthenticator(
+            "client-id", tokenStore, new HttpClient(new FakeHttpMessageHandler()));
+        var oneDriveProvider = new MyPersonalDrive.Services.Providers.OneDrive.OneDriveProvider(
+            authenticator,
+            new MyPersonalDrive.Services.Providers.OneDrive.GraphHttpClient(authenticator, new HttpClient(new FakeHttpMessageHandler())));
+
+        var oneDriveCache = new DriveCacheService(Path.Combine(_tempAppData, "onedrive-cache.db"));
+        await oneDriveCache.SyncItemsAsync("/", [new DriveItem("/seed.txt", "seed.txt", IsFolder: false)]);
+        sut.AddBrowsableAccount(oneDriveProvider, oneDriveCache);
+
+        return (sut, settings);
+    }
+
+    [Fact]
+    public async Task SwitchToOneDrive_ChangesTheActiveProviderLive_NoConfirmationNeeded()
+    {
+        var (sut, _) = await BuildWithBothAccounts();
+        Assert.True(sut.IsProtonActive);
+
+        await sut.SwitchToOneDriveCommand.ExecuteAsync();
+
+        Assert.True(sut.IsOneDriveActive);
+        Assert.False(sut.IsProtonActive);
+        Assert.Equal("OneDrive", sut.ActiveProviderDisplayName);
+        Assert.Equal("/", sut.RootPath);
+        Assert.Equal("/", sut.CurrentPath);
+    }
+
+    [Fact]
+    public async Task SwitchBack_ReturnsToTheOriginalAccountsOwnRoot()
+    {
+        var (sut, _) = await BuildWithBothAccounts();
+
+        await sut.SwitchToOneDriveCommand.ExecuteAsync();
+        await sut.SwitchToProtonCommand.ExecuteAsync();
+
+        Assert.True(sut.IsProtonActive);
+        Assert.Equal("/my-files", sut.RootPath);
+    }
+
+    [Fact]
+    public async Task Switching_ReReadsIsAuthenticatedForTheTargetProvider_NotTheStaleValue()
+    {
+        var (sut, settings) = await BuildWithBothAccounts();
+        Assert.False(sut.IsAuthenticated); // Proton, never configured in this test
+
+        settings.Update(s => s.IsOneDriveAuthenticated = true);
+        await sut.SwitchToOneDriveCommand.ExecuteAsync();
+
+        Assert.True(sut.IsAuthenticated);
+    }
+
+    [Fact]
+    public async Task SwitchingToAnUnregisteredAccount_IsANoOp()
+    {
+        var sut = Build(); // only Proton is ever registered here
+
+        await sut.SwitchToOneDriveCommand.ExecuteAsync();
+
+        Assert.True(sut.IsProtonActive);
+        Assert.False(sut.IsOneDriveActive);
     }
 
     /// <summary>Proves the constructor reads from whatever catalog it's given, not a hardcoded one.</summary>

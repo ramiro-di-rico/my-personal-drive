@@ -59,12 +59,20 @@ public partial class App : Application
                 previewLoader: new TextFilePreviewService(primary.Provider.Operations),
                 imagePreviewLoader: new ImageFilePreviewService(primary.Provider.Operations));
 
-            // The browser only ever shows the primary account, but the console shows every active
-            // account's activity — background sync on an account you're not currently looking at
-            // is still something you'd want to see happening.
+            // The console shows every active account's activity regardless of which is browsed —
+            // background sync on an account you're not currently looking at is still something
+            // you'd want to see happening. The browser itself can now switch to any of them live,
+            // no restart (P7 Phase B, docs/PLAN-CLOUD-PROVIDERS.md) — AddBrowsableAccount registers
+            // the same per-account toolchain built for the primary above.
             foreach (var other in others)
             {
                 mainWindowViewModel.ObserveAdditionalProviderActivity(other.DisplayName, other.Provider);
+                mainWindowViewModel.AddBrowsableAccount(
+                    other.Provider, other.CacheService,
+                    metricsStore: other.MetricsStore,
+                    statsScanner: new FolderStatsScanner(other.Provider),
+                    previewLoader: new TextFilePreviewService(other.Provider.Operations),
+                    imagePreviewLoader: new ImageFilePreviewService(other.Provider.Operations));
             }
 
             desktop.MainWindow = new MainWindow

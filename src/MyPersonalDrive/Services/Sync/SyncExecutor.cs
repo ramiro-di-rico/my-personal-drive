@@ -1,4 +1,5 @@
 using MyPersonalDrive.Models;
+using MyPersonalDrive.Services.Providers;
 
 namespace MyPersonalDrive.Services.Sync;
 
@@ -25,25 +26,51 @@ public sealed class SyncExecutor
     private static readonly TimeSpan LogRetention = TimeSpan.FromDays(30);
     private const int MaxLogEntriesPerPair = 1000;
 
-    private readonly ProtonDriveService _protonDriveService;
+    private readonly IDriveOperations _operations;
+    private readonly IContentHasher _hasher;
+    private readonly RemoteHashAlgorithm _remoteHashAlgorithm;
     private readonly SyncStateStore _stateStore;
     private readonly ILocalScanner _localScanner;
     private readonly IRemoteScanner _remoteScanner;
+    private readonly IRemoteScanner? _deltaScanner;
     private readonly TimeProvider _timeProvider;
     private readonly SyncEchoSuppressor _echoSuppressor;
 
+    /// <param name="hasher">
+    /// Computes local content hashes. Defaults to <see cref="Sha1ContentHasher"/> — correct as
+    /// long as the active provider is Proton; the composition root should pass one matching
+    /// <c>Capabilities.RemoteHash</c> once a second provider exists (docs/PLAN-CLOUD-PROVIDERS.md P3/P6).
+    /// </param>
+    /// <param name="remoteHashAlgorithm">
+    /// Tags fingerprints built from remote data — see the mismatch guard in
+    /// <see cref="SyncReconciler"/>. Defaults to <see cref="RemoteHashAlgorithm.Sha1"/>, Proton's algorithm.
+    /// </param>
+    /// <param name="deltaScanner">
+    /// A delta-based scanner (<see cref="DeltaRemoteScanner"/>) for providers whose
+    /// <c>Capabilities.SupportsDelta</c> is true, used only for <see cref="SyncDirection.TwoWay"/>
+    /// pairs — a one-way pair never populates a baseline (<see cref="LoadBaselineAsync"/> returns an
+    /// empty dictionary for it), so a delta scanner has nothing to merge onto and would be unsound.
+    /// Null falls back to <paramref name="remoteScanner"/> for every pair, same as before P8
+    /// (docs/PLAN-CLOUD-PROVIDERS.md P8).
+    /// </param>
     public SyncExecutor(
-        ProtonDriveService protonDriveService,
+        IDriveOperations operations,
         SyncStateStore stateStore,
         ILocalScanner localScanner,
         IRemoteScanner remoteScanner,
         TimeProvider? timeProvider = null,
-        SyncEchoSuppressor? echoSuppressor = null)
+        SyncEchoSuppressor? echoSuppressor = null,
+        IContentHasher? hasher = null,
+        RemoteHashAlgorithm remoteHashAlgorithm = RemoteHashAlgorithm.Sha1,
+        IRemoteScanner? deltaScanner = null)
     {
-        _protonDriveService = protonDriveService;
+        _operations = operations;
+        _hasher = hasher ?? new Sha1ContentHasher();
+        _remoteHashAlgorithm = remoteHashAlgorithm;
         _stateStore = stateStore;
         _localScanner = localScanner;
         _remoteScanner = remoteScanner;
+        _deltaScanner = deltaScanner;
         _timeProvider = timeProvider ?? TimeProvider.System;
 
         // Shared across runs by design: the whole point is to remember a deletion from the run
@@ -63,9 +90,10 @@ public sealed class SyncExecutor
     /// </summary>
     public async Task<SyncPlan> PreviewAsync(SyncPair pair, CancellationToken cancellationToken = default)
     {
-        var (local, remote, _) = await ScanBothSidesAsync(pair, cancellationToken);
+        var baseline = await LoadBaselineAsync(pair, cancellationToken);
+        var (local, remote, _) = await ScanBothSidesAsync(pair, baseline, cancellationToken);
         var plan = SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote,
-            await LoadBaselineAsync(pair, cancellationToken), _timeProvider.GetUtcNow());
+            baseline, _timeProvider.GetUtcNow());
         await _stateStore.ClearStaleFailedActionsAsync(pair.Id, plan.Actions, cancellationToken);
         return plan;
     }
@@ -94,10 +122,11 @@ public sealed class SyncExecutor
         // — precisely the pair generating the most log noise.
         await PruneHousekeepingAsync(cancellationToken);
 
-        var (local, remote, mapper) = await ScanBothSidesAsync(pair, cancellationToken);
+        var baseline = await LoadBaselineAsync(pair, cancellationToken);
+        var (local, remote, mapper) = await ScanBothSidesAsync(pair, baseline, cancellationToken);
         var now = _timeProvider.GetUtcNow();
         var plan = SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote,
-            await LoadBaselineAsync(pair, cancellationToken), now);
+            baseline, now);
 
         await _stateStore.EnqueueActionsAsync(pair.Id, plan.Actions, now, cancellationToken);
 
@@ -116,7 +145,7 @@ public sealed class SyncExecutor
         await _stateStore.EnqueueConflictsAsync(pair.Id, unresolved, now, cancellationToken);
 
         var context = new RunContext(pair, mapper, local, remote,
-            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_protonDriveService, _stateStore, mapper, pair.Id) : null);
+            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_operations, _hasher, _remoteHashAlgorithm, _stateStore, mapper, pair.Id) : null);
         context.Baseline?.SeedFromScan(remote);
 
         var (failureCount, aborted) = await DrainQueueAsync(context, cancellationToken);
@@ -260,19 +289,20 @@ public sealed class SyncExecutor
 
         try
         {
-            foreach (var item in await _protonDriveService.LoadFolderAsync(mapper.ToRemoteAbsolute(parent), cancellationToken))
+            foreach (var item in await _operations.ListFolderAsync(mapper.ToRemoteAbsolute(parent), cancellationToken))
             {
                 var relativePath = parent.Length == 0 ? item.Name : $"{parent}/{item.Name}";
-                remote[relativePath] = new NodeFingerprint(relativePath, item.IsFolder, item.Size, item.ModifiedAt, item.NodeId, item.ContentHash);
+                remote[relativePath] = new NodeFingerprint(relativePath, item.IsFolder, item.Size, item.ModifiedAt, item.NodeId, item.ContentHash,
+                    item.ContentHash is null ? null : _remoteHashAlgorithm);
             }
         }
-        catch (CliException) when (resolution == ConflictResolution.KeepLocal)
+        catch (DriveException) when (resolution == ConflictResolution.KeepLocal)
         {
             // Keeping the local version doesn't need to know anything about the remote one.
         }
 
         var context = new RunContext(pair, mapper, new Dictionary<string, NodeFingerprint>(), remote,
-            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_protonDriveService, _stateStore, mapper, pair.Id) : null);
+            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_operations, _hasher, _remoteHashAlgorithm, _stateStore, mapper, pair.Id) : null);
         context.Baseline?.SeedFromScan(remote);
 
         var now = _timeProvider.GetUtcNow();
@@ -319,7 +349,26 @@ public sealed class SyncExecutor
         return directory.Length == 0 ? stamped : $"{directory}/{stamped}";
     }
 
-    private async Task<(IReadOnlyDictionary<string, NodeFingerprint> Local, IReadOnlyDictionary<string, NodeFingerprint> Remote, PathMapper Mapper)> ScanBothSidesAsync(SyncPair pair, CancellationToken cancellationToken)
+    /// <summary>
+    /// Regression: this used to be one hardcoded string assuming the only skip reason was an
+    /// unmappable name. Once P3 added <see cref="NodeSkipReason.CaseCollision"/>, that message
+    /// became actively misleading for a case-insensitive provider's collisions — see the P1-P5
+    /// adversarial review.
+    /// </summary>
+    private static string DescribeSkip(NodeSkip skip)
+        => skip.Reason switch
+        {
+            NodeSkipReason.UnmappableName =>
+                $"Skipped '{skip.Name}': its name contains '/', which can't be used in a local filename. " +
+                "It stays on Proton Drive but won't be synced — rename it there to include it.",
+            NodeSkipReason.CaseCollision =>
+                $"Skipped '{skip.Name}': its name collides with a sibling once case is ignored. " +
+                "Both stay on Proton Drive but won't be synced — rename one of them there to include it.",
+            _ => $"Skipped '{skip.Name}': it can't be represented locally."
+        };
+
+    private async Task<(IReadOnlyDictionary<string, NodeFingerprint> Local, IReadOnlyDictionary<string, NodeFingerprint> Remote, PathMapper Mapper)> ScanBothSidesAsync(
+        SyncPair pair, IReadOnlyDictionary<string, SyncBaselineEntry> baseline, CancellationToken cancellationToken)
     {
         var mapper = new PathMapper(pair.RemotePath, pair.LocalPath);
         var exclusions = new ExclusionMatcher(pair.ExcludeGlobs);
@@ -327,26 +376,29 @@ public sealed class SyncExecutor
         Directory.CreateDirectory(pair.LocalPath);
         var local = await _localScanner.ScanAsync(pair.LocalPath, exclusions, cancellationToken);
 
+        // A one-way pair never populates a baseline (LoadBaselineAsync returns an empty dictionary
+        // for it), so a delta scanner has no merge base and would be unsound — it always falls back
+        // to the full-walk scanner regardless of what the provider supports.
+        var scanner = pair.Direction == SyncDirection.TwoWay ? _deltaScanner ?? _remoteScanner : _remoteScanner;
+
         // Subscribed per scan: a node the scanner had to leave out is only discoverable here, and a
         // file visible in Proton Drive but never in the synced folder needs an explanation.
-        var skipped = new List<string>();
-        void OnSkipped(object? _, string name) => skipped.Add(name);
-        _remoteScanner.NodeSkipped += OnSkipped;
+        var skipped = new List<NodeSkip>();
+        void OnSkipped(object? _, NodeSkip skip) => skipped.Add(skip);
+        scanner.NodeSkipped += OnSkipped;
         IReadOnlyDictionary<string, NodeFingerprint> remote;
         try
         {
-            remote = await _remoteScanner.ScanAsync(pair.RemotePath, mapper, exclusions, cancellationToken);
+            remote = await scanner.ScanAsync(pair.RemotePath, mapper, exclusions, baseline, pair.Id, cancellationToken);
         }
         finally
         {
-            _remoteScanner.NodeSkipped -= OnSkipped;
+            scanner.NodeSkipped -= OnSkipped;
         }
 
-        foreach (var name in skipped.Distinct(StringComparer.Ordinal))
+        foreach (var skip in skipped.DistinctBy(s => s.Name, StringComparer.Ordinal))
         {
-            await _stateStore.LogAsync(pair.Id, SyncLogLevel.Warning, name,
-                $"Skipped '{name}': its name contains '/', which can't be used in a local filename. " +
-                "It stays on Proton Drive but won't be synced — rename it there to include it.",
+            await _stateStore.LogAsync(pair.Id, SyncLogLevel.Warning, skip.Name, DescribeSkip(skip),
                 _timeProvider.GetUtcNow(), cancellationToken);
         }
 
@@ -358,6 +410,10 @@ public sealed class SyncExecutor
         if (pair.Direction == SyncDirection.TwoWay)
         {
             local = await HashLocalMoveCandidatesAsync(pair, mapper, local, cancellationToken);
+        }
+        else if (pair.Direction == SyncDirection.LocalToRemote)
+        {
+            local = await HashAmbiguousUploadCandidatesAsync(mapper, local, remote, cancellationToken);
         }
 
         return (local, remote, mapper);
@@ -414,8 +470,8 @@ public sealed class SyncExecutor
         {
             try
             {
-                var hash = await LocalFileHasher.ComputeSha1Async(mapper.ToLocalAbsolute(relativePath), cancellationToken);
-                hashed[relativePath] = hashed[relativePath] with { ContentHash = hash };
+                var hash = await _hasher.ComputeAsync(mapper.ToLocalAbsolute(relativePath), cancellationToken);
+                hashed[relativePath] = hashed[relativePath] with { ContentHash = hash, HashAlgorithm = _hasher.Algorithm };
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -426,6 +482,66 @@ public sealed class SyncExecutor
 
         return hashed;
     }
+
+    /// <summary>
+    /// Fills in <see cref="NodeFingerprint.ContentHash"/> for local files whose size matches the
+    /// remote copy at the same path but whose modified time doesn't (within
+    /// <see cref="SyncReconciler.DefaultMtimeTolerance"/>) — the one case <c>SyncReconciler</c>'s
+    /// own equivalence check can't resolve on its own for a one-way <c>LocalToRemote</c> pair,
+    /// since <see cref="LocalScanner"/> never computes a hash and the remote's own timestamp isn't
+    /// guaranteed to reflect the local file's actual mtime.
+    ///
+    /// This matters most for exactly the case that motivated it: a file that already existed
+    /// independently on both sides before this pair was created (its local and remote copies were
+    /// never related by an upload this app did), so their timestamps have nothing to do with each
+    /// other and will essentially never agree — without this, such a file looks "changed" forever
+    /// and gets re-uploaded on every single cycle, never converging. The same is true for any
+    /// provider whose upload path doesn't preserve the source's claimed modification time.
+    ///
+    /// Narrowed to size-matching, mtime-ambiguous pairs for the same reason
+    /// <see cref="HashLocalMoveCandidatesAsync"/> narrows its own candidate set: hashing is the one
+    /// genuinely expensive thing here, and a file whose mtime already agrees needs no help.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, NodeFingerprint>> HashAmbiguousUploadCandidatesAsync(
+        PathMapper mapper, IReadOnlyDictionary<string, NodeFingerprint> local, IReadOnlyDictionary<string, NodeFingerprint> remote, CancellationToken cancellationToken)
+    {
+        var candidates = local
+            .Where(entry => !entry.Value.IsFolder
+                            && remote.TryGetValue(entry.Key, out var r)
+                            && !r.IsFolder
+                            && r.ContentHash is not null
+                            && r.HashAlgorithm == _hasher.Algorithm
+                            && entry.Value.Size == r.Size
+                            && !MtimesAgree(entry.Value.ModifiedAt, r.ModifiedAt))
+            .Select(entry => entry.Key)
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return local;
+        }
+
+        var hashed = new Dictionary<string, NodeFingerprint>(local, StringComparer.Ordinal);
+        foreach (var relativePath in candidates)
+        {
+            try
+            {
+                var hash = await _hasher.ComputeAsync(mapper.ToLocalAbsolute(relativePath), cancellationToken);
+                hashed[relativePath] = hashed[relativePath] with { ContentHash = hash, HashAlgorithm = _hasher.Algorithm };
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Unreadable right now: leave it hashless, which simply means the mtime mismatch
+                // stands and the ordinary "upload it" path handles it — the same safe default as
+                // before this method existed.
+            }
+        }
+
+        return hashed;
+    }
+
+    private static bool MtimesAgree(DateTimeOffset? a, DateTimeOffset? b)
+        => a is not null && b is not null && (a.Value - b.Value).Duration() <= SyncReconciler.DefaultMtimeTolerance;
 
     private async Task ExecuteOneAsync(RunContext context, QueuedSyncAction action, CancellationToken cancellationToken)
     {
@@ -468,7 +584,7 @@ public sealed class SyncExecutor
                 return;
 
             case SyncOperation.TrashRemote:
-                await _protonDriveService.TrashItemAsync(context.Mapper.ToRemoteAbsolute(action.RelativePath), cancellationToken);
+                await _operations.TrashItemAsync(context.Mapper.ToRemoteAbsolute(action.RelativePath), cancellationToken);
                 context.Baseline?.InvalidateRemoteFolder(ParentOf(action.RelativePath));
                 _echoSuppressor.SuppressDeletion(context.Pair.Id, SyncSide.Remote, action.RelativePath);
                 await ClearBaselineAsync(context, action.RelativePath, cancellationToken);
@@ -544,9 +660,9 @@ public sealed class SyncExecutor
 
         try
         {
-            await _protonDriveService.CreateFolderAsync(context.Mapper.ToRemoteAbsolute(parent), name, cancellationToken);
+            await _operations.CreateFolderAsync(context.Mapper.ToRemoteAbsolute(parent), name, cancellationToken);
         }
-        catch (CliException ex) when (ex.Kind == CliErrorKind.AlreadyExists)
+        catch (DriveException ex) when (ex.Kind == DriveErrorKind.AlreadyExists)
         {
             // Idempotent by design: a retried run, or a folder created by another client between
             // the scan and now, is a success for our purposes, not a failure.
@@ -571,7 +687,7 @@ public sealed class SyncExecutor
             throw new FileNotFoundException($"'{relativePath}' disappeared locally before it could be uploaded.", localAbsolutePath);
         }
 
-        await _protonDriveService.UploadFilesAsync([localAbsolutePath], context.Mapper.ToRemoteAbsolute(parent),
+        await _operations.UploadFilesAsync([localAbsolutePath], context.Mapper.ToRemoteAbsolute(parent),
             UploadConflictStrategy.Replace, cancellationToken);
         context.Baseline?.InvalidateRemoteFolder(parent);
     }
@@ -686,7 +802,7 @@ public sealed class SyncExecutor
 
         if (!string.Equals(oldParent, newParent, StringComparison.Ordinal))
         {
-            await _protonDriveService.MoveItemAsync(currentRemotePath, context.Mapper.ToRemoteAbsolute(newParent), cancellationToken);
+            await _operations.MoveItemAsync(currentRemotePath, context.Mapper.ToRemoteAbsolute(newParent), cancellationToken);
             // It now lives in the new folder, still under the old name.
             currentRemotePath = context.Mapper.ToRemoteAbsolute(newParent.Length == 0 ? oldName : $"{newParent}/{oldName}");
             context.Baseline?.InvalidateRemoteFolder(oldParent);
@@ -695,7 +811,7 @@ public sealed class SyncExecutor
 
         if (!string.Equals(oldName, newName, StringComparison.Ordinal))
         {
-            await _protonDriveService.RenameItemAsync(currentRemotePath, newName, cancellationToken);
+            await _operations.RenameItemAsync(currentRemotePath, newName, cancellationToken);
             context.Baseline?.InvalidateRemoteFolder(newParent);
         }
 
@@ -734,7 +850,7 @@ public sealed class SyncExecutor
         Directory.CreateDirectory(tempDirectory);
         try
         {
-            await _protonDriveService.DownloadFileAsync(context.Mapper.ToRemoteAbsolute(relativePath), tempDirectory, cancellationToken);
+            await _operations.DownloadFileAsync(context.Mapper.ToRemoteAbsolute(relativePath), tempDirectory, cancellationToken);
 
             var fileName = Path.GetFileName(localAbsolutePath);
             var downloadedPath = Path.Combine(tempDirectory, fileName);

@@ -1,4 +1,6 @@
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
+using MyPersonalDrive.Services.Providers.Proton;
 
 namespace MyPersonalDrive.Tests.Fakes;
 
@@ -40,7 +42,7 @@ public sealed class FakeCliExecutor : IProtonDriveCliExecutor
     public void EnqueueOutput(Func<IReadOnlyList<string>, string> respond) => _responses.Enqueue(respond);
 
     /// <summary>Queues a failure the next call should throw.</summary>
-    public void EnqueueFailure(CliException exception) => _responses.Enqueue(_ => throw exception);
+    public void EnqueueFailure(DriveException exception) => _responses.Enqueue(_ => throw exception);
 
     /// <summary>
     /// Routes by the call's last argument (the target path, for every command this app issues)

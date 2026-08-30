@@ -67,4 +67,22 @@ public class AppSettingsServiceTests : IDisposable
         Assert.True(loaded.IsAuthenticated);
         Assert.True(loaded.StrictListingParsing);
     }
+
+    /// <summary>
+    /// docs/PLAN-CLOUD-PROVIDERS.md P5: a value naming a provider this build can't construct
+    /// (an older provider removed, or a settings file from a newer build) must degrade to Proton
+    /// at read time rather than throw at startup — same "store the name, degrade to default"
+    /// contract as <see cref="AppSettings.ViewModeOrDefault"/>.
+    /// </summary>
+    [Fact]
+    public void ActiveProviderOrDefault_UnrecognizedValue_DegradesToProton()
+    {
+        var settings = new AppSettings { ActiveProvider = "SomeFutureProviderThisBuildDoesNotKnow" };
+
+        Assert.Equal(MyPersonalDrive.Services.Providers.ProviderId.Proton, settings.ActiveProviderOrDefault());
+    }
+
+    [Fact]
+    public void ActiveProviderOrDefault_DefaultsToProton()
+        => Assert.Equal(MyPersonalDrive.Services.Providers.ProviderId.Proton, new AppSettings().ActiveProviderOrDefault());
 }

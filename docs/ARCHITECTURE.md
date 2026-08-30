@@ -1,6 +1,7 @@
 # MyPersonalDrive — Technical Reference
 
-> Reference document describing the current state of the application (branch `main`, commit `de22168`).
+> Reference document describing the current state of the application (branch
+> `feature/cloud-providers-seam`, commit `3538eb7`).
 > Meant to give full context to any future chat/session without having to re-read all the code.
 
 ---
@@ -26,6 +27,11 @@ A recursive scan costs ~3.5 s per subfolder, so it is never automatic. See
 Synchronization with a local directory is **present** as of commit `87e91d6`: sync pairs
 (download-only, upload-only, or two-way) that run on their own, with the on/off choice persisted
 across restarts. See [PLAN-LOCAL-SYNC.md](PLAN-LOCAL-SYNC.md) for the design.
+
+Proton is currently the only supported provider, but the app no longer talks to
+`ProtonDriveService` directly anywhere outside `Services/Providers/Proton/` — every consumer goes
+through `ICloudDriveProvider` (§4, §5). See [PLAN-CLOUD-PROVIDERS.md](PLAN-CLOUD-PROVIDERS.md) for
+the seam and the plan to add Microsoft OneDrive as a second provider.
 
 ---
 
@@ -60,14 +66,27 @@ src/MyPersonalDrive/
   App.axaml(.cs)                   # composition root: wires everything by hand
   Models/
     DriveItem.cs                   # immutable record of a drive node
+    NodeFingerprint.cs             # per-node snapshot; HashAlgorithm tags which algorithm produced ContentHash
+    RemoteHashAlgorithm.cs         # None|Sha1|Sha256|QuickXor
     UploadConflictStrategy.cs      # enum None|KeepBoth|Replace|Skip
   Services/
-    IProtonDriveCliLocator.cs      # resolves the executable path
-    ProtonDriveCliLocator.cs
-    IProtonDriveCliExecutor.cs     # launches the process and emits events
-    ProtonDriveCliExecutor.cs
-    CliCommandEventArgs.cs         # Started / Output / Finished
-    ProtonDriveService.cs          # translates domain operations -> CLI args + parsing
+    Providers/
+      ICloudDriveProvider.cs       # the facade every consumer talks to (see §5); exposes Paths
+      IDriveOperations.cs / IDriveAuthenticator.cs / IRemoteViewInvalidator.cs / IProviderDiagnostics.cs
+      IProviderPathSyntax.cs       # Combine / IsRemoteNameMappableLocally / Comparison
+      IContentHasher.cs / Sha1ContentHasher.cs
+      ProviderCapabilities.cs / ProviderId.cs
+      ProviderActivity.cs          # provider-neutral activity feed (Started/Output/Finished)
+      DriveException.cs / DriveErrorKind.cs
+      Proton/
+        ProtonPathSyntax.cs        # delegates to ProtonDriveService.CombinePath/HasUnmappableName
+        ProtonDriveProvider.cs     # adapts ProtonDriveService to ICloudDriveProvider; maps its
+                                    # three Cli*EventArgs events onto one ProviderActivity feed
+        ProtonDriveService.cs      # translates domain operations -> CLI args + parsing
+        ProtonDriveCliLocator.cs / IProtonDriveCliLocator.cs
+        ProtonDriveCliExecutor.cs / IProtonDriveCliExecutor.cs
+        CliCommandEventArgs.cs     # Started / Output / Finished — Proton-internal, CLI-shaped
+        CliErrorClassifier.cs, CliReleaseFeed.cs, CliUpdateInstaller.cs, CliPlatformKey.cs, CliVersionComparer.cs
     DriveCacheService.cs           # SQLite cache of listings
     AppSettings.cs / AppSettingsService.cs / AppJsonContext.cs
   ViewModels/
@@ -89,24 +108,74 @@ There is no test project. There is no DI container: the object graph is wired by
 
 ## 4. Composition root
 
-[`App.axaml.cs:107`](../src/MyPersonalDrive/App.axaml.cs) — all the wiring in a single method:
+[`App.axaml.cs`](../src/MyPersonalDrive/App.axaml.cs) — all the wiring in a single method. Since
+the provider seam (docs/PLAN-CLOUD-PROVIDERS.md P1–P5), everything below the composition root
+depends on `ICloudDriveProvider`/`IDriveOperations`, never on `ProtonDriveService` directly. Since
+P7 Phase A, it builds **one `AccountSyncContext` per provider `ProviderCatalog.Available` lists**
+(`Services/AccountSyncContext.cs` — `Provider`, `AccountKey`, `DisplayName`,
+`CacheService`/`StateStore`/`MetricsStore`, `Executor`, `Scheduler`), not one provider for the
+whole app:
 
 ```
-AppSettingsService  ──► ProtonDriveCliLocator ──► ProtonDriveCliExecutor ──► ProtonDriveService ─┐
-AppSettingsService.BaseFolder/cache.db ──► DriveCacheService ────────────────────────────────────┼─► MainWindowViewModel
-AppSettingsService ──────────────────────────────────────────────────────────────────────────────┘
-                                                                          └─► MainWindow.DataContext
+ProviderCatalog.Available ──► BuildAccountContext(provider) per entry ──► [AccountSyncContext, AccountSyncContext, …]
+                                                                                    │
+                             pick "primary" = AppSettings.ActiveProviderOrDefault() │
+                                    ├─► MainWindowViewModel (browses only the primary)
+                                    ├─► SyncPanelViewModel(primary) + .AddAccount(other) per remaining context
+                                    └─► MainWindowViewModel.ObserveAdditionalProviderActivity(other) per remaining context
 ```
+
+`ProviderCatalog` (`Services/Providers/ProviderCatalog.cs`) is the one place that knows how to
+build either provider's construction chain (Proton: `ProtonDriveCliLocator` →
+`ProtonDriveCliExecutor` → `ProtonDriveService` → `ProtonDriveProvider`; OneDrive:
+`OneDriveTokenStore` → `GraphAuthenticator` → `GraphHttpClient` → `OneDriveProvider`); both
+constructors are cheap and side-effect-free even when unconfigured (an empty
+`CliPath`/`OneDriveClientId` — real failures surface lazily, on the first actual operation), which
+is what makes building a context for every available provider unconditionally safe. `Available`
+also feeds `MainWindowViewModel.AvailableProviders` for the settings view's provider picker.
+`SyncExecutor`, `RemoteScanner`, `FolderStatsScanner` and `SyncPanelViewModel`'s
+`GetRemoteFolderChildren` delegate are all built from `provider`/`provider.Operations`, never from
+a provider-specific type — adding OneDrive meant a case in `ProviderCatalog.Create`, not a change
+to any of those consumers. Each context picks its own `SyncExecutor` content hasher from
+`provider.Capabilities.RemoteHash` (`Sha1ContentHasher` vs `QuickXorHasher`) rather than hardcoding
+Proton's, and computes its own `accountKey` as `{provider.Id}:default` lowercased (`"proton:
+default"`/`"onedrive:default"`) — without this, every store's own `"proton:default"` constructor
+default would apply regardless of which provider is active, letting one account's cache/sync-pair
+rows collide with another's under the same sentinel.
+
+**P7 Phase A** (docs/PLAN-CLOUD-PROVIDERS.md): Proton and OneDrive can both be configured and
+syncing *at once*, not just one "active" provider — narrowed from a general multi-account design
+because Proton's CLI has no multi-account concept of its own, so at most one session per provider
+*type* exists. Only the *browsing* UI still shows one account (the "primary" — the persisted
+`ActiveProvider` preference); sync and the console activity feed run for every built context
+regardless. `SyncPanelViewModel.AddAccount` merges a second account's pairs into one `Pairs` list
+(labeled per row once there's more than one account) with its own independent
+`AccountSyncToggleViewModel`, and `MainWindowViewModel.ObserveAdditionalProviderActivity` tags
+console lines by account. A real gap P7 Phase A's own live testing found and fixed: `AppSettings`
+(`CliPath`/`IsAuthenticated` vs `OneDriveClientId`/`IsOneDriveAuthenticated`) are still flat rather
+than a shared provider-keyed structure (deliberately — see §5.4's "Settings surface" note); a
+provider-picker switch still confirms and restarts for changing what's *browsed*
+(browsing-account-switch-without-restart is Phase B, not built yet), and does not warn about
+affected sync pairs; `":default"` is still a fixed per-provider suffix, not a real per-account
+identity — true same-provider multi-account (P7's general form) stays out of scope, needing Proton
+CLI config-directory isolation.
 
 Nothing is a container singleton; they're single instances created by hand.
 
 ---
 
-## 5. CLI execution layer
+## 5. The providers
+
+Two backends exist behind `ICloudDriveProvider` (§4): Proton (a CLI process) and, since P6,
+OneDrive (Microsoft Graph over HTTP). Everything in §5.1–§5.3 lives under
+`Services/Providers/Proton/` and is reached only through `ICloudDriveProvider` — nothing outside
+that folder should name these types directly except the composition root and the doc-flagged P3
+follow-ups in `RemoteScanner`/`MainWindowViewModel` (path-syntax calls not yet behind an
+interface). §5.4 covers OneDrive, under `Services/Providers/OneDrive/`, on the same rule.
 
 ### 5.1 `ProtonDriveCliLocator`
 
-Resolution order ([`ProtonDriveCliLocator.cs:31`](../src/MyPersonalDrive/Services/ProtonDriveCliLocator.cs)):
+Resolution order ([`ProtonDriveCliLocator.cs:31`](../src/MyPersonalDrive/Services/Providers/Proton/ProtonDriveCliLocator.cs)):
 
 1. `settings.CliPath` if the file exists.
 2. Sweep of `$PATH` looking for `proton-drive` (on Windows, cross-referenced with `PATHEXT`).
@@ -118,7 +187,7 @@ effect immediately.
 
 ### 5.2 `ProtonDriveCliExecutor`
 
-[`ProtonDriveCliExecutor.cs:428`](../src/MyPersonalDrive/Services/ProtonDriveCliExecutor.cs) —
+[`ProtonDriveCliExecutor.cs`](../src/MyPersonalDrive/Services/Providers/Proton/ProtonDriveCliExecutor.cs) —
 `ExecuteAsync(arguments, ct)`:
 
 - `ProcessStartInfo` with `UseShellExecute=false`, `CreateNoWindow=true`, stdout+stderr redirected.
@@ -139,7 +208,7 @@ Known limitations of this layer:
 
 ### 5.3 `ProtonDriveService`
 
-[`ProtonDriveService.cs`](../src/MyPersonalDrive/Services/ProtonDriveService.cs) — maps each
+[`ProtonDriveService.cs`](../src/MyPersonalDrive/Services/Providers/Proton/ProtonDriveService.cs) — maps each
 operation to a command line. **This is the catalog of what's currently known about the CLI:**
 
 | Method | Command emitted |
@@ -152,15 +221,26 @@ operation to a command line. **This is the catalog of what's currently known abo
 | `RenameItemAsync` | `filesystem rename "<path>" "<newName>"` |
 | `CreateFolderAsync` | `filesystem create-folder "<parent>" "<name>"` |
 | `CopyItemAsync` | `filesystem copy [-n "<newName>"] "<src>" "<targetParent>"` |
-| `UploadFilesAsync` | `filesystem upload [-c keep-both\|replace\|skip] "<f1>" "<f2>"… "<parent>"` |
+| `UploadFilesAsync` | `filesystem upload [-f rename\|replace\|skip] [-d rename\|replace\|skip] "<f1>" "<f2>"… "<parent>"` |
 | `GetCliVersionAsync` | `--version` |
 
-`--version` is the one command here that is not a subcommand. Captured from `cli-drive@0.6.0`:
+`--version` is the one command here that is not a subcommand. Captured from `cli-drive@0.8.0`:
 
 ```
-Proton Drive CLI cli-drive@0.6.0+f8e16aac
-Proton Drive SDK js@0.19.2+f8e16aac
+Proton Drive CLI cli-drive@0.8.0+06e8c605
+Proton Drive SDK js@0.21.0+06e8c605
 ```
+
+**Regression found live (2026-08-28):** `cli-drive` 0.8.0 replaced the single `-c keep-both|replace|skip`
+flag `filesystem upload` used to take with two separate ones (`-f`/`--file-conflict-strategy` and
+`-d`/`--folder-conflict-strategy`), and renamed `keep-both` to `rename`. The old `-c` is simply
+unrecognized now, which silently broke every upload that specified a strategy — including this
+app's own default `Replace`-strategy retry for a plain changed-file upload
+(`SyncExecutor.UploadFileAsync`), not just conflict resolution. A sync pair with any file edited on
+both sides would upload the initial version fine, then fail every subsequent update forever, always
+landing back in "Conflict"/"Failed" no matter how many times the user retried or resolved it by
+hand — because the retry and the resolution both route through the same broken upload call. Fixed
+in `ProtonDriveService.UploadFilesAsync` to send both new flags with the same resolved value.
 
 The service returns the first line verbatim and parses nothing — the app only displays it, and
 splitting `cli-drive@0.6.0+f8e16aac` into fields would assume a format the CLI hasn't promised.
@@ -192,6 +272,56 @@ Forwards all three executor events upward.
 array; quoting is the only defense (`LoadFolderAsync` even interpolates the quotes by hand
 instead of using `Quote`).
 
+### 5.4 The OneDrive provider (Microsoft Graph)
+
+No CLI to shell out to — this provider talks HTTP directly. docs/PLAN-CLOUD-PROVIDERS.md §4 has
+the full request-by-request design; this is the as-built shape.
+
+| Piece | Role |
+|---|---|
+| [`GraphAuthenticator`](../src/MyPersonalDrive/Services/Providers/OneDrive/GraphAuthenticator.cs) | `IDriveAuthenticator`. Authorization-code + PKCE via a loopback `HttpListener` (no MSAL, no device-code fallback — a documented gap); exchanges/refreshes tokens against `login.microsoftonline.com`; `GetValidAccessTokenAsync`/`ForceRefreshAsync` are what `GraphHttpClient` calls before/after a 401 |
+| [`OneDriveTokenStore`](../src/MyPersonalDrive/Services/Providers/OneDrive/OneDriveTokenStore.cs) | Persists the refresh/access token pair to `onedrive-token.json` under `AppSettingsService.BaseFolder`, chmod 600 — at-rest plaintext, an accepted risk (R3) matching where Proton's own CLI keeps its session |
+| [`GraphHttpClient`](../src/MyPersonalDrive/Services/Providers/OneDrive/GraphHttpClient.cs) | Attaches the bearer token, retries once on 401 after forcing a refresh, honors `Retry-After` on 429/503, raises `Activity` events per request so the console shows Graph calls the same way it shows a Proton CLI command |
+| [`GraphErrorClassifier`](../src/MyPersonalDrive/Services/Providers/OneDrive/GraphErrorClassifier.cs) | Reads the structured `{"error":{"code":…}}` body → `DriveErrorKind`, instead of substring-matching like Proton's classifier has to |
+| [`OneDriveOperations`](../src/MyPersonalDrive/Services/Providers/OneDrive/OneDriveOperations.cs) | `IDriveOperations`. Paginated listing (follows `@odata.nextLink` to exhaustion), small vs. chunked upload (4 MiB single-shot ceiling, 320 KiB-multiple chunks), asynchronous copy (`202` + polled monitor URL), one `GET` per distinct move/copy target parent (cached per instance — `SupportsBatchMove = false`) |
+| [`OneDrivePathSyntax`](../src/MyPersonalDrive/Services/Providers/OneDrive/OneDrivePathSyntax.cs) | `Comparison = OrdinalIgnoreCase` (OneDrive is case-insensitive, unlike Proton/Linux); `IsLocalNameMappableRemotely` (§4.6/O6 reserved-name rule — new `IProviderPathSyntax` member this phase added, Proton implements it as always-true) |
+| [`QuickXorHasher`](../src/MyPersonalDrive/Services/Providers/OneDrive/QuickXorHasher.cs) | `IContentHasher` for `RemoteHashAlgorithm.QuickXor`. Live-verified (Appendix A #3) — its first version was wrong (a 192-bit accumulator storage detail leaking into what must be a genuinely circular 160-bit width), caught by comparing against Graph's own reported hash; fixed and confirmed matching on two separate uploads |
+
+**Hash tagging**: `OneDriveOperations.ToDriveItem` only ever reads `file.hashes.quickXorHash` —
+deliberately never falling back to `sha1Hash`/`sha256Hash` when a drive doesn't return it, because
+this provider's `Capabilities.RemoteHash` is the fixed value `QuickXor`; tagging a sha1-only item's
+hash as QuickXor would silently mislabel it, exactly the "hash-algorithm mismatch is silent and
+destructive" failure P3's `IsAlgorithmMismatch` guard exists to prevent. A file with no
+quickXorHash just gets no content hash, a safe degrade (RemoteScanner already treats a null hash
+as "unknown algorithm, don't compare").
+
+**Auth flow, mechanically**: `AuthenticateAsync` reserves a loopback port (a throwaway
+`TcpListener` on port 0, then handed to `HttpListener` by exact port number — `HttpListener` has
+no "any free port" mode of its own), builds the `login.microsoftonline.com` authorize URL against
+the registered port-less `http://localhost` redirect URI, launches the system browser
+(`Process.Start(UseShellExecute: true)`) and also emits the URL through `Activity` so it's visible
+in the console even if no browser could be launched, then blocks on the loopback listener for the
+redirect carrying the authorization code. `AppSettings.OneDriveClientId` (entered in Settings, not
+embedded in the binary) is the public-client application id; `Files.ReadWrite.All offline_access
+User.Read` is the fixed scope set. **Azure setup note (Appendix A #1):** the app registration needs
+its "Mobile and desktop applications" platform added explicitly (Authentication → Add a platform),
+registered with the port-less `http://localhost` redirect URI — without that specific platform,
+Microsoft rejects the loopback redirect with `invalid_request: redirect_uri is not valid` even
+though the registration itself exists.
+
+**Settings surface**: `AppSettings.OneDriveClientId` (string) and `IsOneDriveAuthenticated` (bool)
+sit alongside Proton's `CliPath`/`IsAuthenticated` rather than a shared provider-keyed structure —
+the two providers' connection cards are structurally different (CLI path + version vs. sign-in/out
++ account label), so there was nothing to share. `MainWindowViewModel.IsAuthenticated` reads/writes
+whichever of the two backs the active provider, decided once at construction
+(`_provider.Id == ProviderId.OneDrive`) — switching providers requires a restart (§2.7 in the
+plan), so this never changes mid-session.
+
+**Verification status**: sign-in, `ListFolderAsync`, small-file upload, and `QuickXorHasher` are
+live-verified against a real account (docs/PLAN-CLOUD-PROVIDERS.md Appendix A). Pagination past one
+page, chunked upload, async copy, rate-limiting, and the exact O6 reserved-name list remain per
+Microsoft's documentation only, not yet captured live — R6 still applies to those specifically.
+
 ---
 
 ## 6. Persistence
@@ -208,7 +338,15 @@ instead of using `Quote`).
 
 ### 6.2 SQLite cache
 
-`<BaseFolder>/cache.db`, single schema in [`DriveCacheService.cs:242`](../src/MyPersonalDrive/Services/DriveCacheService.cs):
+`<BaseFolder>/cache.db`. The schema below is migration 1's; six migrations have landed since
+(see [`DriveDatabaseMigrations.cs`](../src/MyPersonalDrive/Services/DriveDatabaseMigrations.cs)
+for the current, authoritative shape). Notably, migration 6
+(docs/PLAN-CLOUD-PROVIDERS.md P4) added an `AccountKey` column to `DriveItems`, `FolderMetrics`
+and `SyncPairs` — `"<providerId>:<accountId>"`, defaulted to `'proton:default'` — and
+`DriveCacheService`/`FolderMetricsStore`/`SyncStateStore` all take the active account key in
+their constructor now, scoping every query to it.
+
+Original migration 1, for the shape/reasoning it started from:
 
 ```sql
 CREATE TABLE IF NOT EXISTS DriveItems (
@@ -273,6 +411,29 @@ RequestSaveActivityAsync     : Func<Task<string?>>
 ```
 
 This is **the pattern to follow** for any new dialog (e.g. picking a local folder to sync).
+
+**In-app viewer (text and images).** `PreviewItemAsync`/`ViewSelectedFileCommand`/
+`CloseViewerCommand` open a panel (`IsViewerVisible` + `ViewerTitle/Path/Note`, `IsViewerLoading`,
+plus `ViewerText`/`HasViewerText` or `ViewerImageBytes`/`HasViewerImage` depending on what's shown)
+reachable from a row's eye button, a tile's context menu, or the "Visor" nav button.
+`PreviewItemAsync` routes to one of two independent flows by file kind and policy:
+
+- Text: `Services.TextPreviewPolicy` decides which files qualify (text/code kinds, delimited
+  spreadsheets, extensionless files; capped at 1 MB), and `Services.TextFilePreviewService`
+  (behind `ITextFilePreviewLoader`) downloads, reads and decodes up to the policy's byte/line
+  limits (UTF-8 first, Latin-1 fallback, binary sniffed by a NUL byte).
+- Images: `Services.ImagePreviewPolicy` narrows `FileKind.Image` down to formats
+  `Avalonia.Media.Imaging.Bitmap` (SkiaSharp) actually decodes — png/jpg/jpeg/gif/bmp/webp/ico,
+  excluding RAW formats, .psd and .svg despite those sharing the same `FileKind` — capped at 25 MB.
+  `Services.ImageFilePreviewService` (behind `IImageFilePreviewLoader`) downloads and hands back
+  the raw bytes undecoded; `Views.Converters.BytesToBitmapConverter` turns them into a `Bitmap` in
+  the View, since view models never touch Avalonia types (AGENTS.md).
+
+Both loaders are optional VM dependencies with the same shape: the CLI has no "read a file"
+command, so each downloads into a private temp folder and deletes it again — a preview never
+leaves a copy on disk. The row's `DriveNodeViewModel.CanPreview` (true when either policy accepts
+the file) drives the eye button/context-menu entry's visibility; the actual routing decision is
+made again, from the same policies, in `PreviewItemAsync`.
 
 ### 7.3 Folder-loading flow (cache-first)
 
@@ -362,18 +523,19 @@ compose into three reachable crashes documented there.
 
 ---
 
-## 10. CLI self-update (the one outbound network call)
+## 10. CLI self-update (Proton's one outbound network call)
 
 Everything else in this app reaches Proton by launching `proton-drive`. **This is the single
-exception**, and it is deliberately narrow: it reads one public static file and never touches the
-Drive API.
+exception on the Proton side**, and it is deliberately narrow: it reads one public static file and
+never touches the Drive API. (OneDrive has no such distinction to draw — every OneDrive operation
+is itself an HTTP call to Microsoft Graph; see §5.4.)
 
 | Piece | Role |
 |---|---|
-| [`CliReleaseFeed`](../src/MyPersonalDrive/Services/CliReleaseFeed.cs) | GETs `https://proton.me/download/drive/cli/version.json`, picks the `Stable` release and the file for this platform |
-| [`CliPlatformKey`](../src/MyPersonalDrive/Services/CliPlatformKey.cs) | Maps the running machine to the manifest's platform key, **including the glibc/musl split** |
-| [`CliVersionComparer`](../src/MyPersonalDrive/Services/CliVersionComparer.cs) | Lifts `0.6.0` out of `cli-drive@0.6.0+f8e16aac` and compares it with the manifest's bare `0.7.0` |
-| [`CliUpdateInstaller`](../src/MyPersonalDrive/Services/CliUpdateInstaller.cs) | Downloads, verifies SHA-512, then atomically replaces the executable |
+| [`CliReleaseFeed`](../src/MyPersonalDrive/Services/Providers/Proton/CliReleaseFeed.cs) | GETs `https://proton.me/download/drive/cli/version.json`, picks the `Stable` release and the file for this platform |
+| [`CliPlatformKey`](../src/MyPersonalDrive/Services/Providers/Proton/CliPlatformKey.cs) | Maps the running machine to the manifest's platform key, **including the glibc/musl split** |
+| [`CliVersionComparer`](../src/MyPersonalDrive/Services/Providers/Proton/CliVersionComparer.cs) | Lifts `0.6.0` out of `cli-drive@0.6.0+f8e16aac` and compares it with the manifest's bare `0.7.0` |
+| [`CliUpdateInstaller`](../src/MyPersonalDrive/Services/Providers/Proton/CliUpdateInstaller.cs) | Downloads, verifies SHA-512, then atomically replaces the executable |
 
 The manifest is the same source of truth as the human download page — the SHA-512 values match.
 `CliReleaseManifest`'s PascalCase property names are the manifest's own and are registered in

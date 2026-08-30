@@ -6,7 +6,7 @@ description: Add or change a Proton Drive CLI command end-to-end (ProtonDriveSer
 # Add a Proton Drive CLI command
 
 The app never talks to Proton's API. Every remote operation is a `proton-drive` process whose
-stdout is parsed. That boundary is `src/MyPersonalDrive/Services/` and it has a fixed shape —
+stdout is parsed. That boundary is `src/MyPersonalDrive/Services/Providers/Proton/` (behind `ICloudDriveProvider`, see docs/PLAN-CLOUD-PROVIDERS.md) and it has a fixed shape —
 follow it, don't invent a parallel path.
 
 ## Before writing code
@@ -24,7 +24,7 @@ follow it, don't invent a parallel path.
 
 ## Steps
 
-1. **Add the method to `ProtonDriveService`** (`src/MyPersonalDrive/Services/ProtonDriveService.cs`).
+1. **Add the method to `ProtonDriveService`** (`src/MyPersonalDrive/Services/Providers/Proton/ProtonDriveService.cs`).
    - Build `IReadOnlyList<string>` arguments and pass them to `_executor.ExecuteAsync`.
      One element per process argument — `ProcessStartInfo.ArgumentList` handles escaping.
      **Never** concatenate into a pre-quoted string; it cannot round-trip names with quotes
@@ -48,13 +48,13 @@ follow it, don't invent a parallel path.
      no alias guessing.
 
 3. **Classify new failure modes** in `CliErrorClassifier`
-   (`src/MyPersonalDrive/Services/CliErrorClassifier.cs`).
+   (`src/MyPersonalDrive/Services/Providers/Proton/CliErrorClassifier.cs`).
    - The CLI has no per-failure exit codes, so this is substring matching against both streams
      concatenated (stderr then stdout — a crash writes the banner to stderr and the diagnosis to
      stdout). Keep it that way.
-   - If the command can fail in a way no existing `CliErrorKind` covers, add a kind rather than
+   - If the command can fail in a way no existing `DriveErrorKind` covers, add a kind rather than
      letting it fall to `Unknown` and get surfaced as a generic error.
-   - Callers switch on `CliException.Kind`. Never re-introduce message substring checks upstream.
+   - Callers switch on `DriveException.Kind`. Never re-introduce message substring checks upstream.
 
 4. **AOT safety.** The app project is `PublishAot=true`. Any new type you serialize must be
    registered in `AppJsonContext` (`[JsonSerializable(typeof(T))]`). No reflection-based
@@ -84,7 +84,7 @@ follow it, don't invent a parallel path.
 - [ ] Real CLI output captured, not guessed
 - [ ] Arguments as a list, cancellation token forwarded, timeout justified
 - [ ] Empty result distinguished from unparseable result
-- [ ] New failure text added to `CliErrorClassifier` (+ new `CliErrorKind` if needed)
+- [ ] New failure text added to `CliErrorClassifier` (+ new `DriveErrorKind` if needed)
 - [ ] New serialized types registered in `AppJsonContext`
 - [ ] Argument, parsing, and error tests added; `scripts/run-tests.sh` green
 - [ ] `docs/ARCHITECTURE.md` updated if the service's public surface changed

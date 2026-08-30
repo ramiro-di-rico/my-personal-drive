@@ -1,4 +1,6 @@
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Tests;
 using Xunit;
 
@@ -52,7 +54,7 @@ public class ProtonDriveCliExecutorTests : IDisposable
         // file browser — so the guarantee has to live in the executor they all share.
         //
         // The probe is a `mkdir` lock: mkdir on an existing directory fails, so any overlap makes a
-        // command exit non-zero, which the executor surfaces as a CliException.
+        // command exit non-zero, which the executor surfaces as a DriveException.
 
         var sut = new ProtonDriveCliExecutor(new FixedPathLocator("/bin/sh"), cacheRoot: _scratch);
         var lockPath = Path.Combine(_scratch, "lock");
@@ -152,7 +154,7 @@ public class ProtonDriveCliExecutorTests : IDisposable
 
         var sut = new ProtonDriveCliExecutor(new FixedPathLocator("/bin/sh"), cacheRoot: _scratch);
 
-        await Assert.ThrowsAsync<CliException>(() => sut.ExecuteAsync(["-c", "exit 3"]));
+        await Assert.ThrowsAsync<DriveException>(() => sut.ExecuteAsync(["-c", "exit 3"]));
 
         var output = await sut.ExecuteAsync(["-c", "echo recovered"]);
         Assert.Contains("recovered", output);

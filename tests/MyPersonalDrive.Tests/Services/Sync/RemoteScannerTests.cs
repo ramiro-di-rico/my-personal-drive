@@ -1,4 +1,6 @@
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
 using Xunit;
@@ -43,7 +45,8 @@ public class RemoteScannerTests
         var executor = new FakeCliExecutor();
         executor.RespondForPath("/my-files/Docs", $"[{FileJson("u1", "a.txt", 10, "2026-01-01T00:00:00.000Z", "hash-a")}]");
         var service = new ProtonDriveService(executor);
-        var scanner = new RemoteScanner(service);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider);
         var mapper = new PathMapper("/my-files/Docs", "/home/user/Docs");
 
         var result = await scanner.ScanAsync("/my-files/Docs", mapper, new ExclusionMatcher());
@@ -62,7 +65,8 @@ public class RemoteScannerTests
         executor.RespondForPath("/my-files/Docs", $"[{FolderJson("u-sub", "sub")}]");
         executor.RespondForPath("/my-files/Docs/sub", $"[{FileJson("u-file", "b.txt", 5, "2026-01-01T00:00:00.000Z", "hash-b")}]");
         var service = new ProtonDriveService(executor);
-        var scanner = new RemoteScanner(service);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider);
         var mapper = new PathMapper("/my-files/Docs", "/home/user/Docs");
 
         var result = await scanner.ScanAsync("/my-files/Docs", mapper, new ExclusionMatcher());
@@ -79,7 +83,8 @@ public class RemoteScannerTests
         var executor = new FakeCliExecutor();
         executor.RespondForPath("/my-files/Docs", $"[{FolderJson("u-git", ".git")}, {FileJson("u-file", "real.txt", 1, "2026-01-01T00:00:00.000Z", "hash")}]");
         var service = new ProtonDriveService(executor);
-        var scanner = new RemoteScanner(service);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider);
         var mapper = new PathMapper("/my-files/Docs", "/home/user/Docs");
 
         var result = await scanner.ScanAsync("/my-files/Docs", mapper, new ExclusionMatcher());
@@ -97,7 +102,8 @@ public class RemoteScannerTests
         var executor = new FakeCliExecutor();
         executor.RespondForPath("/my-files/Docs", "[]");
         var service = new ProtonDriveService(executor);
-        var scanner = new RemoteScanner(service);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider);
         var mapper = new PathMapper("/my-files/Docs", "/home/user/Docs");
 
         var result = await scanner.ScanAsync("/my-files/Docs", mapper, new ExclusionMatcher());
@@ -119,7 +125,8 @@ public class RemoteScannerTests
         }
 
         var service = new ProtonDriveService(executor);
-        var scanner = new RemoteScanner(service, maxConcurrency);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider, maxConcurrency);
         var mapper = new PathMapper("/my-files/Docs", "/home/user/Docs");
 
         await scanner.ScanAsync("/my-files/Docs", mapper, new ExclusionMatcher());
@@ -172,10 +179,11 @@ public class RemoteScannerTests
         var executor = new FakeCliExecutor();
         executor.RespondForPath("/my-files/Docs", $"[{FileJson("uid-ok", "ok.txt", 3, "2026-01-01T00:00:00.000Z", "hash-ok")}, {FileJson("uid-slash", "in/voice.pdf", 3, "2026-01-01T00:00:00.000Z", "hash-slash")}]");
         var service = new ProtonDriveService(executor);
-        var scanner = new RemoteScanner(service);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider);
 
         var skipped = new List<string>();
-        scanner.NodeSkipped += (_, name) => skipped.Add(name);
+        scanner.NodeSkipped += (_, skip) => skipped.Add(skip.Name);
 
         var result = await scanner.ScanAsync("/my-files/Docs", new PathMapper("/my-files/Docs", "/tmp/x"), new ExclusionMatcher([]));
 
@@ -191,11 +199,81 @@ public class RemoteScannerTests
         var executor = new FakeCliExecutor();
         executor.RespondForPath("/my-files/Docs", $"[{FolderJson("uid-ab", "a/b")}]");
         var service = new ProtonDriveService(executor);
-        var scanner = new RemoteScanner(service);
+        var provider = new ProtonDriveProvider(service);
+        var scanner = new RemoteScanner(provider);
 
         var result = await scanner.ScanAsync("/my-files/Docs", new PathMapper("/my-files/Docs", "/tmp/x"), new ExclusionMatcher([]));
 
         Assert.Empty(result);
         Assert.Single(executor.Calls); // only the root was listed
+    }
+
+    // ---- case-insensitive providers (docs/PLAN-CLOUD-PROVIDERS.md §2.4, P3) ----
+    // Proton itself is always case-sensitive; these exercise the generic detection through a
+    // decorator that only overrides Paths.Comparison, since no case-insensitive provider exists yet.
+
+    [Fact]
+    public async Task OnACaseInsensitiveProvider_TwoNamesDifferingOnlyByCase_AreBothSkippedAndReported()
+    {
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath("/my-files/Docs",
+            $"[{FileJson("uid-1", "Report.txt", 3, "2026-01-01T00:00:00.000Z", "hash-1")}, " +
+            $"{FileJson("uid-2", "report.txt", 4, "2026-01-01T00:00:00.000Z", "hash-2")}]");
+        var provider = new CaseInsensitivePathsDecorator(new ProtonDriveProvider(new ProtonDriveService(executor)));
+        var scanner = new RemoteScanner(provider);
+
+        var skipped = new List<string>();
+        scanner.NodeSkipped += (_, skip) => skipped.Add(skip.Name);
+
+        var result = await scanner.ScanAsync("/my-files/Docs", new PathMapper("/my-files/Docs", "/tmp/x"), new ExclusionMatcher([]));
+
+        Assert.Empty(result);
+        Assert.Equal(new HashSet<string> { "Report.txt", "report.txt" }, skipped.ToHashSet());
+    }
+
+    [Fact]
+    public async Task OnACaseInsensitiveProvider_NamesDifferingByMoreThanCase_AreNotTreatedAsCollisions()
+    {
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath("/my-files/Docs", $"[{FileJson("uid-1", "a.txt", 3, "2026-01-01T00:00:00.000Z", "hash-1")}]");
+        var provider = new CaseInsensitivePathsDecorator(new ProtonDriveProvider(new ProtonDriveService(executor)));
+        var scanner = new RemoteScanner(provider);
+
+        var result = await scanner.ScanAsync("/my-files/Docs", new PathMapper("/my-files/Docs", "/tmp/x"), new ExclusionMatcher([]));
+
+        Assert.Equal(["a.txt"], result.Keys);
+    }
+
+    /// <summary>
+    /// Regression test for the bug found in the P1-P5 adversarial review: the earlier
+    /// per-item implementation detected a collision only when the *second* colliding name
+    /// arrived, by which point a colliding *folder* sibling had already been queued into the
+    /// walker's next BFS wave — so its children were walked and added to the result despite the
+    /// folder itself being retracted. The fix filters collisions per sibling batch, before any of
+    /// them reach the walker's per-item queueing decision, so a colliding folder is never
+    /// descended into in the first place.
+    /// </summary>
+    [Fact]
+    public async Task OnACaseInsensitiveProvider_ACollidingFolder_IsNeverDescendedInto()
+    {
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath("/my-files/Docs",
+            $"[{FolderJson("uid-1", "Photos")}, {FolderJson("uid-2", "photos")}]");
+        // If the bug regresses, the scanner will list this folder's children and leak them into
+        // the result — RespondForPath means that call would actually succeed, which is exactly
+        // what must not happen.
+        executor.RespondForPath("/my-files/Docs/Photos", $"[{FileJson("uid-3", "vacation.jpg", 5, "2026-01-01T00:00:00.000Z", "hash-3")}]");
+        var provider = new CaseInsensitivePathsDecorator(new ProtonDriveProvider(new ProtonDriveService(executor)));
+        var scanner = new RemoteScanner(provider);
+
+        var skipped = new List<string>();
+        scanner.NodeSkipped += (_, skip) => skipped.Add(skip.Name);
+
+        var result = await scanner.ScanAsync("/my-files/Docs", new PathMapper("/my-files/Docs", "/tmp/x"), new ExclusionMatcher([]));
+
+        Assert.Empty(result);
+        Assert.Equal(new HashSet<string> { "Photos", "photos" }, skipped.ToHashSet());
+        // Only the root listing happened; "Photos"'s children were never listed at all.
+        Assert.Single(executor.Calls);
     }
 }

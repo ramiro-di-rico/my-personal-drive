@@ -17,11 +17,14 @@ namespace MyPersonalDrive.Services;
 public sealed class FolderMetricsStore
 {
     private readonly string _connectionString;
+    private readonly string _accountKey;
 
-    public FolderMetricsStore(string dbPath)
+    /// <param name="accountKey">See <see cref="DriveCacheService"/>'s constructor doc — same account-scoping (docs/PLAN-CLOUD-PROVIDERS.md P4).</param>
+    public FolderMetricsStore(string dbPath, string accountKey = "proton:default")
     {
         Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
         _connectionString = SqliteOffThread.ConnectionStringFor(dbPath);
+        _accountKey = accountKey;
 
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
@@ -43,13 +46,13 @@ public sealed class FolderMetricsStore
             await connection.OpenAsync(cancellationToken);
             var command = connection.CreateCommand();
             command.CommandText = """
-                INSERT INTO FolderMetrics (Path, FileCount, FolderCount, TotalSize, UnknownSizeCount,
+                INSERT INTO FolderMetrics (AccountKey, Path, FileCount, FolderCount, TotalSize, UnknownSizeCount,
                                            ScannedFolderCount, NewestModifiedAt, OldestModifiedAt,
                                            BucketsJson, ComputedAt)
-                VALUES (@Path, @FileCount, @FolderCount, @TotalSize, @UnknownSizeCount,
+                VALUES (@AccountKey, @Path, @FileCount, @FolderCount, @TotalSize, @UnknownSizeCount,
                         @ScannedFolderCount, @NewestModifiedAt, @OldestModifiedAt,
                         @BucketsJson, @ComputedAt)
-                ON CONFLICT(Path) DO UPDATE SET
+                ON CONFLICT(AccountKey, Path) DO UPDATE SET
                     FileCount = excluded.FileCount,
                     FolderCount = excluded.FolderCount,
                     TotalSize = excluded.TotalSize,
@@ -60,6 +63,7 @@ public sealed class FolderMetricsStore
                     BucketsJson = excluded.BucketsJson,
                     ComputedAt = excluded.ComputedAt;
                 """;
+            command.Parameters.AddWithValue("@AccountKey", _accountKey);
             command.Parameters.AddWithValue("@Path", metrics.Path);
             command.Parameters.AddWithValue("@FileCount", metrics.FileCount);
             command.Parameters.AddWithValue("@FolderCount", metrics.FolderCount);
@@ -80,7 +84,8 @@ public sealed class FolderMetricsStore
         using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
-        command.CommandText = SelectSql + " WHERE Path = @Path";
+        command.CommandText = SelectSql + " WHERE AccountKey = @AccountKey AND Path = @Path";
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@Path", path);
 
         using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -105,6 +110,7 @@ public sealed class FolderMetricsStore
             using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             var command = connection.CreateCommand();
+            command.Parameters.AddWithValue("@AccountKey", _accountKey);
 
             var parameterNames = new List<string>(paths.Count);
             for (var i = 0; i < paths.Count; i++)
@@ -114,7 +120,7 @@ public sealed class FolderMetricsStore
                 command.Parameters.AddWithValue(name, paths[i]);
             }
 
-            command.CommandText = $"{SelectSql} WHERE Path IN ({string.Join(", ", parameterNames)})";
+            command.CommandText = $"{SelectSql} WHERE AccountKey = @AccountKey AND Path IN ({string.Join(", ", parameterNames)})";
 
             using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
@@ -143,10 +149,12 @@ public sealed class FolderMetricsStore
         var command = connection.CreateCommand();
         command.CommandText = """
             DELETE FROM FolderMetrics
-            WHERE Path = @Path
-               OR Path LIKE @Descendants
-               OR @Path LIKE Path || '/%';
+            WHERE AccountKey = @AccountKey
+              AND (Path = @Path
+                   OR Path LIKE @Descendants
+                   OR @Path LIKE Path || '/%');
             """;
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@Path", path);
         command.Parameters.AddWithValue("@Descendants", path + "/%");
         await command.ExecuteNonQueryAsync(cancellationToken);

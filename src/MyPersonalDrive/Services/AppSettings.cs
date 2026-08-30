@@ -27,6 +27,26 @@ public sealed class AppSettings
 
     public bool SortDescending { get; set; }
 
+    /// <summary>
+    /// The user's chosen provider, as the name of a <see cref="Providers.ProviderId"/>. Same
+    /// string-not-enum reasoning as <see cref="ViewMode"/>, plus one more: a value naming a
+    /// provider this build can't construct (an older provider removed, or a settings file from a
+    /// newer build) must degrade to Proton rather than throw at startup. Read it through
+    /// <see cref="ActiveProviderOrDefault"/>. See docs/PLAN-CLOUD-PROVIDERS.md P5.
+    /// </summary>
+    public string ActiveProvider { get; set; } = nameof(Providers.ProviderId.Proton);
+
+    /// <summary>
+    /// The Azure app registration's (public client) application id, entered in Settings rather
+    /// than embedded in the binary — kept separate from Proton's fields entirely rather than
+    /// generalized into a provider-keyed settings shape: OneDrive's connection card (sign-in/out +
+    /// account label) has no field this could double up with. See docs/PLAN-CLOUD-PROVIDERS.md P6.
+    /// </summary>
+    public string OneDriveClientId { get; set; } = string.Empty;
+
+    /// <summary>Cached hint mirroring <see cref="IsAuthenticated"/> for OneDrive — the actual token lives in <c>onedrive-token.json</c>, not here.</summary>
+    public bool IsOneDriveAuthenticated { get; set; }
+
     public Models.DriveSortKey SortKeyOrDefault()
         => Enum.TryParse<Models.DriveSortKey>(SortKey, ignoreCase: true, out var key)
             ? key
@@ -36,4 +56,9 @@ public sealed class AppSettings
         => Enum.TryParse<Models.DriveViewMode>(ViewMode, ignoreCase: true, out var mode)
             ? mode
             : Models.DriveViewMode.List;
+
+    public Providers.ProviderId ActiveProviderOrDefault()
+        => Enum.TryParse<Providers.ProviderId>(ActiveProvider, ignoreCase: true, out var id)
+            ? id
+            : Providers.ProviderId.Proton;
 }

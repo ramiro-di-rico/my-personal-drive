@@ -1,0 +1,38 @@
+namespace MyPersonalDrive.ViewModels.Sync;
+
+/// <summary>
+/// One chip in the Sync window's "filter by account" row (docs/PLAN-CLOUD-PROVIDERS.md P9) — the
+/// same shape as <c>ViewModels.KindFilterViewModel</c>, the folder browser's own "filter by type"
+/// chips, reused here rather than inventing a second pattern for the same idea.
+///
+/// <see cref="AccountLabel"/> null is the "Todos" chip: filtering is a view state, and the way out
+/// of it has to be as visible as the way in.
+/// </summary>
+public sealed class ProviderFilterViewModel : ObservableObject
+{
+    private bool _isActive;
+
+    public ProviderFilterViewModel(string? accountLabel, int count, Func<string?, Task> apply, Action<Exception>? onError = null)
+    {
+        AccountLabel = accountLabel;
+        Count = count;
+        Label = accountLabel ?? "Todos";
+        ApplyCommand = new AsyncCommand(() => apply(accountLabel), onError: onError);
+    }
+
+    public string? AccountLabel { get; }
+
+    public int Count { get; }
+
+    public string Label { get; }
+
+    public string LabelWithCount => $"{Label} ({Count:n0})";
+
+    public bool IsActive
+    {
+        get => _isActive;
+        set => SetProperty(ref _isActive, value);
+    }
+
+    public AsyncCommand ApplyCommand { get; }
+}

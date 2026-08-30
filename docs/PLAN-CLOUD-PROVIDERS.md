@@ -15,7 +15,7 @@
 > [P7](#p7--optional-more-than-one-account-active-at-once), but every schema and settings change in
 > P1–P6 is designed so P7 is additive and needs no second migration of user data.
 >
-> Companions: [ARCHITECTURE.md](ARCHITECTURE.md) (current state, commit `a1e85d5`),
+> Companions: [ARCHITECTURE.md](ARCHITECTURE.md) (current state, commit `8637915`),
 > [PLAN-LOCAL-SYNC.md](PLAN-LOCAL-SYNC.md) (the sync engine this seam sits under; **Appendix A** is
 > the verified Proton CLI behavior that several of the abstractions below exist to contain),
 > [PLAN-BROWSER-VIEWS.md](PLAN-BROWSER-VIEWS.md) (the metrics scanners that also hold a service),
@@ -24,14 +24,319 @@
 
 ## Status
 
-- [ ] **P1** — provider interfaces + `ProtonDriveProvider` adapter, mechanical call-site swap. Not started.
-- [ ] **P2** — generalize the error and activity (console) contract off the CLI. Not started.
-- [ ] **P3** — per-provider path syntax and content-hash algorithm. Not started.
-- [ ] **P4** — account-scope the persisted state (`cache.db` migration 6). Not started.
-- [ ] **P5** — provider selection in settings; provider-specific settings sections. Not started.
-- [ ] **P6** — `OneDriveProvider` over Microsoft Graph. Not started.
-- [ ] **P7** — *optional* multiple active accounts. Not started, deliberately last.
-- [ ] **P8** — *optional* delta-based remote scanning where the provider supports it. Not started.
+- [x] **P1 — provider interfaces + `ProtonDriveProvider` adapter, mechanical call-site swap.**
+      `Services/Providers/{ICloudDriveProvider,IDriveOperations,IDriveAuthenticator,IRemoteViewInvalidator,IProviderDiagnostics,ProviderCapabilities,ProviderId}.cs`
+      added; `ProtonDriveService`, `ProtonDriveCliExecutor`, `ProtonDriveCliLocator`,
+      `CliErrorClassifier`, `CliReleaseFeed`, `CliUpdateInstaller`, `CliPlatformKey`,
+      `CliVersionComparer` (+ their interfaces) moved to `Services/Providers/Proton/` with a
+      `ProtonDriveProvider` adapter alongside them. `App.axaml.cs`, `SyncExecutor`,
+      `SyncBaselineWriter`, `RemoteScanner`, `RemoteTreeWalker`, `FolderStatsScanner` and
+      `MainWindowViewModel` now depend on `ICloudDriveProvider`/`IDriveOperations` instead of
+      `ProtonDriveService`. Two deliberate deviations from §2 as originally written, kept minimal
+      on purpose: `IDriveAuthenticator` ships as `AuthenticateAsync`/`LogoutAsync` only (the
+      richer `AuthStatus`/`IAuthPrompt` shape is deferred to P6, when OneDrive's OAuth flow
+      actually needs it); `IProviderPathSyntax` and the `ProviderActivity`/`DriveException`
+      rename were **not** done — `HasUnmappableName`/`CombinePath` are still called as
+      `Providers.Proton.ProtonDriveService` statics (flagged inline in `RemoteScanner` and
+      `MainWindowViewModel`, and in Appendix B), and the console events keep today's
+      `Cli*EventArgs` shape on `ICloudDriveProvider` — both are explicitly P2/P3's job, not P1's.
+      `CliException`/`CliErrorKind`/`CliCommandEventArgs` were left in `Services/` unmoved for the
+      same reason. Verified: `./scripts/run-tests.sh` green (561 passed, 5 skipped-integration),
+      `dotnet publish -r linux-x64` AOT-clean (no IL2xxx/IL3xxx), and the published binary runs
+      against a stub CLI with no crash.log. Landed on branch `feature/cloud-providers-seam`.
+- [x] **P2 — generalize the error and activity (console) contract off the CLI.**
+      `CliException`/`CliErrorKind` renamed to `DriveException`/`DriveErrorKind` and moved to
+      `Services/Providers/` (member names/values kept, plus two new kinds: `RateLimited`,
+      `Conflict`). Added `Services/Providers/ProviderActivity.cs`
+      (`ActivityKind` + `ProviderActivity`); `ICloudDriveProvider`'s three
+      `CommandStarted`/`CommandOutput`/`CommandFinished` events collapsed into one
+      `event EventHandler<ProviderActivity>? Activity`, with `ProtonDriveProvider` doing the
+      translation from the CLI-shaped events it still gets from `ProtonDriveService`.
+      `MainWindowViewModel`'s three `OnCommand*` handlers became one `OnActivity`;
+      `FormatCliError` renamed to `FormatDriveError`. `CliCommandEventArgs.cs` moved to
+      `Services/Providers/Proton/` (it is now purely that provider's internal executor-event
+      shape). Added `ProtonDriveProviderTests` covering the Started→Finished translation.
+      Deviation: **`StrictListingParsing` was left on the flat `AppSettings`**, not moved into a
+      Proton settings section — P5 already owns building the real per-provider settings
+      structure (`ProviderSettings` keyed by provider id, migrating `CliPath`/`IsAuthenticated`);
+      building a one-off nested section for this single flag now would just be redone there.
+      Verified: 562 tests pass (561 + the new provider test), app and AOT builds clean.
+- [x] **P3 — per-provider path syntax and content-hash algorithm.**
+      Added `Services/Providers/IProviderPathSyntax.cs` (`Combine`, `IsRemoteNameMappableLocally`,
+      `Comparison`) and `Providers/Proton/ProtonPathSyntax.cs` (delegates to
+      `ProtonDriveService.CombinePath`/`HasUnmappableName`); `ICloudDriveProvider.Paths` exposes
+      it. `RemoteScanner` and `MainWindowViewModel` now go through `provider.Paths` instead of the
+      static Proton calls; `RemoteScanner` also reports a case-collision as a skipped node when
+      `Paths.Comparison` is case-insensitive (inert for Proton, exercised via a test decorator
+      since no case-insensitive provider exists yet).
+      Added `Services/Providers/IContentHasher.cs` + `Sha1ContentHasher.cs` (wraps
+      `LocalFileHasher`); `SyncExecutor` and `SyncBaselineWriter` take a hasher and a
+      `RemoteHashAlgorithm` via optional constructor parameters (default: Sha1, so every existing
+      call site is unaffected) and tag every `NodeFingerprint` they build with which algorithm
+      produced its hash. `SyncReconciler.AreEquivalent` gained the mismatch guard: two hashes are
+      only compared when both sides' algorithm tags agree (or are unset); otherwise it falls back
+      to size+mtime instead of reporting a spurious change. `RemoteHashAlgorithm` moved from
+      `Services/Providers/ProviderCapabilities.cs` to `Models/RemoteHashAlgorithm.cs` so
+      `NodeFingerprint` (a plain data record) can carry it without depending on `Services`.
+      **Deviations:** `PathMapper` was *not* injected with `IProviderPathSyntax` — it never called
+      `CombinePath`/`HasUnmappableName` in the first place (it builds remote paths by plain `/`
+      concatenation, which is exactly equivalent since an unmappable name is filtered by
+      `RemoteScanner` before any relative path reaches it); injecting an unused dependency there
+      would be abstraction with nothing to justify it. `IProviderPathSyntax` also omits `Root`,
+      `GetParent` and `IsLocalNameMappableRemotely` from §2.4's original design — nothing calls
+      them yet (the upload-side check is a P6 concern once OneDrive's own rules exist to test
+      against). `SyncReconciler`'s dictionaries stay `StringComparer.Ordinal`, per §2.4's own
+      decision, not a deviation.
+      Verified: 565 tests pass (2 new RemoteScanner case-collision tests, 1 new
+      SyncReconciler algorithm-mismatch test — confirmed load-bearing by temporarily removing the
+      guard and watching the test fail with a spurious upload), AOT publish clean, published
+      binary runs against a stub CLI.
+- [x] **P4 — account-scope the persisted state (`cache.db` migration 6).**
+      Migration 6 adds `AccountKey` (default `'proton:default'`) to `DriveItems`, `FolderMetrics`
+      and `SyncPairs`, rebuilding each table's primary key/unique constraint, plus
+      `SyncState.HashAlgorithm` (a plain `ALTER TABLE ADD COLUMN`, no rebuild needed).
+      `DriveCacheService`, `FolderMetricsStore` and `SyncStateStore` take an `accountKey`
+      constructor parameter (default `'proton:default'`, so every existing call site — including
+      `App.axaml.cs`, unchanged until P5 gives it something else to pass — keeps working) and add
+      it to every `CommandText` touching `DriveItems`/`FolderMetrics`/`SyncPairs` (`SyncState`,
+      `SyncQueue`, `SyncLog` are keyed by `PairId`, which is only ever obtained from an
+      already-scoped `GetPairsAsync`, so they inherit the scoping rather than needing their own
+      column). `SyncStateStore` also now reads/writes `SyncState.HashAlgorithm` for P3's guard.
+      `NodeFingerprint` reconstructed from a pre-migration-6 row gets `HashAlgorithm: null`
+      ("unknown"), which the P3 guard already treats as "not a mismatch."
+      **Two real bugs found and fixed while verifying this against a copy of a real, warm
+      `cache.db`** (not a synthetic one — the R1 risk this plan calls out by name):
+      1. The original migration SQL renamed `SyncPairs`/`DriveItems`/`FolderMetrics` out of the
+         way before recreating them under the same name. SQLite's `ALTER TABLE … RENAME` silently
+         rewrites *every other table's* schema that references the renamed one in a foreign key —
+         `SyncQueue`/`SyncState` declare `PairId … REFERENCES SyncPairs(Id)` — so their FK clause
+         got rewritten to point at the throwaway `SyncPairs_pre6` name, and the subsequent
+         `DROP TABLE SyncPairs_pre6` left them referencing a table that no longer existed. First
+         symptom: a `SyncQueue` insert failing with "no such table: main.SyncPairs_pre6" — a name
+         that appears nowhere in that statement. Fixed by never renaming the original table at
+         all: create the replacement under a temp name, copy data in, drop the original, rename
+         the *replacement* into the final name — nothing references the temp name, so nothing
+         gets rewritten.
+      2. Even with that reordering, `DROP TABLE SyncPairs` (now dropping only the never-renamed
+         original) with `PRAGMA foreign_keys=ON` — which `SyncStateStore.OpenConnection` always
+         sets — is treated by SQLite as deleting every row of the parent table first, which
+         **cascades**: it silently deleted all 568 `SyncState` rows and both `SyncQueue` rows in
+         the test copy before the migration even finished. Fixed at the root, in
+         `SqliteMigrationRunner.Apply` itself (not per-migration): foreign key enforcement is now
+         switched off for the duration of *any* migration run and restored to whatever the caller
+         had before returning, since any future migration that rebuilds an FK target would hit the
+         exact same footgun.
+      Verified end to end: 565 tests pass; a copy of this machine's real `cache.db` (171
+      `DriveItems`, 4 `SyncPairs`, 568 `SyncState`, 2 `SyncQueue` rows) migrated with zero FK
+      violations and byte-for-byte-equal row counts before/after, and a write through the
+      migrated schema (`EnqueueActionsAsync`) succeeded; AOT publish clean; **the migration was
+      then run for real** against this machine's actual `~/.config/MyPersonalDrive/cache.db` via
+      the published binary (full directory backed up first to
+      `~/.config/MyPersonalDrive.pre-p4-backup`) — same result, `user_version` now 6, all rows
+      intact, app stayed running.
+- [x] **P5 (partial) — provider selection scaffolding in settings.**
+      Added `Services/Providers/{ProviderDescriptor,IProviderCatalog,ProviderCatalog}.cs`: the
+      catalog centralizes the Proton-construction wiring that used to sit inline in
+      `App.axaml.cs` (`ProtonDriveCliLocator` → `ProtonDriveCliExecutor` → `ProtonDriveService` →
+      `ProtonDriveProvider`) behind `Create(ProviderId, AppSettingsService)`, and exposes
+      `Available` — today exactly one entry, Proton — for a settings-view picker to enumerate.
+      `AppSettings.ActiveProvider` (string, `nameof(ProviderId.Proton)` default,
+      `ActiveProviderOrDefault()` — same degrade-on-unrecognized-value contract as `ViewMode`) is
+      read once, in `App.axaml.cs`, to choose which provider `catalog.Create` builds.
+      `MainWindowViewModel` gained `AvailableProviders` (from the injected/default catalog) and
+      `ActiveProviderDisplayName` (`_provider.DisplayName`); the settings view's connection card
+      shows the active provider's name above the CLI-path row.
+      **Deliberately not done, and why:** the plan's "switching provider with sync pairs
+      configured must be blocked or explicit... persist and prompt for restart" flow, and moving
+      `AppSettings.CliPath`/`IsAuthenticated` into a provider-scoped structure, are **deferred to
+      P6**. `AvailableProviders` has exactly one entry today — there is nothing to switch *to*,
+      so a confirmation/restart flow built now would be exercised only by a synthetic second
+      provider in a unit test, never by the real UI, which is exactly the kind of untested,
+      premature surface this plan has avoided building at every other phase (P1's
+      `IDriveAuthenticator`, P3's `IProviderPathSyntax` members). Restructuring `AppSettings` into
+      a dictionary now, before OneDrive's actual settings shape (a token path, no `CliPath` at
+      all) is known, risks designing the wrong shape and redoing it in P6 anyway. Both land
+      together with P6, when there is a second real provider to build and verify them against.
+      Verified: 573 tests pass (8 new — `ProviderCatalogTests`, `MainWindowProviderTests`, two
+      `AppSettings.ActiveProviderOrDefault` cases), AOT publish clean, published binary runs
+      against a stub CLI with no crash. The new settings-view label could not be visually
+      confirmed in this sandbox (screenshot tooling unavailable here — `import`/`xwd` both failed
+      to capture despite a live X display); the binding itself is covered by
+      `MainWindowProviderTests.ActiveProviderDisplayName_ReflectsTheInjectedProvider`, but an
+      actual look at the running window is still owed before calling this fully done.
+- [x] **P6 (core paths live-verified)** — `OneDriveProvider` over Microsoft Graph, plus the
+      P5 items that only made sense with a second real provider to build them against.
+      Added `Services/Providers/OneDrive/`: `GraphAuthenticator` (authorization-code + PKCE via a
+      loopback `HttpListener`, no MSAL, no device-code fallback — documented gap),
+      `OneDriveTokenStore` (`onedrive-token.json`, chmod 600 — accepted plaintext risk, R3),
+      `GraphHttpClient` (bearer attach, 401-refresh-retry-once, `Retry-After` honored on 429/503),
+      `GraphErrorClassifier` (status + structured `error.code` → `DriveErrorKind`),
+      `OneDriveOperations` (paginated listing, small-vs-chunked upload, async copy + polling,
+      cached per-target move/copy id lookups), `OneDrivePathSyntax` (`OrdinalIgnoreCase`,
+      the O6 reserved-name rule), `QuickXorHasher`, `OneDriveProvider` (the facade). Extended
+      `IProviderPathSyntax` with `IsLocalNameMappableRemotely` (Proton: always true; OneDrive: the
+      real rule) — wiring it into the upload path itself (a `LocalScanner`/`SyncExecutor`
+      skip-with-reason) was **not** done: `LocalScanner` has no provider dependency to call it
+      through, and adding one was wider surgery than this pass — an OneDrive upload of an
+      unmappable local name still fails as a raw Graph 400 today rather than a clean skip; tracked
+      as follow-up, not silently dropped. `ProviderCatalog` now registers OneDrive
+      (`Available`/`Create`/`ResolveOrDefault`); `AppSettings` gained `OneDriveClientId` (entered
+      in Settings, not embedded — a public-client id isn't secret, but keeping it out of the repo
+      avoids tying the app to one person's app registration) and `IsOneDriveAuthenticated`, kept
+      **separate** from Proton's `CliPath`/`IsAuthenticated` rather than unified into a
+      provider-keyed structure — the two connection cards are structurally different enough that
+      there was nothing to share; a real per-provider settings shape stays deferred, now to P7.
+      Fixed a real gap this phase's own code surfaced: `App.axaml.cs` now computes `accountKey` as
+      `{provider.Id}:default` (lowercased) and passes it to `DriveCacheService`/`SyncStateStore`/
+      `FolderMetricsStore` — previously every store defaulted to `"proton:default"` unconditionally
+      (P4's own doc comment had flagged this as owed once a second provider existed), so switching
+      to OneDrive would have let its cache/sync-pair rows collide with Proton's under the same
+      sentinel. UI: a provider picker in Settings → Connection (confirm + restart, §2.7 — no live
+      hot-swap), Proton's and OneDrive's connection cards each `IsVisible`-gated on the active
+      provider, the version/self-update rows gated on `HasDiagnostics` rather than a
+      Proton-specific flag.
+
+      `SyncPanelViewModel` gained an optional `providerDisplayName` constructor parameter
+      (defaulting to `"Proton Drive"`, so every existing call site — tests above all — keeps
+      working unchanged) and now interpolates it into its two Proton-named strings, per §5 item 3.
+
+      **Deliberately not done, and why:** device-code auth fallback (no browser-less machine to
+      support yet); the `IsLocalNameMappableRemotely` upload-path wiring above; a provider-keyed
+      settings structure (P7, once multi-account forces the issue anyway); a full sweep of every
+      remaining Proton-named string beyond the ones §5 item 3 named (e.g. context-menu labels) —
+      cosmetic, parked via the `debt` skill rather than chased here.
+
+      **Live-verified (R6), 2026-08-27 — see Appendix A for the full findings:** real sign-in
+      (after discovering the Azure app registration needs its "Mobile and desktop applications"
+      platform added explicitly — Appendix A #1), a real `ListFolderAsync("/")` against a live
+      personal account (#2), and a real small-file upload. `QuickXorHasher` was **wrong on its
+      first attempt** — an accumulator storage/wraparound bug that live verification caught: 18 of
+      20 output bytes matched Graph's own reported hash, the first byte didn't. Root cause and fix
+      in Appendix A #3; rewritten as a genuinely circular 160-bit bit array and **confirmed
+      matching Graph's real `quickXorHash` on two separate uploads** after the fix. Not yet
+      captured live: pagination past one page, chunked upload, async copy, rate-limiting, and the
+      exact O6 reserved-name list — still per Microsoft's docs only, per Appendix A's "not yet
+      captured" note.
+
+      Verified: 715 tests pass, 6 skipped opt-in (75 new tests overall — `FakeHttpMessageHandler`-
+      based unit tests plus the live integration test above; no real account needed for the
+      unit-test count), 0 IL2xxx/IL3xxx trim/AOT warnings on a `linux-x64` self-contained publish
+      (R4), the published binary launches and stays up.
+- [x] **P7, Phase A** — Proton and OneDrive active and syncing at once, no restart. Scope
+      narrowed from the original sketch: exploration found Proton's CLI has no multi-account
+      concept of its own (`auth login`/`auth logout` against one CLI installation), so true
+      multiple accounts of the *same* provider stays out of scope (would need CLI
+      config-directory isolation) — the real shape here is at most one session per provider
+      *type*, both active together. This also removed the "global concurrency budget" problem the
+      original sketch worried about: `SyncScheduler`'s per-instance one-cycle-at-a-time semaphore
+      exists to stop two *same-provider* CLI processes from crashing each other, and with exactly
+      one session per provider that risk doesn't exist between a Proton scheduler and a OneDrive
+      scheduler — no new cross-instance gate was needed.
+
+      `App.axaml.cs` now builds an `AccountSyncContext` per provider `ProviderCatalog.Available`
+      lists (both constructed unconditionally — cheap and side-effect-free even unconfigured, real
+      failures surface lazily on first use), picks one as "primary" (the persisted
+      `ActiveProvider` preference, browsed by `MainWindowViewModel` same as before), and wires
+      every other context's sync engine + console activity alongside it.
+      `SyncPanelViewModel.AddAccount` merges a second account's pairs into the same `Pairs` list
+      (each row labeled via `SyncPairViewModel.AccountLabel`, blank when there's only one
+      account), with its own independent `AccountSyncToggleViewModel` — pausing one account's
+      automatic sync doesn't touch the other's. `MainWindowViewModel.ObserveAdditionalProviderActivity`
+      tags console lines by account (`[OneDrive] GET …`), and `CommandLogBuffer`'s cap doubled
+      (200→400) since one buffer now serves two interleaved sources.
+
+      **A live test of the actual UI (not just the Graph-level integration test) surfaced two real
+      bugs, both fixed:**
+      1. `SyncStateStore.GetAutomaticSyncEnabledAsync`/`SetAutomaticSyncEnabledAsync` read/wrote a
+         single **unscoped** row in the shared `cache.db` — toggling one account's automatic sync
+         silently toggled every account's. Fixed by scoping the key per `AccountKey`, with a
+         one-time fallback to the old unscoped key *only* for `"proton:default"` so an existing
+         single-Proton install's saved on/off choice survives the upgrade. Covered by
+         `SyncStateStoreTests`.
+      2. The explorer header ("Proton Drive browser", "Point the app at the Proton Drive CLI…")
+         was a hardcoded string — harmless when Proton was the only provider, actively misleading
+         once OneDrive could be the browsed account (a real screenshot showed "Proton Drive
+         browser" over a OneDrive folder listing). Fixed: `MainWindowViewModel.BrowserHeaderTitle`/
+         `BrowserHeaderSubtitle` are provider-neutral, computed from whichever provider is
+         actually browsed.
+
+      **Deliberately not done (Phase B):** the account-switcher *browsing* UI — extracting
+      `RootItems`/`CurrentPath`/breadcrumbs/selection/viewer/metrics out of `MainWindowViewModel`
+      into a per-account object with a `SelectedAccount` the view rebinds to, so which account
+      you're browsing can change without a restart. The Settings provider picker still requires a
+      restart to change what's *browsed* (sync/console already run for both regardless). Also not
+      done: any real same-provider multi-account support, and an "add account" flow beyond what
+      Settings already offers (both providers' settings already coexist independently).
+
+      Verified: 726 tests pass (12 new — `SyncPanelMultiAccountTests`,
+      `SyncStateStoreTests`'s two new account-scoping cases), manual test with both providers
+      configured and authenticated for real: app launches with no crash, two independent
+      automatic-sync toggles appear and behave independently, sync pairs on each account are
+      correctly labeled, and the header correctly reads "OneDrive browser" when OneDrive is the
+      browsed account.
+- [ ] **P7, general form** — *optional* true multiple accounts of the same provider (needs Proton
+      CLI config-directory isolation). Not started, deliberately last, and likely never needed
+      given Phase A's scope already covers "different providers active together."
+- [x] **P7, Phase B** — the account-switcher *browsing* UI Phase A deliberately deferred: change
+      which account `MainWindowViewModel` browses live, no restart. Implemented with a smaller
+      diff than originally sketched (mutable fields + `SwitchBrowserAccountAsync`, not a constructor
+      reshape) and one scope cut (the Settings-card decoupling/browser-toolbar switcher was not
+      attempted) — see [§P7 Phase B](#p7-phase-b--live-account-switch-for-the-browser--implemented)
+      for what shipped and why.
+- [x] **P8 (implementation landed, live verification pending)** — delta-based remote scanning for
+      OneDrive (`IDeltaSource`, `DeltaRemoteScanner`, per-pair delta tokens); Proton has no
+      delta/events command and stays on the full walk, same as a one-way pair of any provider
+      (never populates the baseline a delta scanner needs to merge onto). See
+      [the P8 phase entry below](#p8--optional-delta-based-remote-scanning--implemented-pending-live-verification)
+      for the shipped shape. **Not yet
+      done:** live verification against a real Graph account (sign in, run a delta cycle, make a
+      real change, confirm the next call reports exactly it and a two-way pair picks it up) —
+      still pending that session.
+- [x] **P9** — filter the Sync window's pair list by account/provider, using the same filter-chip
+      idiom the folder browser already uses for file kinds (`ProviderFilterViewModel`,
+      `SyncPanelViewModel.VisiblePairs`). See [§P9](#p9--filter-sync-pairs-by-provider).
+
+### Adversarial review of P1–P5 — 5 confirmed bugs fixed
+
+An 8-angle adversarial review of the full P1–P5 diff found 5 CONFIRMED correctness bugs and 5
+PLAUSIBLE cleanup/design issues. All 5 confirmed bugs are fixed, each with a regression test
+verified to fail without the fix:
+
+1. **`RemoteScanner`/`RemoteTreeWalker` case-collision leak.** The per-item collision check
+   retracted a colliding folder from the scan's `result` dictionary, but `RemoteTreeWalker` had
+   already queued that folder into the next BFS wave before the collision was even detected — so
+   its children were still walked and added, leaking part of a folder that was supposed to be
+   entirely excluded. Fixed by moving collision detection to a new `filterSiblings` hook on
+   `RemoteTreeWalker.WalkAsync`, run once per sibling batch *before* any item reaches the
+   per-node callback, so a colliding folder is never queued in the first place. Test:
+   `RemoteScannerTests.OnACaseInsensitiveProvider_ACollidingFolder_IsNeverDescendedInto`.
+2. **`ProviderId.OneDrive` could crash startup.** It's a real enum member (added in P1, ahead of
+   P6) with no catalog entry; `AppSettings.ActiveProviderOrDefault`'s `Enum.TryParse` only catches
+   a name this build has never heard of, not a valid id it can't build, so `App.axaml.cs` would
+   call `ProviderCatalog.Create` uncaught and crash. Fixed by adding
+   `IProviderCatalog.ResolveOrDefault`, which checks catalog membership (not just enum-parseability)
+   before `App.axaml.cs` ever calls `Create`. Tests: `ProviderCatalogTests.ResolveOrDefault_*`.
+3. **`SyncReconciler.DetectLocalMoves` skipped the P3 algorithm guard.** It compared a persisted
+   baseline hash against a freshly-computed candidate hash by raw string equality, with no check
+   that both came from the same `IContentHasher` — unlike `AreEquivalent`, ~50 lines away in the
+   same file, which already had this guard. Fixed by reusing `IsAlgorithmMismatch` here too. Test:
+   `AMoveIsRefused_WhenTheBaselineAndCandidateHashesCameFromDifferentAlgorithms`.
+4. **`IsAlgorithmMismatch` treated `RemoteHashAlgorithm.None` as a real algorithm**, contradicting
+   its own doc comment ("`None` or a missing tag is not treated as a mismatch: it means
+   'unknown'"). Fixed by adding an `IsKnownAlgorithm` check so only two *known*, differing
+   algorithms count as a mismatch. Test: `TwoWay_BothNew_OneSideTaggedNone_IsNotTreatedAsAnAlgorithmMismatch`.
+5. **Stale skip-log message.** Once P3 broadened `RemoteScanner.NodeSkipped` to also fire for
+   case collisions, `SyncExecutor`'s log handler still hardcoded the unmappable-name explanation
+   ("its name contains '/'") for every skip, regardless of reason. Fixed by giving `NodeSkipped` a
+   typed payload (`NodeSkip(string Name, NodeSkipReason Reason)`) instead of a bare string, so the
+   log message can be accurate per reason. Test:
+   `SyncExecutorTests.RunAsync_ACaseCollidingRemoteName_IsSkippedWithAnAccurateExplanation_NotTheSlashOne`.
+
+The 5 PLAUSIBLE findings (hasher/remoteHashAlgorithm can drift apart, `SqliteMigrationRunner`
+disables foreign keys for the whole migration run rather than just the rebuild statements, the
+`"proton:default"` sentinel and the hash-tagging ternary are each duplicated across a few files,
+and ~50 test call sites repeat provider-construction boilerplate) are cleanup/design items, not
+correctness bugs, and are left for a future pass.
 
 ---
 
@@ -458,12 +763,186 @@ account switcher and a per-account `CurrentPath`; `SyncPanelViewModel` groups pa
 The genuinely new problems are the ones no schema column solves: a global concurrency budget across
 providers, and one console feed carrying two providers' activity. Not scoped here.
 
-### P8 — *Optional:* delta-based remote scanning
+### P7 Phase B — live account switch for the browser — implemented
 
-`Capabilities.SupportsDelta` + `IDeltaSource { Task<DeltaPage> GetChangesAsync(string? token) }`,
-consumed by `RemoteScanner` when available, falling back to the full walk when the provider
-returns "token expired". Worth its own plan: it changes what a "scan" *is*, and the baseline
-correlation in `SyncReconciler` assumes a complete tree snapshot.
+Phase A deliberately deferred this (see its own "Deliberately not done (Phase B)" note above):
+switching which account `MainWindowViewModel` *browses* still persists `AppSettings.ActiveProvider`
+and asks for a restart (`MainWindowViewModel.SwitchProviderAsync`) — even though, since Phase A,
+both accounts' sync engines and console activity already run all the time regardless of which one
+is on screen. The restart is a pure browsing-UI limitation, not a sync one.
+
+**Root cause, concretely.** `MainWindowViewModel` is constructed once, at startup, against a single
+provider's whole toolchain — not just `_provider` itself, but `_cacheService`, `_statsScanner`,
+`_previewLoader`, `_imagePreviewLoader`, and browsing state (`_navigationHistory`, `_currentPath`,
+`_loadedItems`, `KindFilters`, selection). `_isAuthenticated` is worse: it's read once from
+`AppSettingsService` at construction (`_provider.Id == ProviderId.OneDrive ? settings...IsOneDriveAuthenticated : settings...IsAuthenticated`)
+and never revisited, so even today it can go stale if the user (dis)connects the *non-browsed*
+account's auth from the Conexión cards without restarting. `App.axaml.cs` builds one
+`AccountSyncContext` per provider already (for the sync engine); this phase's job is to build the
+browsing-side equivalent per account too, and let `MainWindowViewModel` hold all of them instead of
+just the primary's.
+
+**Shipped design — lower-risk than the original sketch above (kept for context; items 2 and 4 below
+changed on implementation).**
+
+1. New private `MainWindowViewModel.BrowserAccountSession` record bundling exactly the per-account
+   browsing resources: `Provider`, `CacheService`, `MetricsStore`, `StatsScanner`, `PreviewLoader`,
+   `ImagePreviewLoader`. Held in a private `_browserSessions` list, the primary registered by the
+   constructor itself (`_browserSessions[0]`), later ones via the new public
+   `AddBrowsableAccount(...)` — an additive registration method, deliberately mirroring
+   `SyncPanelViewModel.AddAccount`'s own shape (same rationale: existing callers/tests that never
+   call it are completely unaffected).
+2. **Simpler than originally planned:** rather than reshaping the constructor to take
+   `IReadOnlyList<BrowserAccountSession>` (which would have broken every existing test building a
+   `MainWindowViewModel` with one provider — there are many), `_provider`/`_cacheService`/
+   `_metricsStore`/`_statsScanner`/`_previewLoader`/`_imagePreviewLoader`/`_rootPath` simply stopped
+   being `readonly`. `SwitchBrowserAccountAsync` (replacing `SwitchProviderAsync`) reassigns all
+   seven from the target session directly — a much smaller diff than rewriting every one of the
+   ~35 `_provider.X` call sites the original sketch assumed, with identical runtime behavior. Event
+   subscriptions (`Activity`/`ListingParseWarning`) needed no changes at all: Phase A already wires
+   every account's activity permanently (`ObserveAdditionalProviderActivity`), regardless of which
+   one is being browsed, so there was nothing tied to "the active session" to re-wire.
+3. `SwitchBrowserAccountAsync(ProviderId id)`: a no-op if `id` isn't registered or already active;
+   otherwise cancels the in-flight load (`_cts`), swaps the seven fields, re-reads `IsAuthenticated`
+   fresh from `AppSettingsService` for the *new* provider (closing the staleness gap described
+   above as a side effect), clears `KindFilters`/`FilterSummary` (a deep-scan histogram belongs to
+   one specific folder on one specific account), raises property-changed for every
+   `_provider`-derived display property (`ActiveProviderDisplayName`, `BrowserHeaderTitle/Subtitle`,
+   `IsProtonActive`/`IsOneDriveActive`, `HasDiagnostics`, `OneDriveAccountLabel`, `RootPath`), then
+   calls the existing `GoToRootAsync()` (already handles cancellation-safe loading, breadcrumbs,
+   and selection reset). No confirmation dialog, no restart message; `RequestSwitchProviderConfirmationAsync`
+   was removed outright — left in place, it would have kept asking a question whose premise
+   (a restart) is no longer true.
+4. **Decoupling the Conexión tabs from browsing (originally item 4) was *not* done.**
+   `IsProtonActive`/`IsOneDriveActive` still gate both the browser's active account *and* which
+   settings connection card is shown, same as before. Narrowing scope on purpose: making both
+   settings cards always-visible would have meant auditing every Settings field
+   (`CliVersion`/`HasDiagnostics`/`OneDriveAccountLabel`/the CLI-update flow) to see which are
+   safe to read regardless of which account is "active" versus which are only ever meaningful for
+   whichever account the card belongs to — real work, and riskier than it looks (`CliVersion`
+   touches the self-update installer). The user's actual complaint was the restart requirement, not
+   the tab/card coupling; keeping that coupling means the existing Settings tabs *are* the account
+   switcher (now instant instead of restart-gated) with no separate browser-toolbar control needed.
+   A toolbar-level switcher and the two-cards-always-visible decoupling remain a possible future
+   increment, not attempted here.
+5. `AppSettings.ActiveProvider` is still written on every switch (as "last browsed account", read by
+   `App.axaml.cs` on the next cold start) — kept rather than dropped, since it costs nothing and
+   preserves continuity across restarts.
+
+**Scope actually shipped:** switching resets the target session to its own root path (`RootPath`
+back to `/` or `/my-files`), not to wherever it was last left — remembering each session's own
+`CurrentPath`/breadcrumbs/selection across switches remains a small, additive follow-up (the
+`BrowserAccountSession` record already exists to eventually hold it), deliberately not bundled here.
+
+**Explicitly not done:** the Settings-card decoupling and browser-toolbar switcher (item 4 above,
+scope-narrowed out); same-provider multiple accounts (still P7 general form, unaffected); any
+change to `ProviderCatalog`/`AccountSyncContext` (unneeded — `App.axaml.cs` only gained one
+`AddBrowsableAccount` call per non-primary context, reusing the `FolderStatsScanner`/
+`TextFilePreviewService`/`ImageFilePreviewService` construction pattern already used for the
+primary).
+
+**Testing.** `MainWindowProviderTests` gained coverage for: a live switch changing every
+`_provider`-derived property with no confirmation, switching back returning to the original
+account's own root, `IsAuthenticated` being re-read fresh (not the stale value) for the target
+provider, and switching to an unregistered account being a safe no-op. `./scripts/run-tests.sh`
+green throughout (762 total, 6 skipped-integration).
+
+**A real hang found and fixed while writing those tests, worth recording:** any test that lets
+`SwitchBrowserAccountAsync`'s own `GoToRootAsync()` call reach an *uncached* folder load hangs
+forever — `FetchFromCliAndUpdateCacheAsync`'s **success** path (not just its error path) marshals
+through `Dispatcher.UIThread.InvokeAsync`, which never completes without a running Avalonia
+dispatcher (the exact limitation `MainWindowViewModel`'s own `DisplayItems` doc comment already
+flags for the error path — this phase is the first to trip it on the success path too, since no
+prior test ever drove a full `LoadFolderAsync` cycle against an empty cache). Fixed by pre-seeding
+each test session's `DriveCacheService` with one item at its root path, which makes `LoadFolderAsync`
+take its cache-hit, fire-and-forget branch instead of the awaited one — not a production bug, purely
+a test-harness constraint, but one that silently hangs the test host (no failing assertion, no
+stack trace) rather than failing loudly, so it is worth any future test in this area knowing about.
+
+### P9 — Filter sync pairs by provider
+
+Small, independent of Phase B — the Sync window already labels each row with its account
+(`SyncPairViewModel.AccountLabel`, blank when there's only one account) once
+`SyncPanelViewModel.AddAccount` is used; this phase only adds a way to narrow the list to one
+account at a time when there's more than one, following the same filter-chip idiom the folder
+browser already established for file kinds (`ViewModels/KindFilterViewModel.cs` — `Label`/`Count`/
+`IsActive`/`ApplyCommand`, a `null`/"Todos" chip always present) rather than inventing a new pattern.
+
+- New `SyncPanelViewModel.ProviderFilters` (`ObservableCollection` of the same chip shape, or a
+  reused/generalized `KindFilterViewModel`-style type), rebuilt whenever `AccountSyncToggles`
+  changes: one "Todos" chip plus one chip per distinct account label currently registered via
+  `_slots`, each counting how many of `Pairs` belong to it.
+- `Pairs` stays exactly as it is today — the authoritative, unfiltered collection every existing
+  test (`SyncPanelMultiAccountTests` et al.) already reads. A new `VisiblePairs` property (or an
+  `ICollectionView`-style wrapper) is what the Sync window's `ItemsControl` binds to instead;
+  recomputed on `Pairs.CollectionChanged` and on the active filter changing, same as `KindFilters`
+  today drives `RootItems` without the browser ever losing `_loadedItems`.
+- Only shown when `AccountSyncToggles.Count > 1` — with a single account every pair already belongs
+  to it, so the row would be pure noise (same rule `AccountLabel`'s own blank-when-one-account
+  already follows).
+
+**Explicitly not done:** filtering by direction/status/conflict state — provider is the one axis
+asked for; a general filter/sort bar for the Sync window is a separate, larger feature if ever
+wanted.
+
+### P8 — *Optional:* delta-based remote scanning — implemented, pending live verification
+
+`Capabilities.SupportsDelta` + `IDeltaSource.GetChangesAsync(string? deltaToken)`, consumed by the
+new `DeltaRemoteScanner : IRemoteScanner` for OneDrive's whole-drive Graph delta query
+(`/me/drive/root/delta`), falling back to the full-walk `RemoteScanner` for a one-way pair (which
+never populates a baseline to merge onto) and for Proton (no delta/events command exists —
+`DeltaSource => null`). `SyncReconciler` needed zero changes: the scanner's job is to still hand it
+a complete remote-tree dictionary, reconstructed by merging the delta's changes onto the persisted
+three-way baseline (`SyncBaselineEntry.RemoteAtSync`). Delta tokens are scoped **per sync pair**,
+not per account (`SyncStateStore.Get/SetDeltaTokenAsync`) — an account-wide token would let
+whichever pair syncs first in a cycle "consume" the diff and silently starve a second pair sharing
+it. See `Services/Providers/IDeltaSource.cs`, `Services/Sync/DeltaRemoteScanner.cs`,
+`Services/Providers/OneDrive/OneDriveOperations.cs`'s `IDeltaSource` implementation (including the
+`parentReference.path` parser delta items need, since they arrive with no ambient parent context
+unlike `ListFolderAsync`'s recursive walk).
+
+**Not yet done:** full live verification against a real Graph account (sign in, run one delta
+cycle, make a real change, confirm the next delta call reports exactly that change and a two-way
+pair picks it up) — this phase's Appendix A entry is still pending that session.
+
+**A real bug found live, before that full session ran:** adding a new two-way OneDrive pair (a
+brand-new pair has no stored delta token, so its first cycle is a full-resync whole-drive delta
+call) hung the sync scheduler for minutes on a personal account with only a few hundred items
+total — reported by the user as the app appearing "stuck" doing `GET /root/delta` over and over,
+and confirmed in `crash.log` ("OneDrive sync scheduler did not stop within 10s of shutdown") and
+in `cache.db` (the new pair's `LastSyncAt`/`LastSyncStatus` never updated — the cycle never
+completed or failed, it just kept going). Root cause not fully isolated (candidates: Graph's
+default delta page size being much smaller than assumed, so "a few hundred items" still meant many
+pages; rate-limit backoff compounding across many pages) since the app wasn't running with the
+fix's own diagnostics yet when this was investigated. Mitigated defensively either way:
+`FetchDeltaAsync` now labels each page's `Activity` line with its real page number instead of a
+generic repeated string (`GET /root/delta (page N)`), sets an explicit `$top=200` on the first
+page instead of trusting Graph's server-side default, and — the actual safety net — aborts with a
+loud `DriveException` after `MaxDeltaPages` (5,000) instead of paging forever, so a future
+recurrence fails visibly instead of hanging the scheduler again. Next time this happens, the
+per-page activity log is what should pin the exact root cause.
+
+**A second, far more serious bug found live, root-caused this time:** a whole-drive delta
+enumerates *every* item in the drive, including the pair's own root folder as an item in its own
+right — something a full-walk `RemoteScanner`'s BFS can never report, since it starts *at* the
+root and only ever visits children. `DeltaRemoteScanner` did not filter that item out:
+`PathMapper.ToRelativeFromRemote` maps it to `""` (the same key `ToRemoteAbsolute`/`ToLocalAbsolute`
+treat as "the sync root itself"), which then landed in the merged dictionary as an ordinary
+syncable node. `SyncReconciler` was never built to see an entry for the root, and queued a real
+`TrashRemote` action against relative path `""` — which resolves to the pair's *entire* remote
+root folder. Confirmed via a real user's `SyncLog`: a fresh OneDrive pair's very first delta cycle
+trashed its own root folder on OneDrive (`TrashRemote` with an empty `RelativePath`), and because
+that pair's local folder was *also* the local side of a separate Proton pair (the user was trying
+to mirror one folder from both providers at once — see the "coexisting providers" discussion this
+finding prompted), the resulting local deletions cascaded into Proton trashing its own copies of
+the same files too. Fixed: `DeltaRemoteScanner.ScanAsync` now skips any change whose resolved
+relative path is empty, for both the upsert and delete branches, before it ever reaches the merged
+dictionary — the pair's own root can never again be treated as a child of itself.
+
+**Recovery note for the affected user:** both `TrashRemote` (Proton and OneDrive) and OneDrive's
+own delta-driven root deletion go to each service's own trash/recycle bin, not a hard delete —
+check Proton Drive's Trash and OneDrive's Recycle Bin (each provider's own web UI) before assuming
+anything is permanently gone.
 
 ---
 
@@ -621,8 +1100,11 @@ should not imitate it.
 ## 6. Risks
 
 - **R1 — P4's rebuilt primary keys** touch a database holding real sync baselines. A wrong
-  migration turns into phantom deletes on the next cycle. Mitigation: back `cache.db` up to
-  `cache.db.pre6` before applying, and test the migration against a copy of a real warm database.
+  migration turns into phantom deletes on the next cycle. Mitigation (executed, not just
+  planned): tested against a copy of this machine's real warm `cache.db` first, which is exactly
+  what caught two real cascade-delete/dangling-FK bugs in the original migration SQL (see P4's
+  status entry) before they ever touched real data; backed up to
+  `~/.config/MyPersonalDrive.pre-p4-backup` before running the fixed migration for real.
 - **R2 — hash-algorithm mismatch** is silent and destructive (§0.1 #3). Mitigation: P3's
   different-algorithm guard lands *before* any OneDrive code, with the test named in P3's "done when".
 - **R3 — plaintext refresh token** (§4.2). Accepted with a documented limitation, revisit if the
@@ -652,10 +1134,60 @@ should not imitate it.
 
 ## Appendix A — Verified OneDrive/Graph behavior
 
-*(Empty. Populate before or during P6 with real captured requests and responses, following the
-model of PLAN-LOCAL-SYNC.md Appendix A: one numbered finding each, with the actual payload and the
-date/version it was captured against. Nothing in §4 marked (unverified) should be implemented until
-the corresponding finding is recorded here.)*
+Captured 2026-08-27, live session against a real personal Microsoft account, via
+`tests/MyPersonalDrive.Tests/Integration/RealOneDriveAuthTests.cs`
+(`MYPERSONALDRIVE_ONEDRIVE_INTEGRATION=1`).
+
+1. **Loopback redirect URI needs the "Mobile and desktop applications" platform explicitly added
+   in the Azure app registration, registered as the port-less `http://localhost`.** The first
+   attempt failed with `invalid_request: The provided value for the input parameter 'redirect_uri'
+   is not valid` even though the app registration existed — the registration has to add that
+   specific platform (Authentication → Add a platform → Mobile and desktop applications) before
+   `http://localhost:{any port}` requests are accepted. Once added, sign-in worked immediately with
+   `redirect_uri=http://localhost:{dynamic port}/` (confirmed across three different dynamically
+   allocated ports on three separate runs) — confirms §4.2's design as built in
+   `GraphAuthenticator`, with this one prerequisite spelled out for anyone repeating the setup.
+2. **`ListFolderAsync("/")` against a real account's root**: returned successfully, 41 children,
+   ordinary names (`Documents`, `Desktop`, `.Trash-1000`, etc.) — no surprises in the response
+   shape versus §4.3's documented `$select` fields; `GraphDriveItem`'s mapping needed no changes.
+3. **`quickXorHash` — the first `QuickXorHasher` implementation was wrong**, confirmed by comparing
+   its local output against Graph's own reported hash for an uploaded file: 18 of the resulting 20
+   bytes matched exactly, but the first byte differed by a few bits. Root cause: that
+   implementation stored the accumulator as `ulong[3]` (192 bits of storage) and only handled
+   overflow across a 64-bit array-element boundary — it missed that the algorithm's accumulator is
+   circular over exactly **160 bits**, not 192, so a byte whose 8-bit span crosses the 160-bit
+   wraparound point while still sitting entirely inside one 64-bit array element (shift positions
+   154, 159, 153, 158 for short inputs, i.e. bytes 14/29/43/58 mod 160 at `Shift=11`) had its
+   overflow bits silently dropped into unused storage past byte 19 instead of folding back to bit
+   0. Rewritten as a genuinely circular 160-bit (20-byte) bit array with a per-bit XOR helper
+   (`QuickXorHasher.QuickXorState`, see its doc comment) — **confirmed matching Graph's own
+   `quickXorHash` on three separate real uploads** after the fix, one of them with fixed,
+   known content (`QuickXorGoldenVector.Content`, 81 bytes) pinned as a permanent unit test
+   (`QuickXorHasherTests.KnownGoldenVector_MatchesGraphsRealQuickXorHash`) so this exact bug class
+   can never silently regress without a live account. `RemoteHashAlgorithm` field
+   present: `quickXorHash` was populated for every file checked; `sha1Hash`/`sha256Hash` were not
+   inspected on this personal account (§4.4's "unverified: which hashes a personal drive returns
+   today" note stays open for that specific sub-question, but is moot for this app either way since
+   `OneDriveOperations.ToDriveItem` only ever reads `quickXorHash`).
+4. **Upload (small-file path)**: `PUT .../content?@microsoft.graph.conflictBehavior=replace`
+   succeeded for a short text file and the resulting item's `quickXorHash` was readable on the very
+   next listing call with no propagation delay observed.
+5. **Trash**: `DELETE .../{path}:` on the uploaded test file succeeded with no error, run as
+   best-effort cleanup after the test's assertions.
+6. **`MainWindowViewModel._rootPath` was hardcoded to `"/my-files"` app-wide** — Proton's own root
+   folder name, not a generic convention. Caught by hand (not the integration test, which talks to
+   `OneDriveOperations` directly and never exercises the view model): the real app, switched to
+   OneDrive and signed in successfully via the UI, tried to browse `/my-files` on launch and got a
+   real `[fail]` from `GET /my-files/children` with a "path no longer exists" warning — OneDrive
+   404s a nonexistent path exactly as expected, the bug was assuming that path existed at all.
+   Fixed: `_rootPath` (and the initial `_currentPath`) are now computed from `provider.Id` in
+   `MainWindowViewModel`'s constructor (`"/"` for OneDrive, `"/my-files"` for Proton), covered by
+   `MainWindowProviderTests.RootPath_ForOneDrive_IsSlash`/`RootPath_ForProton_IsMyFiles`.
+
+**Not yet captured**: pagination (`@odata.nextLink`) against a folder with more than `$top=200`
+children, chunked upload for a file over 4 MiB, async copy monitoring, 429/503 rate-limiting
+in practice, and the exact reserved-name list in §4.6/O6 (still per Microsoft's documentation, not
+tested against the live service). Each remains marked (unverified) until captured.
 
 ## Appendix B — File-by-file change inventory
 

@@ -5,25 +5,54 @@ using System.Net.Http;
 using System.Text.Json;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
+using MyPersonalDrive.Services.Providers.Proton;
+using MyPersonalDrive.Services.Providers.OneDrive;
 using Avalonia.Threading;
 
 namespace MyPersonalDrive.ViewModels;
 
 public sealed class MainWindowViewModel : ObservableObject
 {
-    private readonly ProtonDriveService _service;
-    private readonly DriveCacheService _cacheService;
+    // Not readonly (P7 Phase B, docs/PLAN-CLOUD-PROVIDERS.md): SwitchBrowserAccountAsync reassigns
+    // these five plus _rootPath below when the browsed account changes, instead of the previous
+    // "persist a preference and ask for a restart" behavior. See _browserSessions.
+    private ICloudDriveProvider _provider;
+    private DriveCacheService _cacheService;
     private readonly AppSettingsService _settings;
-    private readonly FolderMetricsStore? _metricsStore;
-    private readonly FolderStatsScanner? _statsScanner;
+    private FolderMetricsStore? _metricsStore;
+    private FolderStatsScanner? _statsScanner;
     private CancellationTokenSource? _deepScanCts;
+    private ITextFilePreviewLoader? _previewLoader;
+    private IImageFilePreviewLoader? _imagePreviewLoader;
+    private CancellationTokenSource? _previewCts;
     private readonly Stack<string> _navigationHistory = new();
     private readonly TimeProvider _timeProvider;
     private readonly RemoteViewFreshnessPolicy _remoteViewFreshness = new();
     private CancellationTokenSource? _cts;
     private DriveNodeViewModel? _selectedNode;
-    private readonly string _rootPath = "/my-files";
-    private readonly CommandLogBuffer _commandLog = new();
+    private string _rootPath;
+
+    /// <summary>
+    /// One browsable account's whole toolchain — everything <see cref="SwitchBrowserAccountAsync"/>
+    /// needs to swap live. The primary account (registered by the constructor) is always
+    /// <c>_browserSessions[0]</c>; <see cref="AddBrowsableAccount"/> only ever appends, mirroring
+    /// <c>SyncPanelViewModel.AddAccount</c>'s own additive shape (P7 Phase A) so existing call sites
+    /// and tests that never call it are unaffected.
+    /// </summary>
+    private sealed record BrowserAccountSession(
+        ICloudDriveProvider Provider,
+        DriveCacheService CacheService,
+        FolderMetricsStore? MetricsStore,
+        FolderStatsScanner? StatsScanner,
+        ITextFilePreviewLoader? PreviewLoader,
+        IImageFilePreviewLoader? ImagePreviewLoader);
+
+    private readonly List<BrowserAccountSession> _browserSessions = new();
+    // Doubled from CommandLogBuffer's own default (200): with two provider sessions able to be
+    // active at once (P7), one interleaved buffer now serves two sources, and a burst from one
+    // must not push the other's entire recent history out.
+    private readonly CommandLogBuffer _commandLog = new(maxLines: CommandLogBuffer.MaxLines * 2);
 
     /// <summary>
     /// Guards <see cref="_pendingCommandLines"/>, which the CLI executor's events fill from whatever
@@ -34,7 +63,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly List<string> _pendingCommandLines = new();
     private bool _commandLogFlushScheduled;
     private string _cliPath;
-    private string _currentPath = "/my-files";
+    private string _oneDriveClientId;
+    private string _currentPath;
     private string _statusMessage = "Select a Proton Drive CLI executable to begin.";
     private bool _isWarning;
     private bool _isLoading;
@@ -56,6 +86,13 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _selectedShared = "None";
     private bool _hasSelection;
     private bool _isSettingsView;
+    private bool _isViewerVisible;
+    private bool _isViewerLoading;
+    private string _viewerTitle = "Visor";
+    private string _viewerPath = string.Empty;
+    private string _viewerText = string.Empty;
+    private string _viewerNote = string.Empty;
+    private byte[]? _viewerImageBytes;
     private DriveViewMode _viewMode = DriveViewMode.List;
     private bool _isDeepScanRunning;
     private DriveSortKey _sortKey = DriveSortKey.Name;
@@ -79,8 +116,38 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isCliUpdateAvailable;
     private bool _isCliUpdateBusy;
 
+    /// <summary>
+    /// What the settings view's provider picker lists — see docs/PLAN-CLOUD-PROVIDERS.md P5/P6.
+    /// </summary>
+    public IReadOnlyList<ProviderDescriptor> AvailableProviders { get; }
+
+    public string ActiveProviderDisplayName => _provider.DisplayName;
+
+    /// <summary>
+    /// The explorer header's title/subtitle — provider-neutral (P7 Phase A surfaced this as a real
+    /// gap: with OneDrive as the browsed account, a hardcoded "Proton Drive browser" header was
+    /// actively misleading, not just cosmetically stale).
+    /// </summary>
+    public string BrowserHeaderTitle => $"{_provider.DisplayName} browser";
+
+    public string BrowserHeaderSubtitle => $"Browsing {RootPath} on {_provider.DisplayName}.";
+
+    /// <summary>Which connection-card block the settings view shows — Proton's (CLI path, version, update) or OneDrive's (sign-in/out, account label).</summary>
+    public bool IsProtonActive => _provider.Id == ProviderId.Proton;
+
+    public bool IsOneDriveActive => _provider.Id == ProviderId.OneDrive;
+
+    /// <summary>Whether the active provider has a version/self-update story to show — false for a provider with no external binary (docs/PLAN-CLOUD-PROVIDERS.md §5 item 2).</summary>
+    public bool HasDiagnostics => _provider.Diagnostics is not null;
+
+    /// <summary>The signed-in OneDrive account's label (email/name), or a "not signed in" placeholder for the card.</summary>
+    public string OneDriveAccountLabel
+        => _provider is OneDriveProvider oneDrive && oneDrive.Auth is GraphAuthenticator { AccountLabel: { } label }
+            ? label
+            : "Not signed in.";
+
     public MainWindowViewModel(
-        ProtonDriveService service,
+        ICloudDriveProvider provider,
         DriveCacheService cacheService,
         AppSettingsService settings,
         Sync.SyncPanelViewModel syncPanel,
@@ -89,7 +156,10 @@ public sealed class MainWindowViewModel : ObservableObject
         CliUpdateInstaller? updateInstaller = null,
         Func<bool>? isSyncInProgress = null,
         FolderMetricsStore? metricsStore = null,
-        FolderStatsScanner? statsScanner = null)
+        FolderStatsScanner? statsScanner = null,
+        IProviderCatalog? providerCatalog = null,
+        ITextFilePreviewLoader? previewLoader = null,
+        IImageFilePreviewLoader? imagePreviewLoader = null)
     {
         // Optional so the many existing view-model tests don't all have to build a database and a
         // scanner to exercise unrelated behavior. When either is absent the deep-scan command
@@ -97,6 +167,10 @@ public sealed class MainWindowViewModel : ObservableObject
         // feature on a machine with no CLI configured.
         _metricsStore = metricsStore;
         _statsScanner = statsScanner;
+        // Optional for the same reason: a test that never opens the viewer shouldn't have to supply
+        // a loader, and when it's absent the viewer simply can't open (see CanOpenViewer).
+        _previewLoader = previewLoader;
+        _imagePreviewLoader = imagePreviewLoader;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _releaseFeed = releaseFeed;
         _updateInstaller = updateInstaller ?? new CliUpdateInstaller();
@@ -104,23 +178,38 @@ public sealed class MainWindowViewModel : ObservableObject
         // reachable in a test without driving a real sync cycle to a chosen moment.
         // Capturing the parameter, not the SyncPanel property, which is only assigned below.
         _isSyncInProgress = isSyncInProgress ?? (() => syncPanel.IsSyncInProgress);
-        _service = service;
+        AvailableProviders = (providerCatalog ?? new ProviderCatalog()).Available;
+        _provider = provider;
+        // "/my-files" is Proton's own root folder name, not a generic convention — OneDrive (and
+        // any future provider) roots at "/". Browsing "/my-files" against Graph 404s immediately
+        // (verified: docs/PLAN-CLOUD-PROVIDERS.md Appendix A), which is exactly the "path no
+        // longer exists" warning this was hardcoded into before a second provider existed to catch
+        // it.
+        _rootPath = _provider.Id == ProviderId.OneDrive ? "/" : "/my-files";
+        _currentPath = _rootPath;
         _cacheService = cacheService;
         _settings = settings;
         SyncPanel = syncPanel;
 
         var appSettings = settings.Load();
         _cliPath = appSettings.CliPath;
-        _isAuthenticated = appSettings.IsAuthenticated;
+        _oneDriveClientId = appSettings.OneDriveClientId;
+        // Which AppSettings field backs this VM's single IsAuthenticated flag depends on which
+        // provider is active — the two providers have entirely different connection cards (CLI
+        // path + version vs. sign-in/out), so there is one bool per provider in AppSettings but
+        // only ever one "the active provider is signed in" flag in the VM at a time. Switching
+        // providers requires a restart (§2.7), so which field to use never changes mid-session.
+        _isAuthenticated = _provider.Id == ProviderId.OneDrive ? appSettings.IsOneDriveAuthenticated : appSettings.IsAuthenticated;
         // Set through the field, not the property: the property persists, and the constructor has
         // no business writing settings.json back on every launch.
         _viewMode = appSettings.ViewModeOrDefault();
         _sortKey = appSettings.SortKeyOrDefault();
         _sortDescending = appSettings.SortDescending;
-        _service.CommandStarted += OnCommandStarted;
-        _service.CommandOutput += OnCommandOutput;
-        _service.CommandFinished += OnCommandFinished;
-        _service.ListingParseWarning += OnListingParseWarning;
+        // The browsed provider's own activity is tagged like any other session's, so interleaved
+        // lines from ObserveAdditionalProviderActivity (P7, both providers active at once) read
+        // consistently regardless of which one happens to be on screen.
+        _provider.Activity += (_, activity) => OnActivity(_provider.DisplayName, activity);
+        _provider.ListingParseWarning += (_, message) => OnListingParseWarning(_provider.DisplayName, message);
 
         RootItems = new ObservableCollection<DriveNodeViewModel>();
         // Selecting a "largest item" row must behave exactly like clicking that row in the listing,
@@ -152,8 +241,28 @@ public sealed class MainWindowViewModel : ObservableObject
         ShowSettingsCommand = new AsyncCommand(ShowSettingsAsync, onError: HandleUnexpectedError);
         CheckCliVersionCommand = new AsyncCommand(CheckCliVersionAsync, CanCheckCliVersion, HandleUnexpectedError);
         CheckForCliUpdateCommand = new AsyncCommand(CheckForCliUpdateAsync, CanCheckForCliUpdate, HandleUnexpectedError);
+        SwitchToProtonCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.Proton), () => !IsLoading && !IsProtonActive, HandleUnexpectedError);
+        SwitchToOneDriveCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.OneDrive), () => !IsLoading && !IsOneDriveActive, HandleUnexpectedError);
         InstallCliUpdateCommand = new AsyncCommand(InstallCliUpdateAsync, CanInstallCliUpdate, HandleUnexpectedError);
+        ViewSelectedFileCommand = new AsyncCommand(ViewSelectedFileAsync, CanViewSelectedFile, HandleUnexpectedError);
+        CloseViewerCommand = new AsyncCommand(CloseViewerAsync, onError: HandleUnexpectedError);
+
+        _browserSessions.Add(new BrowserAccountSession(_provider, _cacheService, _metricsStore, _statsScanner, _previewLoader, _imagePreviewLoader));
     }
+
+    /// <summary>
+    /// Registers a second (or later) account's browsing toolchain, so <see cref="SwitchBrowserAccountAsync"/>
+    /// can switch to it live — P7 Phase B. Additive only, same shape as <c>SyncPanelViewModel.AddAccount</c>:
+    /// existing callers/tests that never call this are completely unaffected.
+    /// </summary>
+    public void AddBrowsableAccount(
+        ICloudDriveProvider provider,
+        DriveCacheService cacheService,
+        FolderMetricsStore? metricsStore = null,
+        FolderStatsScanner? statsScanner = null,
+        ITextFilePreviewLoader? previewLoader = null,
+        IImageFilePreviewLoader? imagePreviewLoader = null)
+        => _browserSessions.Add(new BrowserAccountSession(provider, cacheService, metricsStore, statsScanner, previewLoader, imagePreviewLoader));
 
     public ObservableCollection<DriveNodeViewModel> RootItems { get; }
 
@@ -213,6 +322,11 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public AsyncCommand ShowSettingsCommand { get; }
 
+    /// <summary>Opens the text viewer on the row currently selected in the listing.</summary>
+    public AsyncCommand ViewSelectedFileCommand { get; }
+
+    public AsyncCommand CloseViewerCommand { get; }
+
     public AsyncCommand CheckCliVersionCommand { get; }
 
     /// <summary>
@@ -238,6 +352,10 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     public AsyncCommand CheckForCliUpdateCommand { get; }
+
+    public AsyncCommand SwitchToProtonCommand { get; }
+
+    public AsyncCommand SwitchToOneDriveCommand { get; }
 
     public AsyncCommand InstallCliUpdateCommand { get; }
 
@@ -434,6 +552,19 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public string OneDriveClientId
+    {
+        get => _oneDriveClientId;
+        set
+        {
+            if (SetProperty(ref _oneDriveClientId, value))
+            {
+                _settings.Update(settings => settings.OneDriveClientId = value);
+                RaiseCommandStates();
+            }
+        }
+    }
+
     public string RootPath => _rootPath;
 
     public string CurrentPath
@@ -539,6 +670,82 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _selectedShared, value);
     }
 
+    /// <summary>
+    /// Whether the in-app text viewer is open over the listing. The viewer is a panel and not a
+    /// separate window so it can't get lost behind the main one, and so closing it needs no
+    /// window plumbing in code-behind.
+    /// </summary>
+    public bool IsViewerVisible
+    {
+        get => _isViewerVisible;
+        private set => SetProperty(ref _isViewerVisible, value);
+    }
+
+    /// <summary>True while the file is being downloaded for the viewer — a preview costs a real CLI download.</summary>
+    public bool IsViewerLoading
+    {
+        get => _isViewerLoading;
+        private set => SetProperty(ref _isViewerLoading, value);
+    }
+
+    /// <summary>The previewed file's name, shown as the viewer's heading.</summary>
+    public string ViewerTitle
+    {
+        get => _viewerTitle;
+        private set => SetProperty(ref _viewerTitle, value);
+    }
+
+    /// <summary>The previewed file's remote path, shown under the heading.</summary>
+    public string ViewerPath
+    {
+        get => _viewerPath;
+        private set => SetProperty(ref _viewerPath, value);
+    }
+
+    /// <summary>The text on screen. Empty while loading, and for a file that turned out to be binary.</summary>
+    public string ViewerText
+    {
+        get => _viewerText;
+        private set
+        {
+            if (SetProperty(ref _viewerText, value))
+            {
+                OnPropertyChanged(nameof(HasViewerText));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The line under the viewer's toolbar: size, encoding, and — when it applies — that what's on
+    /// screen is only the beginning of the file. Never silently truncate.
+    /// </summary>
+    public string ViewerNote
+    {
+        get => _viewerNote;
+        private set => SetProperty(ref _viewerNote, value);
+    }
+
+    public bool HasViewerText => _viewerText.Length > 0;
+
+    /// <summary>
+    /// The previewed image's raw bytes, undecoded — decoding is a view concern (view models never
+    /// touch Avalonia types, AGENTS.md), so the view turns this into a <c>Bitmap</c> via
+    /// <c>Views.Converters.BytesToBitmapConverter</c>.
+    /// </summary>
+    public byte[]? ViewerImageBytes
+    {
+        get => _viewerImageBytes;
+        private set
+        {
+            if (SetProperty(ref _viewerImageBytes, value))
+            {
+                OnPropertyChanged(nameof(HasViewerImage));
+            }
+        }
+    }
+
+    public bool HasViewerImage => _viewerImageBytes is { Length: > 0 };
+
     /// <summary>Whether the Status panel's per-item fields (as opposed to the current-folder ones) have anything to show.</summary>
     public bool HasSelection
     {
@@ -608,18 +815,23 @@ public sealed class MainWindowViewModel : ObservableObject
             QueueCommandLine($"[warn] Sync startup recovery failed: {ex.Message}");
         }
 
-        if (!string.IsNullOrWhiteSpace(CliPath) && IsAuthenticated)
+        var needsCliPath = _provider.Id != ProviderId.OneDrive;
+        if ((!needsCliPath || !string.IsNullOrWhiteSpace(CliPath)) && IsAuthenticated)
         {
             await GoToRootAsync();
             return;
         }
 
-        StatusMessage = string.IsNullOrWhiteSpace(CliPath)
-            ? "Select a Proton Drive CLI executable to begin."
-            : "Authenticate to load /my-files.";
+        StatusMessage = needsCliPath && string.IsNullOrWhiteSpace(CliPath)
+            ? $"Select a {_provider.DisplayName} CLI executable to begin."
+            : $"Authenticate to load /my-files.";
     }
 
-    private bool CanAuthenticate() => !IsLoading && !IsAuthenticated && !string.IsNullOrWhiteSpace(CliPath);
+    private bool CanAuthenticate() => !IsLoading && !IsAuthenticated && _provider.Id switch
+    {
+        ProviderId.OneDrive => !string.IsNullOrWhiteSpace(OneDriveClientId),
+        _ => !string.IsNullOrWhiteSpace(CliPath),
+    };
 
     private bool CanLogout() => !IsLoading && IsAuthenticated;
 
@@ -681,7 +893,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(path, ex);
+            StatusMessage = FormatDriveError(path, ex);
             IsWarning = true;
         }
         catch (DbException ex)
@@ -742,14 +954,14 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = "Opening Proton Drive authentication in your browser...";
-            await _service.AuthenticateAsync();
+            StatusMessage = $"Opening {_provider.DisplayName} authentication in your browser...";
+            await _provider.Auth.AuthenticateAsync();
             IsAuthenticated = true;
             await GoToRootAsync();
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError("auth login", ex);
+            StatusMessage = FormatDriveError("auth login", ex);
         }
         finally
         {
@@ -762,20 +974,88 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = "Logging out from Proton Drive...";
-            await _service.LogoutAsync();
+            StatusMessage = $"Logging out from {_provider.DisplayName}...";
+            await _provider.Auth.LogoutAsync();
             IsAuthenticated = false;
             ResetBrowserState();
             StatusMessage = "Logged out.";
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError("auth logout", ex);
+            StatusMessage = FormatDriveError("auth logout", ex);
         }
         finally
         {
             IsLoading = false;
         }
+    }
+
+    /// <summary>
+    /// Switches which registered <see cref="BrowserAccountSession"/> the browser shows — live, no
+    /// restart (P7 Phase B, docs/PLAN-CLOUD-PROVIDERS.md; §2.7's original "requires a restart" note
+    /// only ever reflected that this hadn't been built yet, not a hard architectural limit). A
+    /// no-op if <paramref name="id"/> isn't registered (not authenticated/configured, or simply not
+    /// one of <see cref="_browserSessions"/> yet).
+    /// </summary>
+    private async Task SwitchBrowserAccountAsync(ProviderId id)
+    {
+        if (id == _provider.Id)
+        {
+            return;
+        }
+
+        var session = _browserSessions.FirstOrDefault(candidate => candidate.Provider.Id == id);
+        if (session is null)
+        {
+            StatusMessage = $"{id} isn't configured.";
+            return;
+        }
+
+        // Whatever the previous account's browser was mid-loading, it no longer belongs on screen
+        // once the account underneath it has changed.
+        _cts?.Cancel();
+
+        _provider = session.Provider;
+        _cacheService = session.CacheService;
+        _metricsStore = session.MetricsStore;
+        _statsScanner = session.StatsScanner;
+        _previewLoader = session.PreviewLoader;
+        _imagePreviewLoader = session.ImagePreviewLoader;
+        _rootPath = _provider.Id == ProviderId.OneDrive ? "/" : "/my-files";
+
+        // Both of these used to be wired once at startup and never revisited — harmless before
+        // this phase, since the browsed account never changed. Left stale, "Add pair"'s remote
+        // folder browser would list the *previous* account's tree starting from the *new*
+        // account's root path (a real bug: navigating OneDrive, switching to Proton, then
+        // browsing for a remote folder to sync showed OneDrive's listing under a Proton-shaped
+        // path, mixing the two).
+        SyncPanel.GetRemoteFolderChildren = _provider.Operations.ListFolderAsync;
+        SyncPanel.SetActiveAccount(_provider.DisplayName);
+        // Re-read fresh rather than trust the field left over from the previous account — it can
+        // otherwise go stale the moment auth changes for the account not currently on screen (a
+        // real gap this phase closes, not just the restart requirement).
+        IsAuthenticated = _provider.Id == ProviderId.OneDrive ? _settings.Load().IsOneDriveAuthenticated : _settings.Load().IsAuthenticated;
+
+        // A deep-scan histogram belongs to one specific folder on one specific account — carrying
+        // it over to a different account's (unrelated) folder would show buckets for content that
+        // isn't even on screen.
+        KindFilters.Clear();
+        _kindFilter = null;
+        FilterSummary = string.Empty;
+
+        OnPropertyChanged(nameof(ActiveProviderDisplayName));
+        OnPropertyChanged(nameof(BrowserHeaderTitle));
+        OnPropertyChanged(nameof(BrowserHeaderSubtitle));
+        OnPropertyChanged(nameof(IsProtonActive));
+        OnPropertyChanged(nameof(IsOneDriveActive));
+        OnPropertyChanged(nameof(HasDiagnostics));
+        OnPropertyChanged(nameof(OneDriveAccountLabel));
+        OnPropertyChanged(nameof(RootPath));
+        RaiseCommandStates();
+
+        _settings.Update(settings => settings.ActiveProvider = id.ToString());
+        StatusMessage = $"Switched to {_provider.DisplayName}.";
+        await GoToRootAsync();
     }
 
     private async Task GoToRootAsync()
@@ -803,7 +1083,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             _navigationHistory.Push(previousPath);
             RaiseCommandStates();
-            StatusMessage = FormatCliError(previousPath, ex);
+            StatusMessage = FormatDriveError(previousPath, ex);
         }
     }
 
@@ -836,7 +1116,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 RaiseCommandStates();
             }
 
-            StatusMessage = FormatCliError(path, ex);
+            StatusMessage = FormatDriveError(path, ex);
         }
     }
 
@@ -848,7 +1128,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(CurrentPath, ex);
+            StatusMessage = FormatDriveError(CurrentPath, ex);
         }
     }
 
@@ -891,7 +1171,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             StatusMessage = $"Uploading {files.Count} file(s) to {CurrentPath}...";
-            await _service.UploadFilesAsync(files, CurrentPath, strategy);
+            await _provider.Operations.UploadFilesAsync(files, CurrentPath, strategy);
             StatusMessage = $"Uploaded {files.Count} file(s) to {CurrentPath}.";
             await InvalidateDeepMetricsAsync(CurrentPath);
 
@@ -899,7 +1179,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(CurrentPath, ex);
+            StatusMessage = FormatDriveError(CurrentPath, ex);
         }
         finally
         {
@@ -926,11 +1206,11 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             StatusMessage = $"Creating folder '{folderName}' in {CurrentPath}...";
-            await _service.CreateFolderAsync(CurrentPath, folderName);
+            await _provider.Operations.CreateFolderAsync(CurrentPath, folderName);
             StatusMessage = $"Created folder '{folderName}' in {CurrentPath}.";
             
             // Update DB immediately
-            var newFolderPath = ProtonDriveService.CombinePath(CurrentPath, folderName);
+            var newFolderPath = _provider.Paths.Combine(CurrentPath, folderName);
             await _cacheService.AddOrUpdateItemAsync(CurrentPath, new DriveItem(newFolderPath, folderName, true));
             await InvalidateDeepMetricsAsync(newFolderPath);
 
@@ -938,7 +1218,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(CurrentPath, ex);
+            StatusMessage = FormatDriveError(CurrentPath, ex);
         }
         finally
         {
@@ -965,17 +1245,217 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             StatusMessage = $"Downloading {item.Name}...";
-            await _service.DownloadFileAsync(item.Path, folder);
+            await _provider.Operations.DownloadFileAsync(item.Path, folder);
             StatusMessage = $"Downloaded {item.Name} to {folder}.";
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(item.Path, ex);
+            StatusMessage = FormatDriveError(item.Path, ex);
         }
         finally
         {
             IsLoading = false;
         }
+    }
+
+    /// <summary>
+    /// Opens the viewer on <paramref name="item"/> — as text or as an image, whichever
+    /// <see cref="ImagePreviewPolicy"/>/<see cref="TextPreviewPolicy"/> say it is. Images are
+    /// checked first: an image's <see cref="FileKind"/> never also qualifies as text, so the order
+    /// only matters for the refusal message when neither policy accepts the file.
+    /// </summary>
+    public async Task PreviewItemAsync(DriveItem item)
+    {
+        if (!item.IsFolder && FileKindClassifier.Classify(item.Name, isFolder: false) == FileKind.Image && ImagePreviewPolicy.CanPreview(item))
+        {
+            await PreviewImageAsync(item);
+            return;
+        }
+
+        if (TextPreviewPolicy.CanPreview(item))
+        {
+            await PreviewTextAsync(item);
+            return;
+        }
+
+        StatusMessage = $"{item.Name} no se puede abrir en el visor: solo texto (hasta {TextPreviewPolicy.MaxPreviewBytes / 1024} KB) o imágenes (hasta {ImagePreviewPolicy.MaxPreviewBytes / (1024 * 1024)} MB).";
+        IsWarning = true;
+    }
+
+    /// <summary>
+    /// The text half of <see cref="PreviewItemAsync"/>. The CLI can only download, so this pays for
+    /// a real download of the file into a temp folder that the loader deletes again.
+    /// </summary>
+    private async Task PreviewTextAsync(DriveItem item)
+    {
+        if (_previewLoader is null)
+        {
+            StatusMessage = "El visor de texto no está disponible.";
+            IsWarning = true;
+            return;
+        }
+
+        var cts = BeginPreview(item);
+
+        try
+        {
+            var preview = await _previewLoader.LoadAsync(item, cts.Token);
+            if (cts.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (preview.IsBinary)
+            {
+                ViewerText = string.Empty;
+                ViewerNote = $"{preview.ByteCount:n0} bytes — no parece ser un archivo de texto, así que no se muestra su contenido.";
+                StatusMessage = $"{item.Name} no es un archivo de texto.";
+                IsWarning = true;
+                return;
+            }
+
+            ViewerText = preview.Text;
+            ViewerNote = FormatViewerNote(preview);
+            StatusMessage = $"Mostrando {item.Name} en el visor.";
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded or closed; whoever did that already owns the panel's state.
+        }
+        catch (InvalidOperationException ex)
+        {
+            ViewerNote = "No se pudo abrir el archivo.";
+            StatusMessage = FormatDriveError(item.Path, ex);
+            IsWarning = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ViewerNote = "No se pudo leer el archivo descargado.";
+            StatusMessage = $"No se pudo abrir {item.Name} en el visor: {ex.Message}";
+            IsWarning = true;
+        }
+        finally
+        {
+            EndPreview(cts);
+        }
+    }
+
+    /// <summary>The image half of <see cref="PreviewItemAsync"/> — same download-then-show shape as the text one.</summary>
+    private async Task PreviewImageAsync(DriveItem item)
+    {
+        if (_imagePreviewLoader is null)
+        {
+            StatusMessage = "El visor de imágenes no está disponible.";
+            IsWarning = true;
+            return;
+        }
+
+        var cts = BeginPreview(item);
+
+        try
+        {
+            var preview = await _imagePreviewLoader.LoadAsync(item, cts.Token);
+            if (cts.IsCancellationRequested)
+            {
+                return;
+            }
+
+            ViewerImageBytes = preview.Bytes;
+            ViewerNote = $"{preview.ByteCount:n0} bytes";
+            StatusMessage = $"Mostrando {item.Name} en el visor.";
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded or closed; whoever did that already owns the panel's state.
+        }
+        catch (InvalidOperationException ex)
+        {
+            ViewerNote = "No se pudo abrir el archivo.";
+            StatusMessage = FormatDriveError(item.Path, ex);
+            IsWarning = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ViewerNote = "No se pudo leer el archivo descargado.";
+            StatusMessage = $"No se pudo abrir {item.Name} en el visor: {ex.Message}";
+            IsWarning = true;
+        }
+        finally
+        {
+            EndPreview(cts);
+        }
+    }
+
+    /// <summary>
+    /// Shared setup for both preview flows: supersede any in-flight download and reset the panel to
+    /// a clean loading state for <paramref name="item"/>, clearing whichever content type the
+    /// previous preview left behind.
+    /// </summary>
+    private CancellationTokenSource BeginPreview(DriveItem item)
+    {
+        _previewCts?.Cancel();
+        _previewCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _previewCts = cts;
+
+        IsViewerVisible = true;
+        IsViewerLoading = true;
+        ViewerTitle = item.Name;
+        ViewerPath = item.Path;
+        ViewerText = string.Empty;
+        ViewerImageBytes = null;
+        ViewerNote = "Descargando el archivo…";
+        StatusMessage = $"Abriendo {item.Name} en el visor…";
+        return cts;
+    }
+
+    private void EndPreview(CancellationTokenSource cts)
+    {
+        if (ReferenceEquals(_previewCts, cts))
+        {
+            IsViewerLoading = false;
+            _previewCts = null;
+            cts.Dispose();
+        }
+    }
+
+    private static string FormatViewerNote(TextFilePreview preview)
+    {
+        // "más de" when the read stopped at the byte limit: ByteCount is what was read, not the
+        // file's size, and printing it as the size would be a lie of exactly one byte.
+        var size = preview.ByteCount > TextPreviewPolicy.MaxPreviewBytes
+            ? $"más de {TextPreviewPolicy.MaxPreviewBytes:n0} bytes"
+            : $"{preview.ByteCount:n0} bytes";
+        var note = $"{preview.LineCount:n0} líneas · {size} · {preview.EncodingName}";
+        return preview.IsTruncated
+            ? note + " · vista parcial: el archivo es más largo de lo que muestra el visor"
+            : note;
+    }
+
+    private bool CanViewSelectedFile()
+        => _selectedNode is { CanPreview: true } && (_previewLoader is not null || _imagePreviewLoader is not null);
+
+    private async Task ViewSelectedFileAsync()
+    {
+        if (_selectedNode is not { } node)
+        {
+            StatusMessage = "Seleccioná un archivo para verlo.";
+            IsWarning = true;
+            return;
+        }
+
+        await PreviewItemAsync(node.Item);
+    }
+
+    private async Task CloseViewerAsync()
+    {
+        _previewCts?.Cancel();
+        IsViewerVisible = false;
+        IsViewerLoading = false;
+        ViewerImageBytes = null;
+        ViewerText = string.Empty;
+        ViewerNote = string.Empty;
+        await Task.CompletedTask;
     }
 
     public async Task RenameItemAsync(DriveItem item)
@@ -997,12 +1477,12 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             StatusMessage = $"Renaming {item.Name} to {newName}...";
-            await _service.RenameItemAsync(item.Path, newName);
+            await _provider.Operations.RenameItemAsync(item.Path, newName);
             StatusMessage = $"Renamed {item.Name} to {newName}.";
 
             // Update DB immediately
             var parentPath = GetParentPath(item.Path);
-            var newPath = ProtonDriveService.CombinePath(parentPath, newName);
+            var newPath = _provider.Paths.Combine(parentPath, newName);
             await _cacheService.RemoveItemAsync(item.Path);
             await _cacheService.AddOrUpdateItemAsync(parentPath, item with { Path = newPath, Name = newName });
             // Both paths: the old subtree's metrics are gone, and the new name's ancestors no
@@ -1014,7 +1494,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(item.Path, ex);
+            StatusMessage = FormatDriveError(item.Path, ex);
         }
         finally
         {
@@ -1043,7 +1523,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             StatusMessage = $"Creating a copy of {item.Name} as {displayTarget} in {CurrentPath}...";
-            await _service.CopyItemAsync(item.Path, CurrentPath, string.IsNullOrEmpty(newName) ? null : newName);
+            await _provider.Operations.CopyItemAsync(item.Path, CurrentPath, string.IsNullOrEmpty(newName) ? null : newName);
             StatusMessage = $"Copied {item.Name} successfully.";
             await InvalidateDeepMetricsAsync(CurrentPath);
             
@@ -1051,7 +1531,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(item.Path, ex);
+            StatusMessage = FormatDriveError(item.Path, ex);
         }
         finally
         {
@@ -1070,7 +1550,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             StatusMessage = $"Moving {item.Name} to trash...";
-            await _service.TrashItemAsync(item.Path);
+            await _provider.Operations.TrashItemAsync(item.Path);
             StatusMessage = $"Moved {item.Name} to trash.";
 
             // Update DB immediately
@@ -1081,7 +1561,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatCliError(item.Path, ex);
+            StatusMessage = FormatDriveError(item.Path, ex);
         }
         finally
         {
@@ -1115,6 +1595,8 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             node.IsSelected = true;
         }
+
+        ViewSelectedFileCommand.RaiseCanExecuteChanged();
     }
 
     private async Task LoadFolderAsync(string path, bool clearSelection, bool forceFreshRemoteView = false)
@@ -1183,9 +1665,9 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     private async Task EnsureFreshRemoteViewAsync(bool force, CancellationToken token)
     {
-        if (_remoteViewFreshness.ShouldRefresh(_timeProvider.GetUtcNow(), force))
+        if (_remoteViewFreshness.ShouldRefresh(_timeProvider.GetUtcNow(), force) && _provider.RemoteView is not null)
         {
-            await _service.ResetRemoteCacheAsync(token);
+            await _provider.RemoteView.ResetRemoteCacheAsync(token);
         }
     }
 
@@ -1196,7 +1678,7 @@ public sealed class MainWindowViewModel : ObservableObject
             await EnsureFreshRemoteViewAsync(forceFreshRemoteView, token);
 
             // 2. Fetch from CLI
-            var items = await _service.LoadFolderAsync(path, token);
+            var items = await _provider.Operations.ListFolderAsync(path, token);
 
             // 3. Update DB
             await _cacheService.SyncItemsAsync(path, items);
@@ -1245,21 +1727,21 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void HandleLoadError(string path, InvalidOperationException ex)
     {
-        var kind = (ex as CliException)?.Kind ?? CliErrorKind.Unknown;
+        var kind = (ex as DriveException)?.Kind ?? DriveErrorKind.Unknown;
 
-        if (kind == CliErrorKind.NotFound)
+        if (kind == DriveErrorKind.NotFound)
         {
             StatusMessage = $"Warning: The path '{path}' no longer exists.";
             IsWarning = true;
             return;
         }
 
-        if (kind == CliErrorKind.NotAuthenticated)
+        if (kind == DriveErrorKind.NotAuthenticated)
         {
             IsAuthenticated = false;
         }
 
-        StatusMessage = FormatCliError(path, ex);
+        StatusMessage = FormatDriveError(path, ex);
         IsWarning = true;
     }
 
@@ -1302,7 +1784,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RootItems.Clear();
         foreach (var item in DriveItemSorter.Sort(visible, SortKey, SortDescending))
         {
-            var node = new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, HandleUnexpectedError);
+            var node = new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, PreviewItemAsync, HandleUnexpectedError);
             if (previouslySelectedPath is not null && item.Path == previouslySelectedPath)
             {
                 node.IsSelected = true;
@@ -1378,15 +1860,28 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         BreadcrumbItems.Clear();
 
-        var segments = path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var currentPath = string.Empty;
+        // The root always gets its own leading, always-clickable segment. Proton's root is a
+        // real named folder ("/my-files"), so splitting the path on '/' always produced at
+        // least one segment to click back to. OneDrive's root is bare "/", which splits into
+        // *zero* segments — so browsing into a folder left the breadcrumb bar showing only that
+        // folder's name, with nothing before it to get back to root: it looked like the folder
+        // itself was the root. Labeling this segment with the provider's name when the root has
+        // no real name of its own (OneDrive) keeps Proton's own label ("my-files") unchanged.
+        var rootLabel = _rootPath == "/" ? _provider.DisplayName : _rootPath.TrimEnd('/').Split('/').Last();
+        BreadcrumbItems.Add(new BreadcrumbSegmentViewModel(rootLabel, _rootPath, path == _rootPath, NavigateIntoAsync, HandleUnexpectedError));
+
+        if (path == _rootPath)
+        {
+            return;
+        }
+
+        var relative = path[_rootPath.Length..].Trim('/');
+        var segments = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var currentPath = _rootPath;
 
         foreach (var segment in segments)
         {
-            currentPath = string.IsNullOrEmpty(currentPath)
-                ? "/" + segment
-                : currentPath + "/" + segment;
-
+            currentPath = currentPath.TrimEnd('/') + "/" + segment;
             BreadcrumbItems.Add(new BreadcrumbSegmentViewModel(segment, currentPath, currentPath == path, NavigateIntoAsync, HandleUnexpectedError));
         }
     }
@@ -1415,6 +1910,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectedOwner = "None";
         SelectedShared = "None";
         HasSelection = false;
+        ViewSelectedFileCommand.RaiseCanExecuteChanged();
     }
 
     private void ResetBrowserState()
@@ -1431,7 +1927,15 @@ public sealed class MainWindowViewModel : ObservableObject
         _settings.Update(settings =>
         {
             settings.CliPath = CliPath;
-            settings.IsAuthenticated = IsAuthenticated;
+            if (_provider.Id == ProviderId.OneDrive)
+            {
+                settings.IsOneDriveAuthenticated = IsAuthenticated;
+            }
+            else
+            {
+                settings.IsAuthenticated = IsAuthenticated;
+            }
+
             settings.ViewMode = ViewMode.ToString();
             settings.SortKey = SortKey.ToString();
             settings.SortDescending = SortDescending;
@@ -1451,6 +1955,9 @@ public sealed class MainWindowViewModel : ObservableObject
         CheckCliVersionCommand.RaiseCanExecuteChanged();
         CheckForCliUpdateCommand.RaiseCanExecuteChanged();
         InstallCliUpdateCommand.RaiseCanExecuteChanged();
+        ViewSelectedFileCommand.RaiseCanExecuteChanged();
+        SwitchToProtonCommand.RaiseCanExecuteChanged();
+        SwitchToOneDriveCommand.RaiseCanExecuteChanged();
     }
 
     private async Task ToggleCommandConsoleAsync()
@@ -1558,14 +2065,19 @@ public sealed class MainWindowViewModel : ObservableObject
         IsCheckingCliVersion = true;
         try
         {
-            var version = await _service.GetCliVersionAsync();
+            // Diagnostics is only ever null for a provider with no external binary to version
+            // (docs/PLAN-CLOUD-PROVIDERS.md §2.6); the settings UI stops offering this command for
+            // such a provider as of P5. Today's only provider (Proton) always has one.
+            var version = _provider.Diagnostics is not null
+                ? await _provider.Diagnostics.GetVersionAsync()
+                : null;
             CliVersion = string.IsNullOrWhiteSpace(version)
                 ? "The CLI reported no version."
                 : version;
         }
         catch (InvalidOperationException ex)
         {
-            // Includes CliException. The CLI's own text is the most useful thing on screen here:
+            // Includes DriveException. The CLI's own text is the most useful thing on screen here:
             // if `--version` is not the flag this build understands, the user sees exactly that.
             CliVersion = $"Unavailable: {ex.Message}";
         }
@@ -1743,23 +2255,45 @@ public sealed class MainWindowViewModel : ObservableObject
         await Task.CompletedTask;
     }
 
-    private void OnCommandStarted(object? sender, CliCommandStartedEventArgs e)
+    /// <summary>
+    /// Lets the console show activity from a provider session other than the one this view model
+    /// browses — the composition root calls this once per additional active session (P7: Proton
+    /// and OneDrive can both be configured and syncing at once, even though only one is on screen
+    /// at a time until Phase B's account switcher). Lines from every session share one buffer,
+    /// prefixed with <paramref name="accountLabel"/> so an interleaved console stays readable.
+    /// </summary>
+    public void ObserveAdditionalProviderActivity(string accountLabel, ICloudDriveProvider provider)
     {
-        Dispatcher.UIThread.Post(() => ActiveCommand = e.CommandText);
-        QueueCommandLine($"> {e.CommandText}");
+        provider.Activity += (_, activity) => OnActivity(accountLabel, activity);
+        provider.ListingParseWarning += (_, message) => OnListingParseWarning(accountLabel, message);
     }
 
-    private void OnCommandOutput(object? sender, CliCommandOutputEventArgs e)
-        => QueueCommandLine(e.IsError ? $"[err] {e.Text}" : e.Text);
-
-    private void OnCommandFinished(object? sender, CliCommandFinishedEventArgs e)
+    private void OnActivity(string accountLabel, ProviderActivity activity)
     {
-        QueueCommandLine(e.Succeeded ? $"[done] exit {e.ExitCode}" : $"[fail] exit {e.ExitCode}");
-        Dispatcher.UIThread.Post(() => ActiveCommand = "Idle");
+        switch (activity.Kind)
+        {
+            case ActivityKind.Started:
+                Dispatcher.UIThread.Post(() => ActiveCommand = $"[{accountLabel}] {activity.Label}");
+                QueueCommandLine($"[{accountLabel}] > {activity.Label}");
+                break;
+
+            case ActivityKind.Output:
+                QueueCommandLine($"[{accountLabel}] " + (activity.IsError ? $"[err] {activity.Text}" : activity.Text ?? string.Empty));
+                break;
+
+            case ActivityKind.Finished:
+                QueueCommandLine($"[{accountLabel}] " + (activity.IsError ? $"[fail] exit {activity.ExitCode}" : $"[done] exit {activity.ExitCode}"));
+                // Unconditional, same as before P7: with two sessions active, one session's
+                // Finished can clear ActiveCommand out from under the other's still-running
+                // Started. A single "what's active" label can't represent two concurrent
+                // operations correctly — a real per-session indicator is Phase B's job.
+                Dispatcher.UIThread.Post(() => ActiveCommand = "Idle");
+                break;
+        }
     }
 
-    private void OnListingParseWarning(object? sender, string message)
-        => QueueCommandLine($"[warn] {message}");
+    private void OnListingParseWarning(string accountLabel, string message)
+        => QueueCommandLine($"[{accountLabel}] [warn] {message}");
 
     /// <summary>
     /// Buffers a console line and makes sure exactly one flush is pending.
@@ -1831,11 +2365,11 @@ public sealed class MainWindowViewModel : ObservableObject
         });
     }
 
-    private static string FormatCliError(string path, Exception ex)
+    private static string FormatDriveError(string path, Exception ex)
     {
-        var kind = (ex as CliException)?.Kind ?? CliErrorKind.Unknown;
+        var kind = (ex as DriveException)?.Kind ?? DriveErrorKind.Unknown;
 
-        if (kind == CliErrorKind.NotAuthenticated)
+        if (kind == DriveErrorKind.NotAuthenticated)
         {
             return path == "auth login"
                 ? "Authentication required. Use Authenticate to sign in."

@@ -56,6 +56,115 @@ public class SyncStateStoreTests : IDisposable
         Assert.True(await CreateSut().GetAutomaticSyncEnabledAsync());
     }
 
+    /// <summary>
+    /// P7 Phase A regression (docs/PLAN-CLOUD-PROVIDERS.md): the flag used to be one unscoped row
+    /// in the shared `cache.db`, so two accounts sharing that file (e.g. Proton + OneDrive) would
+    /// silently share one on/off choice — turning OneDrive's automatic sync off also turned
+    /// Proton's off. Caught by <c>SyncPanelMultiAccountTests</c>.
+    /// </summary>
+    [Fact]
+    public async Task AutomaticSyncEnabled_IsScopedPerAccountKey_NotSharedAcrossAccountsInTheSameDatabase()
+    {
+        var accountA = new SyncStateStore(_dbPath, "account-a");
+        var accountB = new SyncStateStore(_dbPath, "account-b");
+
+        await accountA.SetAutomaticSyncEnabledAsync(false);
+        await accountB.SetAutomaticSyncEnabledAsync(true);
+
+        Assert.False(await accountA.GetAutomaticSyncEnabledAsync());
+        Assert.True(await accountB.GetAutomaticSyncEnabledAsync());
+    }
+
+    /// <summary>
+    /// An existing single-Proton-account install wrote this flag under the old unscoped key,
+    /// before P7 introduced per-account scoping. That choice must survive the upgrade rather than
+    /// silently resetting to the default (on) the first time it's read under the new scoped key —
+    /// only for "proton:default", the sentinel every pre-P7 row was backfilled to (P4).
+    /// </summary>
+    [Fact]
+    public async Task AutomaticSyncEnabled_FallsBackToTheLegacyUnscopedKey_ForTheDefaultProtonAccountOnly()
+    {
+        var legacyStore = new SyncStateStore(_dbPath); // defaults to "proton:default"
+        await legacyStore.GetPairsAsync(); // ensure migrations have run before writing to AppSettings by hand
+
+        // Simulate a pre-P7 row: written directly under the old unscoped key, not through
+        // SetAutomaticSyncEnabledAsync (which now always writes the scoped key).
+        await using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = "INSERT INTO AppSettings (Key, Value) VALUES ('AutomaticSyncEnabled', '0')";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        Assert.False(await legacyStore.GetAutomaticSyncEnabledAsync());
+
+        // A non-default account key must NOT see the legacy Proton row — it has no legacy data of
+        // its own, so it should just get the ordinary "never recorded a choice" default (on).
+        var oneDriveStore = new SyncStateStore(_dbPath, "onedrive:default");
+        Assert.True(await oneDriveStore.GetAutomaticSyncEnabledAsync());
+    }
+
+    [Fact]
+    public async Task DeltaToken_DefaultsToNull()
+    {
+        var sut = CreateSut();
+
+        Assert.Null(await sut.GetDeltaTokenAsync(pairId: 1));
+    }
+
+    [Fact]
+    public async Task DeltaToken_SetThenGet_RoundTrips()
+    {
+        var sut = CreateSut();
+
+        await sut.SetDeltaTokenAsync(1, "https://graph.microsoft.com/v1.0/cursor-abc");
+
+        Assert.Equal("https://graph.microsoft.com/v1.0/cursor-abc", await sut.GetDeltaTokenAsync(1));
+    }
+
+    [Fact]
+    public async Task DeltaToken_SetToNull_ClearsAPreviouslyStoredToken()
+    {
+        var sut = CreateSut();
+        await sut.SetDeltaTokenAsync(1, "https://graph.microsoft.com/v1.0/cursor-abc");
+
+        await sut.SetDeltaTokenAsync(1, null);
+
+        Assert.Null(await sut.GetDeltaTokenAsync(1));
+    }
+
+    /// <summary>
+    /// A token is scoped per *pair*, not per account: two pairs on the same account sharing one
+    /// token would mean whichever pair's sync runs first in a cycle "consumes" the diff and
+    /// advances the cursor, so a second pair sharing it would then silently miss changes to its own
+    /// subtree from before that (docs/PLAN-CLOUD-PROVIDERS.md P8).
+    /// </summary>
+    [Fact]
+    public async Task DeltaToken_IsScopedPerPair_NotSharedAcrossPairsOnTheSameAccount()
+    {
+        var sut = CreateSut();
+
+        await sut.SetDeltaTokenAsync(1, "cursor-for-pair-1");
+        await sut.SetDeltaTokenAsync(2, "cursor-for-pair-2");
+
+        Assert.Equal("cursor-for-pair-1", await sut.GetDeltaTokenAsync(1));
+        Assert.Equal("cursor-for-pair-2", await sut.GetDeltaTokenAsync(2));
+    }
+
+    [Fact]
+    public async Task DeltaToken_IsScopedPerAccountKey_NotSharedAcrossAccountsInTheSameDatabase()
+    {
+        var accountA = new SyncStateStore(_dbPath, "account-a");
+        var accountB = new SyncStateStore(_dbPath, "account-b");
+
+        await accountA.SetDeltaTokenAsync(1, "cursor-for-account-a");
+        await accountB.SetDeltaTokenAsync(1, "cursor-for-account-b");
+
+        Assert.Equal("cursor-for-account-a", await accountA.GetDeltaTokenAsync(1));
+        Assert.Equal("cursor-for-account-b", await accountB.GetDeltaTokenAsync(1));
+    }
+
     [Fact]
     public async Task GetPair_ById_ReturnsMatchingPair()
     {
@@ -102,6 +211,36 @@ public class SyncStateStoreTests : IDisposable
         var updated = await sut.GetPairAsync(pair.Id);
         Assert.False(updated!.IsEnabled);
         Assert.True(updated.IsPaused);
+    }
+
+    [Fact]
+    public async Task UpdatePairSettings_ChangesDirectionAndConflictPolicy()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+
+        await sut.UpdatePairSettingsAsync(pair.Id, SyncDirection.TwoWay, ConflictPolicy.PreferLocal);
+
+        var updated = await sut.GetPairAsync(pair.Id);
+        Assert.Equal(SyncDirection.TwoWay, updated!.Direction);
+        Assert.Equal(ConflictPolicy.PreferLocal, updated.ConflictPolicy);
+    }
+
+    [Fact]
+    public async Task UpdatePairSettings_LeavesEverythingElseUnchanged()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.RemoteToLocal, ConflictPolicy.Ask, ["*.tmp"]);
+        await sut.UpdatePairStatusAsync(pair.Id, T0, SyncPairStatus.Ok, null);
+
+        await sut.UpdatePairSettingsAsync(pair.Id, SyncDirection.LocalToRemote, ConflictPolicy.KeepBoth);
+
+        var updated = await sut.GetPairAsync(pair.Id);
+        Assert.Equal("/my-files/A", updated!.RemotePath);
+        Assert.Equal("/home/user/A", updated.LocalPath);
+        Assert.Equal(["*.tmp"], updated.ExcludeGlobs);
+        Assert.Equal(SyncPairStatus.Ok, updated.LastStatus);
+        Assert.Equal(T0, updated.LastSyncAt);
     }
 
     [Fact]

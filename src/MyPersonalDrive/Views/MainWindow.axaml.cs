@@ -99,6 +99,7 @@ public partial class MainWindow : Window
         viewModel.SyncPanel.RequestPreviewConfirmationAsync = ShowPreviewAsync;
         viewModel.SyncPanel.RequestConflictResolutionsAsync = ShowConflictsAsync;
         viewModel.SyncPanel.RequestConfirmationAsync = AskAsync;
+        viewModel.SyncPanel.RequestEditPairAsync = PromptForEditPairAsync;
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -532,6 +533,122 @@ public partial class MainWindow : Window
                 result = new NewSyncPairRequest(remoteBox.Text.Trim(), localBox.Text.Trim(), direction, policy);
             }
 
+            dialog.Close();
+        };
+
+        cancelButton.Click += (_, _) => dialog.Close();
+
+        await dialog.ShowDialog(this);
+        return result;
+    }
+
+    /// <summary>
+    /// Lets an existing pair's direction/conflict policy change without recreating it. Remote/local
+    /// paths aren't editable here — changing those already has a working path (remove, then add a
+    /// new pair) and would need re-validating against every other pair, which this flow never does.
+    /// </summary>
+    private async Task<EditSyncPairRequest?> PromptForEditPairAsync(SyncPairViewModel pair)
+    {
+        var directionBox = new ComboBox
+        {
+            Width = 380,
+            ItemsSource = new[]
+            {
+                "Download only  (remote → local)",
+                "Upload only  (local → remote)",
+                "Two-way  (remote ↔ local)",
+            },
+            SelectedIndex = pair.Direction switch
+            {
+                SyncDirection.LocalToRemote => 1,
+                SyncDirection.TwoWay => 2,
+                _ => 0,
+            },
+        };
+
+        var policyBox = new ComboBox
+        {
+            Width = 380,
+            ItemsSource = new[]
+            {
+                "Ask me  (park the conflict, decide later)",
+                "Keep both  (never loses either version)",
+                "Prefer local",
+                "Prefer remote",
+            },
+            SelectedIndex = pair.ConflictPolicy switch
+            {
+                ConflictPolicy.KeepBoth => 1,
+                ConflictPolicy.PreferLocal => 2,
+                ConflictPolicy.PreferRemote => 3,
+                _ => 0,
+            },
+        };
+
+        var policyLabel = new TextBlock { Text = "When both sides changed:", FontWeight = Avalonia.Media.FontWeight.Bold };
+
+        void SyncPolicyVisibility()
+        {
+            var isTwoWay = directionBox.SelectedIndex == 2;
+            policyBox.IsVisible = isTwoWay;
+            policyLabel.IsVisible = isTwoWay;
+        }
+
+        directionBox.SelectionChanged += (_, _) => SyncPolicyVisibility();
+        SyncPolicyVisibility();
+
+        var saveButton = new Button { Content = "Save", IsDefault = true, Width = 80 };
+        var cancelButton = new Button { Content = "Cancel", IsCancel = true, Width = 80 };
+
+        var dialog = new Window
+        {
+            Title = "Edit sync pair",
+            Width = 440,
+            Height = 320,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                Margin = new Avalonia.Thickness(20),
+                Children =
+                {
+                    new TextBlock { Text = pair.RemotePath, FontWeight = Avalonia.Media.FontWeight.Bold },
+                    new TextBlock { Text = pair.LocalPath, Opacity = 0.7 },
+                    new TextBlock { Text = "Direction:", FontWeight = Avalonia.Media.FontWeight.Bold },
+                    directionBox,
+                    policyLabel,
+                    policyBox,
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 10,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Children = { saveButton, cancelButton }
+                    }
+                }
+            },
+        };
+
+        EditSyncPairRequest? result = null;
+
+        saveButton.Click += (_, _) =>
+        {
+            var direction = directionBox.SelectedIndex switch
+            {
+                1 => SyncDirection.LocalToRemote,
+                2 => SyncDirection.TwoWay,
+                _ => SyncDirection.RemoteToLocal,
+            };
+
+            var policy = policyBox.SelectedIndex switch
+            {
+                1 => ConflictPolicy.KeepBoth,
+                2 => ConflictPolicy.PreferLocal,
+                3 => ConflictPolicy.PreferRemote,
+                _ => ConflictPolicy.Ask,
+            };
+
+            result = new EditSyncPairRequest(direction, policy);
             dialog.Close();
         };
 

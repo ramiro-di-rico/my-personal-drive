@@ -10,10 +10,11 @@ public sealed class DriveNodeViewModel : ObservableObject
     private readonly Func<DriveItem, Task> _trashItemAsync;
     private readonly Func<DriveItem, Task> _renameItemAsync;
     private readonly Func<DriveItem, Task> _copyItemAsync;
+    private readonly Func<DriveItem, Task>? _previewItemAsync;
     private bool _isSelected;
     private string? _deepSizeText;
 
-    public DriveNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Func<DriveItem, Task> downloadItemAsync, Func<DriveItem, Task> trashItemAsync, Func<DriveItem, Task> renameItemAsync, Func<DriveItem, Task> copyItemAsync, Action<Exception>? onError = null)
+    public DriveNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Func<DriveItem, Task> downloadItemAsync, Func<DriveItem, Task> trashItemAsync, Func<DriveItem, Task> renameItemAsync, Func<DriveItem, Task> copyItemAsync, Func<DriveItem, Task>? previewItemAsync = null, Action<Exception>? onError = null)
     {
         Item = item;
         FileKind = FileKindClassifier.Classify(item.Name, item.IsFolder);
@@ -22,11 +23,14 @@ public sealed class DriveNodeViewModel : ObservableObject
         _trashItemAsync = trashItemAsync;
         _renameItemAsync = renameItemAsync;
         _copyItemAsync = copyItemAsync;
+        _previewItemAsync = previewItemAsync;
+        CanPreview = TextPreviewPolicy.CanPreview(item) || ImagePreviewPolicy.CanPreview(item);
         RowCommand = new AsyncCommand(HandleRowClickAsync, onError: onError);
         DownloadCommand = new AsyncCommand(DownloadAsync, () => !Item.IsFolder, onError);
         TrashCommand = new AsyncCommand(TrashAsync, () => !Item.IsFolder, onError);
         RenameCommand = new AsyncCommand(RenameAsync, onError: onError);
         CopyCommand = new AsyncCommand(CopyAsync, onError: onError);
+        PreviewCommand = new AsyncCommand(PreviewAsync, () => CanPreview && _previewItemAsync is not null, onError);
     }
 
     public DriveItem Item { get; }
@@ -44,6 +48,16 @@ public sealed class DriveNodeViewModel : ObservableObject
     public string DisplayName => string.IsNullOrWhiteSpace(Item.Name) ? Item.Path : Item.Name;
 
     public string Path => Item.Path;
+
+    /// <summary>
+    /// Whether the in-app viewer offers itself for this row — text via <see cref="TextPreviewPolicy"/>
+    /// or an image via <see cref="ImagePreviewPolicy"/>. Which one it is gets decided again, from
+    /// the same policies, where the download actually happens
+    /// (<c>MainWindowViewModel.PreviewItemAsync</c>) — this flag only drives whether the button
+    /// shows up. Computed once per row like <see cref="FileKind"/>: both policies are pure, and
+    /// every refresh rebuilds the rows anyway.
+    /// </summary>
+    public bool CanPreview { get; }
 
     public string Kind => Item.IsFolder ? "Folder" : "File";
 
@@ -92,6 +106,8 @@ public sealed class DriveNodeViewModel : ObservableObject
 
     public AsyncCommand CopyCommand { get; }
 
+    public AsyncCommand PreviewCommand { get; }
+
     private async Task HandleRowClickAsync()
     {
         await _handleRowClickAsync(Item);
@@ -125,5 +141,15 @@ public sealed class DriveNodeViewModel : ObservableObject
     private async Task CopyAsync()
     {
         await _copyItemAsync(Item);
+    }
+
+    private async Task PreviewAsync()
+    {
+        if (!CanPreview || _previewItemAsync is null)
+        {
+            return;
+        }
+
+        await _previewItemAsync(Item);
     }
 }

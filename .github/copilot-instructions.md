@@ -16,6 +16,7 @@ are pointers to these same files.
 |---|---|
 | Add/change a `proton-drive` command | [`cli-command`](../.claude/skills/cli-command/SKILL.md) |
 | Add a UI feature (MVVM) | [`add-feature`](../.claude/skills/add-feature/SKILL.md) |
+| Add a new cloud storage provider | [`add-cloud-provider`](../.claude/skills/add-cloud-provider/SKILL.md) |
 | Cut a Linux release | [`release-linux`](../.claude/skills/release-linux/SKILL.md) |
 | Check Native AOT / trim safety | [`aot-check`](../.claude/skills/aot-check/SKILL.md) |
 | Run the app locally | [`run-app`](../.claude/skills/run-app/SKILL.md) |

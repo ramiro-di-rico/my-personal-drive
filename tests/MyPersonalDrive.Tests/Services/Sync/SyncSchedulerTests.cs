@@ -1,6 +1,8 @@
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
 using Xunit;
@@ -40,9 +42,10 @@ public class SyncSchedulerTests : IDisposable
         var clock = new FakeTimeProvider(T0);
         var cli = new FakeCliExecutor();
         var service = new ProtonDriveService(cli);
+        var provider = new ProtonDriveProvider(service);
         var store = new SyncStateStore(_dbPath);
         var suppressor = new SyncEchoSuppressor(clock);
-        var executor = new SyncExecutor(service, store, new LocalScanner(), new RemoteScanner(service), clock, suppressor);
+        var executor = new SyncExecutor(provider.Operations, store, new LocalScanner(), new RemoteScanner(provider), clock, suppressor);
 
         var pair = await store.CreatePairAsync(RemoteRoot, _localRoot, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
         if (paused)
@@ -162,7 +165,7 @@ public class SyncSchedulerTests : IDisposable
     {
         for (var i = 1; i <= times; i++)
         {
-            h.Cli.EnqueueOutput(_ => throw new CliException("list", 1, "", "boom", "boom", CliErrorKind.Network));
+            h.Cli.EnqueueOutput(_ => throw new DriveException("list", 1, "", "boom", "boom", DriveErrorKind.Network));
             var due = SyncSchedulePolicy.ErrorBackoff(i - 1);
             h.Clock.Advance(due > SyncSchedulePolicy.MinInterval ? due : SyncSchedulePolicy.MinInterval);
             Assert.True(await h.Scheduler.PumpOnceAsync(CancellationToken.None), $"failure {i} did not run");

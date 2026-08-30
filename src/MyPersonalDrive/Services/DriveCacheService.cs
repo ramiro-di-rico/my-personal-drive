@@ -10,11 +10,18 @@ namespace MyPersonalDrive.Services;
 public class DriveCacheService
 {
     private readonly string _connectionString;
+    private readonly string _accountKey;
 
-    public DriveCacheService(string dbPath)
+    /// <param name="accountKey">
+    /// "&lt;providerId&gt;:&lt;accountId&gt;" (docs/PLAN-CLOUD-PROVIDERS.md P4). Defaults to the
+    /// sentinel migration 6 backfilled every pre-existing row to, so a caller that hasn't been
+    /// updated for multi-provider yet keeps reading the same rows it always has.
+    /// </param>
+    public DriveCacheService(string dbPath, string accountKey = "proton:default")
     {
         Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
         _connectionString = SqliteOffThread.ConnectionStringFor(dbPath);
+        _accountKey = accountKey;
         InitializeDatabase();
     }
 
@@ -42,7 +49,8 @@ public class DriveCacheService
         await connection.OpenAsync();
 
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Path, Name, IsFolder, Size, ModifiedAt, Owner, IsShared, NodeId, ContentHash FROM DriveItems WHERE ParentPath = @ParentPath";
+        command.CommandText = "SELECT Path, Name, IsFolder, Size, ModifiedAt, Owner, IsShared, NodeId, ContentHash FROM DriveItems WHERE AccountKey = @AccountKey AND ParentPath = @ParentPath";
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@ParentPath", parentPath);
 
         using var reader = await command.ExecuteReaderAsync();
@@ -79,7 +87,8 @@ public class DriveCacheService
             var cachedPaths = new List<string>();
             var selectCmd = connection.CreateCommand();
             selectCmd.Transaction = transaction;
-            selectCmd.CommandText = "SELECT Path FROM DriveItems WHERE ParentPath = @ParentPath";
+            selectCmd.CommandText = "SELECT Path FROM DriveItems WHERE AccountKey = @AccountKey AND ParentPath = @ParentPath";
+            selectCmd.Parameters.AddWithValue("@AccountKey", _accountKey);
             selectCmd.Parameters.AddWithValue("@ParentPath", parentPath);
             using (var reader = await selectCmd.ExecuteReaderAsync())
             {
@@ -96,7 +105,8 @@ public class DriveCacheService
                 {
                     var deleteCmd = connection.CreateCommand();
                     deleteCmd.Transaction = transaction;
-                    deleteCmd.CommandText = "DELETE FROM DriveItems WHERE Path = @Path";
+                    deleteCmd.CommandText = "DELETE FROM DriveItems WHERE AccountKey = @AccountKey AND Path = @Path";
+                    deleteCmd.Parameters.AddWithValue("@AccountKey", _accountKey);
                     deleteCmd.Parameters.AddWithValue("@Path", cachedPath);
                     await deleteCmd.ExecuteNonQueryAsync();
                 }
@@ -127,7 +137,8 @@ public class DriveCacheService
         using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync();
         var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM DriveItems WHERE Path = @Path OR Path LIKE @PathPrefix";
+        command.CommandText = "DELETE FROM DriveItems WHERE AccountKey = @AccountKey AND (Path = @Path OR Path LIKE @PathPrefix)";
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@Path", path);
         command.Parameters.AddWithValue("@PathPrefix", path + "/%");
         await command.ExecuteNonQueryAsync();
@@ -145,9 +156,9 @@ public class DriveCacheService
     });
 
     private const string UpsertSql = """
-        INSERT INTO DriveItems (Path, ParentPath, Name, IsFolder, Size, ModifiedAt, Owner, IsShared, NodeId, ContentHash)
-        VALUES (@Path, @ParentPath, @Name, @IsFolder, @Size, @ModifiedAt, @Owner, @IsShared, @NodeId, @ContentHash)
-        ON CONFLICT(Path) DO UPDATE SET
+        INSERT INTO DriveItems (AccountKey, Path, ParentPath, Name, IsFolder, Size, ModifiedAt, Owner, IsShared, NodeId, ContentHash)
+        VALUES (@AccountKey, @Path, @ParentPath, @Name, @IsFolder, @Size, @ModifiedAt, @Owner, @IsShared, @NodeId, @ContentHash)
+        ON CONFLICT(AccountKey, Path) DO UPDATE SET
             ParentPath = excluded.ParentPath,
             Name = excluded.Name,
             IsFolder = excluded.IsFolder,
@@ -159,8 +170,9 @@ public class DriveCacheService
             ContentHash = excluded.ContentHash;
         """;
 
-    private static void BindUpsertParameters(SqliteCommand command, string parentPath, DriveItem item)
+    private void BindUpsertParameters(SqliteCommand command, string parentPath, DriveItem item)
     {
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@Path", item.Path);
         command.Parameters.AddWithValue("@ParentPath", parentPath);
         command.Parameters.AddWithValue("@Name", item.Name);

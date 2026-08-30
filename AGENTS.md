@@ -1,13 +1,15 @@
 # Agent guide — my-personal-drive
 
-Avalonia UI 12 (.NET 10) desktop front-end for the official Proton Drive CLI (`proton-drive`).
-The app **never talks to Proton's API directly**: every remote operation launches a CLI process
-and parses its stdout.
+Avalonia UI 12 (.NET 10) desktop front-end for cloud drive storage, behind a provider seam
+(`ICloudDriveProvider`, `Services/Providers/`) — see `docs/PLAN-CLOUD-PROVIDERS.md`. Two providers
+exist: **Proton Drive**, via the official CLI (`proton-drive`) — every remote operation launches a
+CLI process and parses its stdout, never talking to Proton's API directly — and **OneDrive**, via
+Microsoft Graph over HTTP (`Services/Providers/OneDrive/`), which is inherently network-based.
 
-The one exception is `CliReleaseFeed`, which GETs the published CLI release manifest
-(`https://proton.me/download/drive/cli/version.json`) so the app can offer to update the CLI —
-a public static file, not the Drive API. It is the app's **only** outbound network call; adding a
-second one is an architectural decision, not a detail. See `docs/ARCHITECTURE.md` §10.
+On the Proton side, the one exception to "CLI only" is `CliReleaseFeed`, which GETs the published
+CLI release manifest (`https://proton.me/download/drive/cli/version.json`) so the app can offer to
+update the CLI — a public static file, not the Drive API. Adding a further outbound call on the
+Proton side is still an architectural decision, not a detail. See `docs/ARCHITECTURE.md` §5.4/§10.
 
 Read `docs/ARCHITECTURE.md` for the current state, and the `docs/PLAN-*.md` files for planned work
 and verified CLI behavior (`PLAN-LOCAL-SYNC.md` Appendix A).
@@ -23,6 +25,7 @@ one-line description.
 |---|---|
 | [`cli-command`](.claude/skills/cli-command/SKILL.md) | Adding or changing a `proton-drive` command: service method, parsing, error kind, tests |
 | [`add-feature`](.claude/skills/add-feature/SKILL.md) | Adding UI: view, panel, button, or any user-facing action (MVVM rules) |
+| [`add-cloud-provider`](.claude/skills/add-cloud-provider/SKILL.md) | Planning and implementing a new cloud storage backend behind `ICloudDriveProvider` |
 | [`release-linux`](.claude/skills/release-linux/SKILL.md) | Cutting a Linux release or producing an installable artifact |
 | [`aot-check`](.claude/skills/aot-check/SKILL.md) | After touching serialization, reflection, packages, or bindings; before a release |
 | [`run-app`](.claude/skills/run-app/SKILL.md) | Running the app for real, with the real CLI or a stub |
@@ -35,8 +38,9 @@ one-line description.
 - **CLI arguments are lists.** `IProtonDriveCliExecutor.ExecuteAsync` takes
   `IReadOnlyList<string>` and passes it to `ProcessStartInfo.ArgumentList`. Never build a
   pre-quoted argument string.
-- **Errors are typed.** Callers switch on `CliException.Kind` (`CliErrorKind`). Substring
-  matching on error messages lives in `CliErrorClassifier` and nowhere else.
+- **Errors are typed.** Callers switch on `DriveException.Kind` (`DriveErrorKind`). Substring
+  matching on error messages lives in `CliErrorClassifier` — one place per provider, not
+  reintroduced upstream (docs/PLAN-CLOUD-PROVIDERS.md §2.6).
 - **The app project is Native AOT.** `PublishAot=true`, `TrimMode=partial`. Serialized types go
   in `AppJsonContext`; no reflection-based `JsonSerializer` overloads. Tests run on the JIT host,
   so passing tests do not prove AOT safety.
@@ -64,6 +68,7 @@ dotnet run --project src/MyPersonalDrive     # run the app
 ```
 src/MyPersonalDrive/
   Services/           CLI boundary: executor, locator, ProtonDriveService, error classifier, cache
+  Services/Providers/ ICloudDriveProvider seam + Proton/ (see docs/PLAN-CLOUD-PROVIDERS.md)
   Services/Sync/      local-sync engine: scanners, reconciler, executor, scheduler, state store
   ViewModels/         MVVM (ObservableObject, AsyncCommand)
   Views/              .axaml + minimal code-behind

@@ -16,11 +16,19 @@ namespace MyPersonalDrive.Services.Sync;
 public sealed class SyncStateStore
 {
     private readonly string _connectionString;
+    private readonly string _accountKey;
 
-    public SyncStateStore(string dbPath)
+    /// <param name="accountKey">
+    /// See <see cref="DriveCacheService"/>'s constructor doc. Scopes <c>SyncPairs</c> only —
+    /// <c>SyncState</c>/<c>SyncQueue</c>/<c>SyncLog</c> are keyed by <c>PairId</c>, a value only
+    /// ever obtained from an already-scoped <see cref="GetPairsAsync"/> call, so they inherit the
+    /// scoping transitively rather than needing their own column (docs/PLAN-CLOUD-PROVIDERS.md P4).
+    /// </param>
+    public SyncStateStore(string dbPath, string accountKey = "proton:default")
     {
         Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
         _connectionString = SqliteOffThread.ConnectionStringFor(dbPath);
+        _accountKey = accountKey;
 
         using var connection = OpenConnection();
         SqliteMigrationRunner.Apply(connection, DriveDatabaseMigrations.All);
@@ -46,12 +54,52 @@ public sealed class SyncStateStore
     /// Whether the automatic sync loop should be running. Defaults to true for a database that
     /// has never recorded a choice, so existing users keep the behaviour they had before this
     /// setting existed.
+    ///
+    /// Scoped by <see cref="_accountKey"/> (prefixed into the row's key, not a schema change —
+    /// <c>AppSettings</c> is a plain key/value table) — found by a P7 Phase A test
+    /// (docs/PLAN-CLOUD-PROVIDERS.md): before this, the row was a single unscoped key shared by
+    /// every account's <see cref="SyncStateStore"/> instance against the same <c>cache.db</c>, so
+    /// pausing OneDrive's automatic sync silently paused Proton's too (or vice versa). The
+    /// unscoped key is still read as a fallback *only* for the pre-P7 default account key
+    /// (`"proton:default"`), so an existing single-Proton-account install's saved on/off choice
+    /// survives the upgrade instead of silently resetting to the default (on) the first time it's
+    /// read under the new scoped key.
     /// </summary>
     public async Task<bool> GetAutomaticSyncEnabledAsync(CancellationToken ct = default)
-        => await GetSettingAsync(AutomaticSyncEnabledKey, ct) is not "0";
+    {
+        var value = await GetSettingAsync(ScopedSettingKey(AutomaticSyncEnabledKey), ct);
+        if (value is null && _accountKey == "proton:default")
+        {
+            value = await GetSettingAsync(AutomaticSyncEnabledKey, ct);
+        }
+
+        return value is not "0";
+    }
 
     public async Task SetAutomaticSyncEnabledAsync(bool isEnabled, CancellationToken ct = default)
-        => await SetSettingAsync(AutomaticSyncEnabledKey, isEnabled ? "1" : "0", ct);
+        => await SetSettingAsync(ScopedSettingKey(AutomaticSyncEnabledKey), isEnabled ? "1" : "0", ct);
+
+    /// <summary>
+    /// The delta cursor for one sync pair — scoped per-pair, not per-account: a single account-wide
+    /// token would mean whichever pair's sync runs first in a cycle "consumes" the diff and
+    /// advances the cursor, so a second pair sharing it would then see only the tiny diff since the
+    /// *first pair's* refresh and silently miss changes to its own subtree from before that. Reuses
+    /// the same account-scoped <see cref="ScopedSettingKey"/> mechanism as
+    /// <see cref="GetAutomaticSyncEnabledAsync"/> so two accounts never collide on the same
+    /// <c>cache.db</c>, then adds the pair id on top of that (docs/PLAN-CLOUD-PROVIDERS.md P8).
+    /// Null means "no cursor yet — enumerate the entire current tree."
+    /// </summary>
+    public Task<string?> GetDeltaTokenAsync(int pairId, CancellationToken ct = default)
+        => GetSettingAsync(ScopedSettingKey(DeltaTokenKey(pairId)), ct);
+
+    public Task SetDeltaTokenAsync(int pairId, string? token, CancellationToken ct = default)
+        => token is null
+            ? DeleteSettingAsync(ScopedSettingKey(DeltaTokenKey(pairId)), ct)
+            : SetSettingAsync(ScopedSettingKey(DeltaTokenKey(pairId)), token, ct);
+
+    private static string DeltaTokenKey(int pairId) => $"DeltaToken:{pairId}";
+
+    private string ScopedSettingKey(string key) => $"{_accountKey}:{key}";
 
     private Task<string?> GetSettingAsync(string key, CancellationToken ct)
         => SqliteOffThread.RunAsync<string?>(async () =>
@@ -77,6 +125,16 @@ public sealed class SyncStateStore
         await command.ExecuteNonQueryAsync(ct);
     });
 
+    private Task DeleteSettingAsync(string key, CancellationToken ct)
+        => SqliteOffThread.RunAsync(async () =>
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM AppSettings WHERE Key = @Key";
+        command.Parameters.AddWithValue("@Key", key);
+        await command.ExecuteNonQueryAsync(ct);
+    });
+
     // ---------------------------------------------------------------- SyncPairs
 
     public Task<SyncPair> CreatePairAsync(
@@ -87,10 +145,11 @@ public sealed class SyncStateStore
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO SyncPairs (RemotePath, LocalPath, Direction, ConflictPolicy, ExcludeGlobs, LastSyncStatus)
-            VALUES (@RemotePath, @LocalPath, @Direction, @ConflictPolicy, @ExcludeGlobs, 'Never');
+            INSERT INTO SyncPairs (AccountKey, RemotePath, LocalPath, Direction, ConflictPolicy, ExcludeGlobs, LastSyncStatus)
+            VALUES (@AccountKey, @RemotePath, @LocalPath, @Direction, @ConflictPolicy, @ExcludeGlobs, 'Never');
             SELECT last_insert_rowid();
             """;
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@RemotePath", remotePath);
         command.Parameters.AddWithValue("@LocalPath", localPath);
         command.Parameters.AddWithValue("@Direction", direction.ToString());
@@ -107,7 +166,8 @@ public sealed class SyncStateStore
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, RemotePath, LocalPath, Direction, ConflictPolicy, IsEnabled, IsPaused, ExcludeGlobs, LastSyncAt, LastSyncStatus, LastError FROM SyncPairs ORDER BY Id";
+        command.CommandText = "SELECT Id, RemotePath, LocalPath, Direction, ConflictPolicy, IsEnabled, IsPaused, ExcludeGlobs, LastSyncAt, LastSyncStatus, LastError FROM SyncPairs WHERE AccountKey = @AccountKey ORDER BY Id";
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         var pairs = new List<SyncPair>();
         using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -123,7 +183,8 @@ public sealed class SyncStateStore
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, RemotePath, LocalPath, Direction, ConflictPolicy, IsEnabled, IsPaused, ExcludeGlobs, LastSyncAt, LastSyncStatus, LastError FROM SyncPairs WHERE Id = @Id";
+        command.CommandText = "SELECT Id, RemotePath, LocalPath, Direction, ConflictPolicy, IsEnabled, IsPaused, ExcludeGlobs, LastSyncAt, LastSyncStatus, LastError FROM SyncPairs WHERE AccountKey = @AccountKey AND Id = @Id";
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@Id", id);
         using var reader = await command.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? ReadPair(reader) : null;
@@ -134,10 +195,34 @@ public sealed class SyncStateStore
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
-        command.CommandText = "UPDATE SyncPairs SET LastSyncAt = @LastSyncAt, LastSyncStatus = @Status, LastError = @Error WHERE Id = @Id";
+        command.CommandText = "UPDATE SyncPairs SET LastSyncAt = @LastSyncAt, LastSyncStatus = @Status, LastError = @Error WHERE AccountKey = @AccountKey AND Id = @Id";
         command.Parameters.AddWithValue("@LastSyncAt", FormatTimestamp(syncedAt));
         command.Parameters.AddWithValue("@Status", status.ToString());
         command.Parameters.AddWithValue("@Error", (object?)error ?? DBNull.Value);
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
+        command.Parameters.AddWithValue("@Id", id);
+        await command.ExecuteNonQueryAsync(ct);
+    });
+
+    /// <summary>
+    /// Changes an existing pair's direction/conflict policy — the two fields "Add sync pair"
+    /// itself asks for. Deliberately not remote/local path, which already has a working path
+    /// (remove, then add a new pair) and would need its own validation against every other pair;
+    /// this only ever updates a row that's already valid. Switching away from `TwoWay` doesn't
+    /// need to touch the baseline — <c>SyncExecutor.LoadBaselineAsync</c> already only ever
+    /// consults it for `TwoWay` pairs, so a stale baseline for a pair no longer in that direction
+    /// is simply never read again. Switching *into* `TwoWay` starts with no baseline, same as any
+    /// brand-new two-way pair.
+    /// </summary>
+    public Task UpdatePairSettingsAsync(int id, SyncDirection direction, ConflictPolicy conflictPolicy, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync(async () =>
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+        command.CommandText = "UPDATE SyncPairs SET Direction = @Direction, ConflictPolicy = @ConflictPolicy WHERE AccountKey = @AccountKey AND Id = @Id";
+        command.Parameters.AddWithValue("@Direction", direction.ToString());
+        command.Parameters.AddWithValue("@ConflictPolicy", conflictPolicy.ToString());
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@Id", id);
         await command.ExecuteNonQueryAsync(ct);
     });
@@ -154,8 +239,9 @@ public sealed class SyncStateStore
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
         // `column` is one of two hardcoded literals above, never user input.
-        command.CommandText = $"UPDATE SyncPairs SET {column} = @Value WHERE Id = @Id";
+        command.CommandText = $"UPDATE SyncPairs SET {column} = @Value WHERE AccountKey = @AccountKey AND Id = @Id";
         command.Parameters.AddWithValue("@Value", value ? 1 : 0);
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@Id", id);
         await command.ExecuteNonQueryAsync(ct);
     });
@@ -167,7 +253,8 @@ public sealed class SyncStateStore
         var command = connection.CreateCommand();
         // SyncState/SyncQueue rows cascade via the FK declared in DriveDatabaseMigrations,
         // now that OpenConnection() turns PRAGMA foreign_keys on.
-        command.CommandText = "DELETE FROM SyncPairs WHERE Id = @Id";
+        command.CommandText = "DELETE FROM SyncPairs WHERE AccountKey = @AccountKey AND Id = @Id";
+        command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@Id", id);
         await command.ExecuteNonQueryAsync(ct);
     });
@@ -201,7 +288,7 @@ public sealed class SyncStateStore
         var command = connection.CreateCommand();
         command.CommandText = """
             SELECT RelativePath, IsFolder, RemoteSize, RemoteModifiedAt, RemoteNodeId, RemoteHash,
-                   LocalSize, LocalModifiedAt, LocalInode, ContentHash
+                   LocalSize, LocalModifiedAt, LocalInode, ContentHash, HashAlgorithm
             FROM SyncState WHERE PairId = @PairId
             """;
         command.Parameters.AddWithValue("@PairId", pairId);
@@ -212,6 +299,11 @@ public sealed class SyncStateStore
         {
             var relativePath = reader.GetString(0);
             var isFolder = reader.GetInt32(1) != 0;
+            // One algorithm per row, not per side: both sides' hashes (when present) were
+            // produced by whichever provider was active the moment this baseline was written
+            // (docs/PLAN-CLOUD-PROVIDERS.md P3/P4). Null on every row written before this column
+            // existed — the guard in SyncReconciler treats that as "unknown", not a mismatch.
+            var hashAlgorithm = reader.IsDBNull(10) ? (RemoteHashAlgorithm?)null : Enum.Parse<RemoteHashAlgorithm>(reader.GetString(10));
 
             NodeFingerprint? remoteAtSync = reader.IsDBNull(4) && reader.IsDBNull(2) && reader.IsDBNull(3) && reader.IsDBNull(5)
                 ? null
@@ -219,7 +311,8 @@ public sealed class SyncStateStore
                     reader.IsDBNull(2) ? null : reader.GetInt64(2),
                     reader.IsDBNull(3) ? null : ParseTimestamp(reader.GetString(3)),
                     reader.IsDBNull(4) ? null : reader.GetString(4),
-                    reader.IsDBNull(5) ? null : reader.GetString(5));
+                    reader.IsDBNull(5) ? null : reader.GetString(5),
+                    reader.IsDBNull(5) ? null : hashAlgorithm);
 
             NodeFingerprint? localAtSync = reader.IsDBNull(6) && reader.IsDBNull(7) && reader.IsDBNull(8) && reader.IsDBNull(9)
                 ? null
@@ -227,7 +320,8 @@ public sealed class SyncStateStore
                     reader.IsDBNull(6) ? null : reader.GetInt64(6),
                     reader.IsDBNull(7) ? null : ParseTimestamp(reader.GetString(7)),
                     reader.IsDBNull(8) ? null : reader.GetString(8),
-                    reader.IsDBNull(9) ? null : reader.GetString(9));
+                    reader.IsDBNull(9) ? null : reader.GetString(9),
+                    reader.IsDBNull(9) ? null : hashAlgorithm);
 
             result[relativePath] = new SyncBaselineEntry(relativePath, isFolder, localAtSync, remoteAtSync);
         }
@@ -242,9 +336,9 @@ public sealed class SyncStateStore
         var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO SyncState (PairId, RelativePath, IsFolder, RemoteSize, RemoteModifiedAt, RemoteNodeId, RemoteHash,
-                                    LocalSize, LocalModifiedAt, LocalInode, ContentHash, SyncedAt)
+                                    LocalSize, LocalModifiedAt, LocalInode, ContentHash, HashAlgorithm, SyncedAt)
             VALUES (@PairId, @RelativePath, @IsFolder, @RemoteSize, @RemoteModifiedAt, @RemoteNodeId, @RemoteHash,
-                    @LocalSize, @LocalModifiedAt, @LocalInode, @ContentHash, @SyncedAt)
+                    @LocalSize, @LocalModifiedAt, @LocalInode, @ContentHash, @HashAlgorithm, @SyncedAt)
             ON CONFLICT(PairId, RelativePath) DO UPDATE SET
                 IsFolder = excluded.IsFolder,
                 RemoteSize = excluded.RemoteSize,
@@ -255,6 +349,7 @@ public sealed class SyncStateStore
                 LocalModifiedAt = excluded.LocalModifiedAt,
                 LocalInode = excluded.LocalInode,
                 ContentHash = excluded.ContentHash,
+                HashAlgorithm = excluded.HashAlgorithm,
                 SyncedAt = excluded.SyncedAt;
             """;
         command.Parameters.AddWithValue("@PairId", pairId);
@@ -268,6 +363,9 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@LocalModifiedAt", (object?)FormatTimestamp(entry.LocalAtSync?.ModifiedAt) ?? DBNull.Value);
         command.Parameters.AddWithValue("@LocalInode", (object?)entry.LocalAtSync?.NodeId ?? DBNull.Value);
         command.Parameters.AddWithValue("@ContentHash", (object?)entry.LocalAtSync?.ContentHash ?? DBNull.Value);
+        // Whichever side has a hash tells us the algorithm that was active for this row; when
+        // both do, P3's guard already requires SyncBaselineWriter to have tagged them the same.
+        command.Parameters.AddWithValue("@HashAlgorithm", (object?)(entry.LocalAtSync?.HashAlgorithm ?? entry.RemoteAtSync?.HashAlgorithm)?.ToString() ?? DBNull.Value);
         command.Parameters.AddWithValue("@SyncedAt", FormatTimestamp(syncedAt));
         await command.ExecuteNonQueryAsync(ct);
     });

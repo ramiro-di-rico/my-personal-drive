@@ -1,0 +1,148 @@
+using Microsoft.Data.Sqlite;
+using MyPersonalDrive.Models;
+using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
+using MyPersonalDrive.Services.Sync;
+using MyPersonalDrive.Tests.Fakes;
+using MyPersonalDrive.ViewModels.Sync;
+using Xunit;
+
+namespace MyPersonalDrive.Tests.ViewModels;
+
+/// <summary>
+/// P9 (docs/PLAN-CLOUD-PROVIDERS.md): the Sync window's "filter by account" chips, and
+/// <see cref="SyncPanelViewModel.VisiblePairs"/>, the filtered view of <see cref="SyncPanelViewModel.Pairs"/>
+/// they drive. Same two-fake-Proton-accounts setup as <c>SyncPanelMultiAccountTests</c> — the
+/// filtering logic doesn't care which provider a slot's store/executor came from.
+/// </summary>
+public class SyncPanelProviderFilterTests : IDisposable
+{
+    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"mypersonaldrive-providerfilter-{Guid.NewGuid():N}.db");
+    private readonly string _localRootA = Directory.CreateTempSubdirectory("mypersonaldrive-providerfilter-a").FullName;
+    private readonly string _localRootB = Directory.CreateTempSubdirectory("mypersonaldrive-providerfilter-b").FullName;
+
+    public void Dispose()
+    {
+        SqliteConnection.ClearAllPools();
+        try
+        {
+            File.Delete(_dbPath);
+            Directory.Delete(_localRootA, recursive: true);
+            Directory.Delete(_localRootB, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    private sealed record Account(SyncStateStore Store, SyncExecutor Executor);
+
+    private Account BuildAccount(string accountKey)
+    {
+        var cli = new FakeCliExecutor();
+        cli.RespondForPath("/", "[]");
+        var service = new ProtonDriveService(cli);
+        var provider = new ProtonDriveProvider(service);
+        var store = new SyncStateStore(_dbPath, accountKey);
+        var executor = new SyncExecutor(provider.Operations, store, new LocalScanner(), new RemoteScanner(provider));
+        return new Account(store, executor);
+    }
+
+    [Fact]
+    public async Task WithASingleAccount_NoFilterChipsAreOffered()
+    {
+        var accountA = BuildAccount("account-a");
+        await accountA.Store.CreatePairAsync("/remote-a", _localRootA, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+
+        var panel = new SyncPanelViewModel(accountA.Store, accountA.Executor, new SyncCrashRecovery(accountA.Store), providerDisplayName: "Account A");
+        await panel.InitializeAsync();
+
+        Assert.Empty(panel.ProviderFilters);
+        Assert.False(panel.HasProviderFilters);
+        Assert.Equal(panel.Pairs, panel.VisiblePairs);
+    }
+
+    [Fact]
+    public async Task WithTwoAccounts_OffersATodosChipPlusOnePerAccount_WithCounts()
+    {
+        var accountA = BuildAccount("account-a");
+        var accountB = BuildAccount("account-b");
+        await accountA.Store.CreatePairAsync("/remote-a1", _localRootA, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        await accountA.Store.CreatePairAsync("/remote-a2", _localRootA, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        await accountB.Store.CreatePairAsync("/remote-b", _localRootB, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+
+        var panel = new SyncPanelViewModel(accountA.Store, accountA.Executor, new SyncCrashRecovery(accountA.Store), providerDisplayName: "Account A");
+        panel.AddAccount(accountB.Store, accountB.Executor, new SyncCrashRecovery(accountB.Store), null, "Account B");
+        await panel.InitializeAsync();
+
+        Assert.True(panel.HasProviderFilters);
+        Assert.Equal(3, panel.ProviderFilters.Count);
+        Assert.Null(panel.ProviderFilters[0].AccountLabel);
+        Assert.Equal(3, panel.ProviderFilters[0].Count);
+        Assert.True(panel.ProviderFilters[0].IsActive); // "Todos" starts active
+        Assert.Equal("Account A", panel.ProviderFilters[1].AccountLabel);
+        Assert.Equal(2, panel.ProviderFilters[1].Count);
+        Assert.Equal("Account B", panel.ProviderFilters[2].AccountLabel);
+        Assert.Equal(1, panel.ProviderFilters[2].Count);
+    }
+
+    [Fact]
+    public async Task ApplyingAChip_NarrowsVisiblePairsWithoutTouchingPairs()
+    {
+        var accountA = BuildAccount("account-a");
+        var accountB = BuildAccount("account-b");
+        await accountA.Store.CreatePairAsync("/remote-a", _localRootA, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        await accountB.Store.CreatePairAsync("/remote-b", _localRootB, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+
+        var panel = new SyncPanelViewModel(accountA.Store, accountA.Executor, new SyncCrashRecovery(accountA.Store), providerDisplayName: "Account A");
+        panel.AddAccount(accountB.Store, accountB.Executor, new SyncCrashRecovery(accountB.Store), null, "Account B");
+        await panel.InitializeAsync();
+
+        await panel.ProviderFilters[1].ApplyCommand.ExecuteAsync(); // "Account A" chip
+
+        Assert.Equal(2, panel.Pairs.Count); // the source collection is untouched
+        var visible = Assert.Single(panel.VisiblePairs);
+        Assert.Equal("Account A", visible.AccountLabel);
+        Assert.True(panel.ProviderFilters[1].IsActive);
+        Assert.False(panel.ProviderFilters[0].IsActive);
+    }
+
+    [Fact]
+    public async Task ClickingTheActiveChipAgain_ClearsTheFilter()
+    {
+        var accountA = BuildAccount("account-a");
+        var accountB = BuildAccount("account-b");
+        await accountA.Store.CreatePairAsync("/remote-a", _localRootA, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        await accountB.Store.CreatePairAsync("/remote-b", _localRootB, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+
+        var panel = new SyncPanelViewModel(accountA.Store, accountA.Executor, new SyncCrashRecovery(accountA.Store), providerDisplayName: "Account A");
+        panel.AddAccount(accountB.Store, accountB.Executor, new SyncCrashRecovery(accountB.Store), null, "Account B");
+        await panel.InitializeAsync();
+
+        await panel.ProviderFilters[1].ApplyCommand.ExecuteAsync();
+        await panel.ProviderFilters[1].ApplyCommand.ExecuteAsync();
+
+        Assert.Equal(2, panel.VisiblePairs.Count());
+        Assert.True(panel.ProviderFilters[0].IsActive);
+    }
+
+    [Fact]
+    public async Task RemovingTheFilteredAccountsLastPair_FallsBackToTodosInsteadOfGoingEmpty()
+    {
+        var accountA = BuildAccount("account-a");
+        var accountB = BuildAccount("account-b");
+        var pairA = await accountA.Store.CreatePairAsync("/remote-a", _localRootA, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        await accountB.Store.CreatePairAsync("/remote-b", _localRootB, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+
+        var panel = new SyncPanelViewModel(accountA.Store, accountA.Executor, new SyncCrashRecovery(accountA.Store), providerDisplayName: "Account A");
+        panel.AddAccount(accountB.Store, accountB.Executor, new SyncCrashRecovery(accountB.Store), null, "Account B");
+        await panel.InitializeAsync();
+        await panel.ProviderFilters[1].ApplyCommand.ExecuteAsync(); // filter to "Account A"
+
+        await accountA.Store.DeletePairAsync(pairA.Id);
+        await panel.RefreshCommand.ExecuteAsync();
+
+        Assert.True(panel.ProviderFilters[0].IsActive); // back to "Todos"
+        Assert.Single(panel.VisiblePairs);
+    }
+}

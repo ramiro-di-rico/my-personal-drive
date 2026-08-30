@@ -1,4 +1,5 @@
 using MyPersonalDrive.Models;
+using MyPersonalDrive.Services.Providers;
 
 namespace MyPersonalDrive.Services;
 
@@ -14,10 +15,12 @@ namespace MyPersonalDrive.Services;
 ///
 /// <b>Why concurrency is safe.</b> Concurrent <c>proton-drive</c> processes really do crash on the
 /// CLI's own SQLite cache with <c>SQLITE_BUSY</c>. Appendix A #16 established that the contention is
-/// entirely over the one shared cache file, and <see cref="ProtonDriveCliExecutor"/> gives each
-/// concurrent process a private <c>XDG_CACHE_HOME</c> — measured at 64 clean calls out of 64 with
-/// eight in flight, against 15 failures in 64 sharing one cache. The executor is what makes this
-/// safe; the width here only says how many the walk is allowed to ask for.
+/// entirely over the one shared cache file, and <c>Providers.Proton.ProtonDriveCliExecutor</c>
+/// gives each concurrent process a private <c>XDG_CACHE_HOME</c> — measured at 64 clean calls out
+/// of 64 with eight in flight, against 15 failures in 64 sharing one cache. The executor is what
+/// makes this safe; the width here only says how many the walk is allowed to ask for. This class
+/// itself is provider-neutral — the Proton-specific reasoning above documents why the width is
+/// currently derived from CPU count rather than anything backend-specific.
 ///
 /// Each call costs ~3.5 s of Node.js startup regardless of folder size (Appendix A #11a) and
 /// subtree caching is impossible with this CLI (#11b), so a walk is unavoidably
@@ -26,16 +29,16 @@ namespace MyPersonalDrive.Services;
 /// </summary>
 public sealed class RemoteTreeWalker
 {
-    private readonly ProtonDriveService _service;
+    private readonly ICloudDriveProvider _provider;
     private readonly int _maxConcurrency;
 
     /// <param name="maxConcurrency">
     /// 0 defers to a ceiling derived from the CPU count: the ~3.5 s per call is process startup, so
     /// cores are the real limit.
     /// </param>
-    public RemoteTreeWalker(ProtonDriveService service, int maxConcurrency = 0)
+    public RemoteTreeWalker(ICloudDriveProvider provider, int maxConcurrency = 0)
     {
-        _service = service;
+        _provider = provider;
         _maxConcurrency = maxConcurrency > 0
             ? maxConcurrency
             : Math.Clamp(Environment.ProcessorCount, 1, 8);
@@ -52,10 +55,20 @@ public sealed class RemoteTreeWalker
     /// level). Progress on this walk cannot be a percentage: BFS does not know the total until it is
     /// finished, so callers report counts.
     /// </param>
+    /// <param name="filterSiblings">
+    /// Runs once per listing — i.e. once per set of siblings under one parent — before any of
+    /// them reach <paramref name="onNode"/>. This is the only point where a caller can drop an
+    /// item with full sibling context: <paramref name="onNode"/> decides one item at a time and,
+    /// once it returns true for a folder, that folder is already queued for the next wave —
+    /// too late to un-queue if a *later* sibling in the same listing turns out to make it
+    /// invalid (e.g. two names that collide under a case-insensitive provider). Null runs every
+    /// listing unfiltered.
+    /// </param>
     public async Task WalkAsync(
         string rootPath,
         Func<DriveItem, bool> onNode,
         Action<int, int>? onWaveCompleted = null,
+        Func<IReadOnlyList<DriveItem>, IReadOnlyList<DriveItem>>? filterSiblings = null,
         CancellationToken cancellationToken = default)
     {
         using var semaphore = new SemaphoreSlim(_maxConcurrency);
@@ -72,8 +85,9 @@ public sealed class RemoteTreeWalker
             foldersVisited += currentWave.Count;
 
             var nextWave = new List<string>();
-            foreach (var items in listings)
+            foreach (var rawItems in listings)
             {
+                var items = filterSiblings is null ? rawItems : filterSiblings(rawItems);
                 foreach (var item in items)
                 {
                     if (onNode(item) && item.IsFolder)
@@ -97,7 +111,7 @@ public sealed class RemoteTreeWalker
             // more folders than the semaphore admits at once, and every one of those is a ~3.5 s
             // process the user has already asked us not to start.
             cancellationToken.ThrowIfCancellationRequested();
-            return await _service.LoadFolderAsync(folderPath, cancellationToken);
+            return await _provider.Operations.ListFolderAsync(folderPath, cancellationToken);
         }
         finally
         {

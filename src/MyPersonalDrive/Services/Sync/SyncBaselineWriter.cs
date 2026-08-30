@@ -1,4 +1,5 @@
 using MyPersonalDrive.Models;
+using MyPersonalDrive.Services.Providers;
 
 namespace MyPersonalDrive.Services.Sync;
 
@@ -16,16 +17,22 @@ namespace MyPersonalDrive.Services.Sync;
 /// </summary>
 public sealed class SyncBaselineWriter
 {
-    private readonly ProtonDriveService _protonDriveService;
+    private readonly IDriveOperations _operations;
+    private readonly IContentHasher _hasher;
+    private readonly RemoteHashAlgorithm _remoteHashAlgorithm;
     private readonly SyncStateStore _stateStore;
     private readonly PathMapper _mapper;
     private readonly int _pairId;
     private readonly Dictionary<string, Dictionary<string, DriveItem>> _remoteFolderCache = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Dictionary<string, NodeFingerprint>> _seededRemote = new(StringComparer.Ordinal);
 
-    public SyncBaselineWriter(ProtonDriveService protonDriveService, SyncStateStore stateStore, PathMapper mapper, int pairId)
+    /// <param name="hasher">Computes the local side; chosen to match the active provider's remote algorithm.</param>
+    /// <param name="remoteHashAlgorithm">Tags fingerprints built from remote data, so a mismatched pairing is never silently compared — see the guard in <see cref="SyncReconciler"/>.</param>
+    public SyncBaselineWriter(IDriveOperations operations, IContentHasher hasher, RemoteHashAlgorithm remoteHashAlgorithm, SyncStateStore stateStore, PathMapper mapper, int pairId)
     {
-        _protonDriveService = protonDriveService;
+        _operations = operations;
+        _hasher = hasher;
+        _remoteHashAlgorithm = remoteHashAlgorithm;
         _stateStore = stateStore;
         _mapper = mapper;
         _pairId = pairId;
@@ -73,7 +80,8 @@ public sealed class SyncBaselineWriter
         var local = ReadLocalFingerprint(relativePath, isFolder);
         if (local is not null && !isFolder)
         {
-            local = local with { ContentHash = await TryHashAsync(relativePath, cancellationToken) };
+            var hash = await TryHashAsync(relativePath, cancellationToken);
+            local = local with { ContentHash = hash, HashAlgorithm = hash is null ? null : _hasher.Algorithm };
         }
 
         var remote = await ReadRemoteFingerprintAsync(relativePath, cancellationToken);
@@ -120,7 +128,7 @@ public sealed class SyncBaselineWriter
     {
         try
         {
-            return await LocalFileHasher.ComputeSha1Async(_mapper.ToLocalAbsolute(relativePath), cancellationToken);
+            return await _hasher.ComputeAsync(_mapper.ToLocalAbsolute(relativePath), cancellationToken);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -143,12 +151,12 @@ public sealed class SyncBaselineWriter
             bucket = new Dictionary<string, DriveItem>(StringComparer.Ordinal);
             try
             {
-                foreach (var item in await _protonDriveService.LoadFolderAsync(parentRemoteAbsolute, cancellationToken))
+                foreach (var item in await _operations.ListFolderAsync(parentRemoteAbsolute, cancellationToken))
                 {
                     bucket[item.Name] = item;
                 }
             }
-            catch (CliException)
+            catch (DriveException)
             {
                 // The parent folder is gone or unreadable — treat the remote side as absent
                 // rather than failing an action that already succeeded.
@@ -158,7 +166,8 @@ public sealed class SyncBaselineWriter
         }
 
         return bucket.TryGetValue(name, out var driveItem)
-            ? new NodeFingerprint(relativePath, driveItem.IsFolder, driveItem.Size, driveItem.ModifiedAt, driveItem.NodeId, driveItem.ContentHash)
+            ? new NodeFingerprint(relativePath, driveItem.IsFolder, driveItem.Size, driveItem.ModifiedAt, driveItem.NodeId, driveItem.ContentHash,
+                driveItem.ContentHash is null ? null : _remoteHashAlgorithm)
             : null;
     }
 

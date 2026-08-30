@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
 using Xunit;
@@ -30,6 +31,7 @@ public sealed class RealCliAutoSyncTests : IDisposable
     private readonly string _localRoot = Directory.CreateTempSubdirectory("mypersonaldrive-f3-auto").FullName;
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"mypersonaldrive-f3-auto-{Guid.NewGuid():N}.db");
     private readonly ProtonDriveService _service;
+    private readonly ProtonDriveProvider _provider;
     private readonly bool _enabled = Environment.GetEnvironmentVariable(IntegrationFactAttribute.EnvironmentVariable) == "1";
 
     public RealCliAutoSyncTests(ITestOutputHelper output)
@@ -38,6 +40,7 @@ public sealed class RealCliAutoSyncTests : IDisposable
         var cliPath = Environment.GetEnvironmentVariable("MYPERSONALDRIVE_CLI")
                       ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Apps", "proton-drive");
         _service = new ProtonDriveService(new ProtonDriveCliExecutor(new FixedPathLocator(cliPath)));
+        _provider = new ProtonDriveProvider(_service);
         _service.CommandStarted += (_, e) => _output.WriteLine($"$ {e.CommandText}");
     }
 
@@ -75,7 +78,7 @@ public sealed class RealCliAutoSyncTests : IDisposable
 
         var store = new SyncStateStore(_dbPath);
         var suppressor = new SyncEchoSuppressor(clock);
-        var executor = new SyncExecutor(_service, store, new LocalScanner(), new RemoteScanner(_service), clock, suppressor);
+        var executor = new SyncExecutor(_provider.Operations, store, new LocalScanner(), new RemoteScanner(_provider), clock, suppressor);
         await store.CreatePairAsync(_remoteRoot, _localRoot, SyncDirection.TwoWay, ConflictPolicy.KeepBoth);
 
         await using var scheduler = new SyncScheduler(store, executor, suppressor, () => true, clock, TimeSpan.FromMilliseconds(50));

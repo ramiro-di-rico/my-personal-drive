@@ -158,7 +158,14 @@ public partial class App : Application
             syncStateStore, syncExecutor, echoSuppressor,
             // The bool that actually matters is this provider's own — mirrors
             // MainWindowViewModel's own IsAuthenticated field selection.
-            isAuthenticated: () => provider.Id == ProviderId.OneDrive ? settings.Load().IsOneDriveAuthenticated : settings.Load().IsAuthenticated);
+            isAuthenticated: () => provider.Id switch
+            {
+                ProviderId.OneDrive => settings.Load().IsOneDriveAuthenticated,
+                ProviderId.GoogleDrive => settings.Load().IsGoogleDriveAuthenticated,
+                ProviderId.Nextcloud => settings.Load().IsNextcloudAuthenticated,
+                ProviderId.S3 => settings.Load().IsS3Authenticated,
+                _ => settings.Load().IsAuthenticated
+            });
 
         return new AccountSyncContext(provider, accountKey, provider.DisplayName, cacheService, syncStateStore, metricsStore, syncExecutor, syncScheduler);
     }

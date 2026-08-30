@@ -8,6 +8,7 @@ using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Providers.OneDrive;
+using MyPersonalDrive.Services.Providers.Generic;
 using Avalonia.Threading;
 
 namespace MyPersonalDrive.ViewModels;
@@ -20,6 +21,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private ICloudDriveProvider _provider;
     private DriveCacheService _cacheService;
     private readonly AppSettingsService _settings;
+    private readonly IProviderCatalog _providerCatalog;
     private FolderMetricsStore? _metricsStore;
     private FolderStatsScanner? _statsScanner;
     private CancellationTokenSource? _deepScanCts;
@@ -125,9 +127,57 @@ public sealed class MainWindowViewModel : ObservableObject
     private long _quotaTotalBytes = 500L * 1024 * 1024 * 1024;
 
     /// <summary>
-    /// What the settings view's provider picker lists — see docs/PLAN-CLOUD-PROVIDERS.md P5/P6.
+    /// What the settings view's provider picker and header dropdown list — see docs/PLAN-CLOUD-PROVIDERS.md P5/P6.
+    /// Dynamically reflects the live account identities and connection statuses.
     /// </summary>
-    public IReadOnlyList<ProviderDescriptor> AvailableProviders { get; }
+    public IReadOnlyList<ProviderDescriptor> AvailableProviders
+    {
+        get
+        {
+            var settings = _settings.Load();
+            var available = (_providerCatalog ?? new ProviderCatalog()).Available;
+            return available.Select(desc =>
+            {
+                var identity = desc.Id switch
+                {
+                    ProviderId.Proton => !string.IsNullOrWhiteSpace(settings.ProtonAccountLabel)
+                        ? settings.ProtonAccountLabel
+                        : ((_provider.Id == ProviderId.Proton ? _isAuthenticated : settings.IsAuthenticated) ? "user@proton.me" : null),
+                    ProviderId.OneDrive => _provider is OneDriveProvider oneDrive && oneDrive.Auth is GraphAuthenticator { AccountLabel: { } label } && label != "Not signed in."
+                        ? label
+                        : (!string.IsNullOrWhiteSpace(settings.OneDriveAccountLabel)
+                            ? settings.OneDriveAccountLabel
+                            : ((_provider.Id == ProviderId.OneDrive ? _isAuthenticated : settings.IsOneDriveAuthenticated) ? "user@outlook.com" : null)),
+                    ProviderId.GoogleDrive => !string.IsNullOrWhiteSpace(settings.GoogleDriveAccountLabel)
+                        ? settings.GoogleDriveAccountLabel
+                        : ((settings.IsGoogleDriveAuthenticated || (_provider.Id == ProviderId.GoogleDrive && _isAuthenticated)) ? "user@gmail.com" : null),
+                    ProviderId.Nextcloud => !string.IsNullOrWhiteSpace(settings.NextcloudAccountLabel)
+                        ? settings.NextcloudAccountLabel
+                        : ((settings.IsNextcloudAuthenticated || (_provider.Id == ProviderId.Nextcloud && _isAuthenticated)) ? "user@nextcloud.local" : null),
+                    ProviderId.S3 => !string.IsNullOrWhiteSpace(settings.S3AccountLabel)
+                        ? settings.S3AccountLabel
+                        : ((settings.IsS3Authenticated || (_provider.Id == ProviderId.S3 && _isAuthenticated)) ? "s3-bucket-primary" : null),
+                    _ => null
+                };
+
+                var isAuth = desc.Id switch
+                {
+                    ProviderId.Proton => _provider.Id == ProviderId.Proton ? _isAuthenticated : settings.IsAuthenticated,
+                    ProviderId.OneDrive => _provider.Id == ProviderId.OneDrive ? _isAuthenticated : settings.IsOneDriveAuthenticated,
+                    ProviderId.GoogleDrive => settings.IsGoogleDriveAuthenticated || (_provider.Id == ProviderId.GoogleDrive && _isAuthenticated),
+                    ProviderId.Nextcloud => settings.IsNextcloudAuthenticated || (_provider.Id == ProviderId.Nextcloud && _isAuthenticated),
+                    ProviderId.S3 => settings.IsS3Authenticated || (_provider.Id == ProviderId.S3 && _isAuthenticated),
+                    _ => false
+                };
+
+                return desc with
+                {
+                    AccountIdentity = identity,
+                    IsAuthenticated = isAuth
+                };
+            }).ToList();
+        }
+    }
 
     public ProviderDescriptor? SelectedProvider
     {
@@ -152,10 +202,16 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public string BrowserHeaderSubtitle => $"Browsing {RootPath} on {_provider.DisplayName}.";
 
-    /// <summary>Which connection-card block the settings view shows — Proton's (CLI path, version, update) or OneDrive's (sign-in/out, account label).</summary>
+    /// <summary>Which connection-card block the settings view shows — Proton's, OneDrive's, Google Drive's, Nextcloud's, or S3's.</summary>
     public bool IsProtonActive => _provider.Id == ProviderId.Proton;
 
     public bool IsOneDriveActive => _provider.Id == ProviderId.OneDrive;
+
+    public bool IsGoogleDriveActive => _provider.Id == ProviderId.GoogleDrive;
+
+    public bool IsNextcloudActive => _provider.Id == ProviderId.Nextcloud;
+
+    public bool IsS3Active => _provider.Id == ProviderId.S3;
 
     /// <summary>Whether the active provider has a version/self-update story to show — false for a provider with no external binary (docs/PLAN-CLOUD-PROVIDERS.md §5 item 2).</summary>
     public bool HasDiagnostics => _provider.Diagnostics is not null;
@@ -198,7 +254,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // reachable in a test without driving a real sync cycle to a chosen moment.
         // Capturing the parameter, not the SyncPanel property, which is only assigned below.
         _isSyncInProgress = isSyncInProgress ?? (() => syncPanel.IsSyncInProgress);
-        AvailableProviders = (providerCatalog ?? new ProviderCatalog()).Available;
+        _providerCatalog = providerCatalog ?? new ProviderCatalog();
         _provider = provider;
         // "/my-files" is Proton's own root folder name, not a generic convention — OneDrive (and
         // any future provider) roots at "/". Browsing "/my-files" against Graph 404s immediately
@@ -266,6 +322,9 @@ public sealed class MainWindowViewModel : ObservableObject
         CheckForCliUpdateCommand = new AsyncCommand(CheckForCliUpdateAsync, CanCheckForCliUpdate, HandleUnexpectedError);
         SwitchToProtonCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.Proton), () => !IsLoading && !IsProtonActive, HandleUnexpectedError);
         SwitchToOneDriveCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.OneDrive), () => !IsLoading && !IsOneDriveActive, HandleUnexpectedError);
+        SwitchToGoogleDriveCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.GoogleDrive), () => !IsLoading && !IsGoogleDriveActive, HandleUnexpectedError);
+        SwitchToNextcloudCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.Nextcloud), () => !IsLoading && !IsNextcloudActive, HandleUnexpectedError);
+        SwitchToS3Command = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.S3), () => !IsLoading && !IsS3Active, HandleUnexpectedError);
         InstallCliUpdateCommand = new AsyncCommand(InstallCliUpdateAsync, CanInstallCliUpdate, HandleUnexpectedError);
         ViewSelectedFileCommand = new AsyncCommand(ViewSelectedFileAsync, CanViewSelectedFile, HandleUnexpectedError);
         CloseViewerCommand = new AsyncCommand(CloseViewerAsync, onError: HandleUnexpectedError);
@@ -387,6 +446,12 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand SwitchToProtonCommand { get; }
 
     public AsyncCommand SwitchToOneDriveCommand { get; }
+
+    public AsyncCommand SwitchToGoogleDriveCommand { get; }
+
+    public AsyncCommand SwitchToNextcloudCommand { get; }
+
+    public AsyncCommand SwitchToS3Command { get; }
 
     public AsyncCommand InstallCliUpdateCommand { get; }
 
@@ -940,7 +1005,7 @@ public sealed class MainWindowViewModel : ObservableObject
             QueueCommandLine($"[warn] Sync startup recovery failed: {ex.Message}");
         }
 
-        var needsCliPath = _provider.Id != ProviderId.OneDrive;
+        var needsCliPath = _provider.Id == ProviderId.Proton;
         if ((!needsCliPath || !string.IsNullOrWhiteSpace(CliPath)) && IsAuthenticated)
         {
             await GoToRootAsync();
@@ -949,13 +1014,14 @@ public sealed class MainWindowViewModel : ObservableObject
 
         StatusMessage = needsCliPath && string.IsNullOrWhiteSpace(CliPath)
             ? $"Select a {_provider.DisplayName} CLI executable to begin."
-            : $"Authenticate to load /my-files.";
+            : $"Authenticate to load {RootPath}.";
     }
 
     private bool CanAuthenticate() => !IsLoading && !IsAuthenticated && _provider.Id switch
     {
         ProviderId.OneDrive => !string.IsNullOrWhiteSpace(OneDriveClientId),
-        _ => !string.IsNullOrWhiteSpace(CliPath),
+        ProviderId.Proton => !string.IsNullOrWhiteSpace(CliPath),
+        _ => true,
     };
 
     private bool CanLogout() => !IsLoading && IsAuthenticated;
@@ -1079,9 +1145,51 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Opening {_provider.DisplayName} authentication in your browser...";
+            StatusMessage = $"Opening {_provider.DisplayName} authentication...";
             await _provider.Auth.AuthenticateAsync();
             IsAuthenticated = true;
+            _settings.Update(settings =>
+            {
+                switch (_provider.Id)
+                {
+                    case ProviderId.Proton:
+                        settings.IsAuthenticated = true;
+                        break;
+                    case ProviderId.OneDrive:
+                        settings.IsOneDriveAuthenticated = true;
+                        if (_provider is OneDriveProvider oneDrive && oneDrive.Auth is GraphAuthenticator graphAuth && graphAuth.AccountLabel is not null)
+                        {
+                            settings.OneDriveAccountLabel = graphAuth.AccountLabel;
+                        }
+                        break;
+                    case ProviderId.GoogleDrive:
+                        settings.IsGoogleDriveAuthenticated = true;
+                        if (_provider is GenericCloudDriveProvider g && g.AccountIdentity is not null)
+                        {
+                            settings.GoogleDriveAccountLabel = g.AccountIdentity;
+                        }
+                        break;
+                    case ProviderId.Nextcloud:
+                        settings.IsNextcloudAuthenticated = true;
+                        if (_provider is GenericCloudDriveProvider n && n.AccountIdentity is not null)
+                        {
+                            settings.NextcloudAccountLabel = n.AccountIdentity;
+                        }
+                        break;
+                    case ProviderId.S3:
+                        settings.IsS3Authenticated = true;
+                        if (_provider is GenericCloudDriveProvider s && s.AccountIdentity is not null)
+                        {
+                            settings.S3AccountLabel = s.AccountIdentity;
+                        }
+                        break;
+                }
+            });
+            UpdateConnectionTelemetry();
+            UpdateQuotaMetrics();
+            OnPropertyChanged(nameof(AvailableProviders));
+            OnPropertyChanged(nameof(SelectedProvider));
+            OnPropertyChanged(nameof(OneDriveAccountLabel));
             await GoToRootAsync();
         }
         catch (InvalidOperationException ex)
@@ -1102,8 +1210,34 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusMessage = $"Logging out from {_provider.DisplayName}...";
             await _provider.Auth.LogoutAsync();
             IsAuthenticated = false;
+            _settings.Update(settings =>
+            {
+                switch (_provider.Id)
+                {
+                    case ProviderId.Proton:
+                        settings.IsAuthenticated = false;
+                        break;
+                    case ProviderId.OneDrive:
+                        settings.IsOneDriveAuthenticated = false;
+                        break;
+                    case ProviderId.GoogleDrive:
+                        settings.IsGoogleDriveAuthenticated = false;
+                        break;
+                    case ProviderId.Nextcloud:
+                        settings.IsNextcloudAuthenticated = false;
+                        break;
+                    case ProviderId.S3:
+                        settings.IsS3Authenticated = false;
+                        break;
+                }
+            });
+            UpdateConnectionTelemetry();
+            UpdateQuotaMetrics();
+            OnPropertyChanged(nameof(AvailableProviders));
+            OnPropertyChanged(nameof(SelectedProvider));
+            OnPropertyChanged(nameof(OneDriveAccountLabel));
             ResetBrowserState();
-            StatusMessage = "Logged out.";
+            StatusMessage = $"Logged out from {_provider.DisplayName}.";
         }
         catch (InvalidOperationException ex)
         {
@@ -1122,7 +1256,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// no-op if <paramref name="id"/> isn't registered (not authenticated/configured, or simply not
     /// one of <see cref="_browserSessions"/> yet).
     /// </summary>
-    private async Task SwitchBrowserAccountAsync(ProviderId id)
+    public async Task SwitchBrowserAccountAsync(ProviderId id)
     {
         if (id == _provider.Id)
         {
@@ -1147,7 +1281,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _statsScanner = session.StatsScanner;
         _previewLoader = session.PreviewLoader;
         _imagePreviewLoader = session.ImagePreviewLoader;
-        _rootPath = _provider.Id == ProviderId.OneDrive ? "/" : "/my-files";
+        _rootPath = _provider.Id == ProviderId.Proton ? "/my-files" : "/";
 
         // Both of these used to be wired once at startup and never revisited — harmless before
         // this phase, since the browsed account never changed. Left stale, "Add pair"'s remote
@@ -1157,10 +1291,16 @@ public sealed class MainWindowViewModel : ObservableObject
         // path, mixing the two).
         SyncPanel.GetRemoteFolderChildren = _provider.Operations.ListFolderAsync;
         SyncPanel.SetActiveAccount(_provider.DisplayName);
-        // Re-read fresh rather than trust the field left over from the previous account — it can
-        // otherwise go stale the moment auth changes for the account not currently on screen (a
-        // real gap this phase closes, not just the restart requirement).
-        IsAuthenticated = _provider.Id == ProviderId.OneDrive ? _settings.Load().IsOneDriveAuthenticated : _settings.Load().IsAuthenticated;
+        
+        var currentSettings = _settings.Load();
+        IsAuthenticated = _provider.Id switch
+        {
+            ProviderId.OneDrive => currentSettings.IsOneDriveAuthenticated,
+            ProviderId.GoogleDrive => currentSettings.IsGoogleDriveAuthenticated || (_provider is GenericCloudDriveProvider g && g.IsAuthenticated),
+            ProviderId.Nextcloud => currentSettings.IsNextcloudAuthenticated || (_provider is GenericCloudDriveProvider n && n.IsAuthenticated),
+            ProviderId.S3 => currentSettings.IsS3Authenticated || (_provider is GenericCloudDriveProvider s && s.IsAuthenticated),
+            _ => currentSettings.IsAuthenticated
+        };
 
         // A deep-scan histogram belongs to one specific folder on one specific account — carrying
         // it over to a different account's (unrelated) folder would show buckets for content that
@@ -1169,20 +1309,46 @@ public sealed class MainWindowViewModel : ObservableObject
         _kindFilter = null;
         FilterSummary = string.Empty;
 
+        UpdateQuotaMetrics();
+        UpdateConnectionTelemetry();
+
+        OnPropertyChanged(nameof(AvailableProviders));
         OnPropertyChanged(nameof(SelectedProvider));
         OnPropertyChanged(nameof(ActiveProviderDisplayName));
         OnPropertyChanged(nameof(BrowserHeaderTitle));
         OnPropertyChanged(nameof(BrowserHeaderSubtitle));
         OnPropertyChanged(nameof(IsProtonActive));
         OnPropertyChanged(nameof(IsOneDriveActive));
+        OnPropertyChanged(nameof(IsGoogleDriveActive));
+        OnPropertyChanged(nameof(IsNextcloudActive));
+        OnPropertyChanged(nameof(IsS3Active));
         OnPropertyChanged(nameof(HasDiagnostics));
         OnPropertyChanged(nameof(OneDriveAccountLabel));
         OnPropertyChanged(nameof(RootPath));
         RaiseCommandStates();
 
         _settings.Update(settings => settings.ActiveProvider = id.ToString());
+
+        if (!IsAuthenticated)
+        {
+            StatusMessage = $"Authentication required for {_provider.DisplayName}. Please sign in to access files.";
+            ResetBrowserState();
+            return;
+        }
+
         StatusMessage = $"Switched to {_provider.DisplayName}.";
-        await GoToRootAsync();
+
+        try
+        {
+            await GoToRootAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or DriveException)
+        {
+            IsAuthenticated = false;
+            UpdateConnectionTelemetry();
+            StatusMessage = $"Authentication required for {_provider.DisplayName}. Please sign in to access files.";
+            ResetBrowserState();
+        }
     }
 
     private async Task GoToRootAsync()
@@ -2116,9 +2282,14 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public void UpdateQuotaMetrics()
     {
-        _quotaTotalBytes = _provider.Id == ProviderId.OneDrive
-            ? 1024L * 1024 * 1024 * 1024 // 1 TB
-            : 500L * 1024 * 1024 * 1024; // 500 GB
+        _quotaTotalBytes = _provider.Id switch
+        {
+            ProviderId.OneDrive => 1024L * 1024 * 1024 * 1024, // 1 TB
+            ProviderId.GoogleDrive => 15L * 1024 * 1024 * 1024, // 15 GB
+            ProviderId.Nextcloud => 100L * 1024 * 1024 * 1024, // 100 GB
+            ProviderId.S3 => 5120L * 1024 * 1024 * 1024, // 5 TB
+            _ => 500L * 1024 * 1024 * 1024 // 500 GB (Proton)
+        };
 
         _quotaUsedBytes = _loadedItems.Where(i => !i.IsFolder && i.Size.HasValue).Sum(i => i.Size!.Value);
 
@@ -2176,6 +2347,9 @@ public sealed class MainWindowViewModel : ObservableObject
         ViewSelectedFileCommand.RaiseCanExecuteChanged();
         SwitchToProtonCommand.RaiseCanExecuteChanged();
         SwitchToOneDriveCommand.RaiseCanExecuteChanged();
+        SwitchToGoogleDriveCommand.RaiseCanExecuteChanged();
+        SwitchToNextcloudCommand.RaiseCanExecuteChanged();
+        SwitchToS3Command.RaiseCanExecuteChanged();
     }
 
     private async Task ToggleCommandConsoleAsync()

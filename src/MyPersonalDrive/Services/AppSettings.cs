@@ -6,6 +6,8 @@ public sealed class AppSettings
 
     public bool IsAuthenticated { get; set; }
 
+    public string ProtonAccountLabel { get; set; } = string.Empty;
+
     /// <summary>
     /// When true, a `filesystem list --json` response that isn't valid JSON is treated as a
     /// hard error instead of falling back to a best-effort text parser. Defaults to false
@@ -46,6 +48,20 @@ public sealed class AppSettings
 
     /// <summary>Cached hint mirroring <see cref="IsAuthenticated"/> for OneDrive — the actual token lives in <c>onedrive-token.json</c>, not here.</summary>
     public bool IsOneDriveAuthenticated { get; set; }
+
+    public string OneDriveAccountLabel { get; set; } = string.Empty;
+
+    public bool IsGoogleDriveAuthenticated { get; set; }
+
+    public string GoogleDriveAccountLabel { get; set; } = string.Empty;
+
+    public bool IsNextcloudAuthenticated { get; set; }
+
+    public string NextcloudAccountLabel { get; set; } = string.Empty;
+
+    public bool IsS3Authenticated { get; set; }
+
+    public string S3AccountLabel { get; set; } = string.Empty;
 
     /// <summary>
     /// The user's chosen workspace theme variant: "Default" (System default), "Light", or "Dark".

@@ -104,14 +104,33 @@
                     VerticalAlignment="Center"
                     CornerRadius="6"
                     Padding="10,4"
-                    MinWidth="150"
+                    MinWidth="180"
                     ToolTip.Tip="Seleccionar proveedor de almacenamiento">
             <ComboBox.ItemTemplate>
               <DataTemplate x:DataType="providers:ProviderDescriptor">
-                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                  <Path Classes="icon" Data="{StaticResource IconCloud}" Width="14" Height="14" VerticalAlignment="Center" />
-                  <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" />
-                </StackPanel>
+                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" VerticalAlignment="Center" Margin="2,2">
+                  <Path Grid.Column="0" Classes="icon" Data="{StaticResource IconCloud}" Width="16" Height="16" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                    <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding AccountSummary}" VerticalAlignment="Center" FontSize="10" Opacity="0.6" />
+                  </StackPanel>
+                  <Ellipse Grid.Column="2" Width="7" Height="7" VerticalAlignment="Center">
+                    <Ellipse.Styles>
+                      <Style Selector="Ellipse.auth">
+                        <Setter Property="Fill" Value="#28A745" />
+                      </Style>
+                      <Style Selector="Ellipse.unauth">
+                        <Setter Property="Fill" Value="#6C757D" />
+                      </Style>
+                    </Ellipse.Styles>
+                    <Classes.auth>
+                      <Binding Path="IsAuthenticated" />
+                    </Classes.auth>
+                    <Classes.unauth>
+                      <Binding Path="!IsAuthenticated" />
+                    </Classes.unauth>
+                  </Ellipse>
+                </Grid>
               </DataTemplate>
             </ComboBox.ItemTemplate>
           </ComboBox>
@@ -390,6 +409,25 @@
           </ItemsControl>
 
           <Grid Grid.Row="2">
+          <!-- Unauthenticated / Expired Session Fallback Card -->
+          <Border IsVisible="{Binding !IsAuthenticated}"
+                  Background="{DynamicResource CardBackgroundBrush}"
+                  CornerRadius="8"
+                  Padding="28"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  MaxWidth="480">
+            <StackPanel Spacing="14" HorizontalAlignment="Center">
+              <Path Classes="icon" Data="{StaticResource IconKey}" Width="36" Height="36" Stroke="{DynamicResource AccentBrush}" HorizontalAlignment="Center" />
+              <TextBlock Text="Autenticación Requerida" FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" />
+              <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" TextAlignment="Center" Opacity="0.8" />
+              <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center" Margin="0,8,0,0">
+                <Button Classes="primary" Content="Iniciar Sesión" Command="{Binding AuthenticateCommand}" Padding="16,8" />
+                <Button Content="Configuración" Command="{Binding ToggleSettingsCommand}" Padding="16,8" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
           <!-- List mode: the original row, one per line, with the per-row actions inline. -->
           <ListBox x:Name="ListModeListing"
                    Classes="driveListing"
@@ -927,13 +965,13 @@
         <StackPanel Spacing="10">
           <TextBlock FontSize="18" FontWeight="Bold" Text="Conexión" />
 
-          <!-- Provider picker: which backend is active. Switching writes AppSettings.ActiveProvider
-               and asks for a restart rather than hot-swapping — every downstream service (cache,
-               sync engine, this window's own view model) was built once, at startup, against
-               whichever provider was active then (docs/PLAN-CLOUD-PROVIDERS.md §2.7). -->
+          <!-- Provider picker: which backend is active. -->
           <StackPanel Orientation="Horizontal" Spacing="8">
             <Button Classes.primary="{Binding IsProtonActive}" Content="Proton Drive" Command="{Binding SwitchToProtonCommand}" />
             <Button Classes.primary="{Binding IsOneDriveActive}" Content="OneDrive" Command="{Binding SwitchToOneDriveCommand}" />
+            <Button Classes.primary="{Binding IsGoogleDriveActive}" Content="Google Drive" Command="{Binding SwitchToGoogleDriveCommand}" />
+            <Button Classes.primary="{Binding IsNextcloudActive}" Content="Nextcloud" Command="{Binding SwitchToNextcloudCommand}" />
+            <Button Classes.primary="{Binding IsS3Active}" Content="Custom S3" Command="{Binding SwitchToS3Command}" />
           </StackPanel>
 
           <!-- Proton's card: CLI path, auth, version, self-update. -->
@@ -1033,6 +1071,87 @@
                            TextWrapping="Wrap"
                            Opacity="0.8"
                            Text="{Binding OneDriveAccountLabel}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- Google Drive's card -->
+          <Border Padding="16"
+                  Background="{DynamicResource CardBackgroundBrush}"
+                  CornerRadius="6"
+                  IsVisible="{Binding IsGoogleDriveActive}">
+            <StackPanel Spacing="10">
+              <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
+              <TextBlock Text="Google Workspace &amp; Drive Account Connection" FontWeight="SemiBold" />
+              <TextBlock Opacity="0.6" FontSize="12" TextWrapping="Wrap"
+                         Text="Connect with Google OAuth2 credentials or API tokens for seamless synchronization." />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes.primary="{Binding !IsAuthenticated}" Content="Iniciar Sesión en Google Drive" Command="{Binding AuthenticateCommand}">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Path Classes="icon" Data="{StaticResource IconKey}" />
+                    <TextBlock Text="Conectar Google Drive" />
+                  </StackPanel>
+                </Button>
+                <Button ToolTip.Tip="Cerrar sesión" Command="{Binding LogoutCommand}" IsVisible="{Binding IsAuthenticated}">
+                  <Path Classes="icon" Data="{StaticResource IconLogout}" />
+                </Button>
+                <Button ToolTip.Tip="Actualizar contenido" Command="{Binding RefreshCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+                </Button>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- Nextcloud's card -->
+          <Border Padding="16"
+                  Background="{DynamicResource CardBackgroundBrush}"
+                  CornerRadius="6"
+                  IsVisible="{Binding IsNextcloudActive}">
+            <StackPanel Spacing="10">
+              <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
+              <TextBlock Text="Nextcloud Server Connection (WebDAV)" FontWeight="SemiBold" />
+              <TextBlock Opacity="0.6" FontSize="12" TextWrapping="Wrap"
+                         Text="Self-hosted Nextcloud instance connectivity and user credentials." />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes.primary="{Binding !IsAuthenticated}" Content="Conectar Nextcloud" Command="{Binding AuthenticateCommand}">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Path Classes="icon" Data="{StaticResource IconKey}" />
+                    <TextBlock Text="Conectar Nextcloud" />
+                  </StackPanel>
+                </Button>
+                <Button ToolTip.Tip="Cerrar sesión" Command="{Binding LogoutCommand}" IsVisible="{Binding IsAuthenticated}">
+                  <Path Classes="icon" Data="{StaticResource IconLogout}" />
+                </Button>
+                <Button ToolTip.Tip="Actualizar contenido" Command="{Binding RefreshCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+                </Button>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- Custom S3 Storage card -->
+          <Border Padding="16"
+                  Background="{DynamicResource CardBackgroundBrush}"
+                  CornerRadius="6"
+                  IsVisible="{Binding IsS3Active}">
+            <StackPanel Spacing="10">
+              <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
+              <TextBlock Text="Custom S3 / MinIO Object Storage" FontWeight="SemiBold" />
+              <TextBlock Opacity="0.6" FontSize="12" TextWrapping="Wrap"
+                         Text="Amazon S3, Cloudflare R2, Wasabi, or MinIO bucket endpoint and access keys." />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes.primary="{Binding !IsAuthenticated}" Content="Conectar Bucket S3" Command="{Binding AuthenticateCommand}">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Path Classes="icon" Data="{StaticResource IconKey}" />
+                    <TextBlock Text="Conectar S3" />
+                  </StackPanel>
+                </Button>
+                <Button ToolTip.Tip="Cerrar sesión" Command="{Binding LogoutCommand}" IsVisible="{Binding IsAuthenticated}">
+                  <Path Classes="icon" Data="{StaticResource IconLogout}" />
+                </Button>
+                <Button ToolTip.Tip="Actualizar contenido" Command="{Binding RefreshCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+                </Button>
               </StackPanel>
             </StackPanel>
           </Border>

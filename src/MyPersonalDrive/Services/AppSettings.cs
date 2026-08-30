@@ -47,6 +47,26 @@ public sealed class AppSettings
     /// <summary>Cached hint mirroring <see cref="IsAuthenticated"/> for OneDrive — the actual token lives in <c>onedrive-token.json</c>, not here.</summary>
     public bool IsOneDriveAuthenticated { get; set; }
 
+    /// <summary>
+    /// The user's chosen workspace theme variant: "Default" (System default), "Light", or "Dark".
+    /// </summary>
+    public string Theme { get; set; } = "Default";
+
+    /// <summary>
+    /// Network bandwidth throttle limit in KB/s (0 = unlimited).
+    /// </summary>
+    public int BandwidthLimitKbps { get; set; }
+
+    /// <summary>
+    /// Default local folder path for file sync pairs and downloads.
+    /// </summary>
+    public string DefaultSyncFolder { get; set; } = string.Empty;
+
+    public string ThemeOrDefault()
+        => string.Equals(Theme, "Light", StringComparison.OrdinalIgnoreCase) ? "Light"
+         : string.Equals(Theme, "Dark", StringComparison.OrdinalIgnoreCase) ? "Dark"
+         : "Default";
+
     public Models.DriveSortKey SortKeyOrDefault()
         => Enum.TryParse<Models.DriveSortKey>(SortKey, ignoreCase: true, out var key)
             ? key

@@ -22,6 +22,7 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var settings = new AppSettingsService();
+            ApplyTheme(settings.Load().ThemeOrDefault());
             var catalog = new ProviderCatalog();
 
             // P7 Phase A (docs/PLAN-CLOUD-PROVIDERS.md): a session per provider *type*, not just
@@ -104,6 +105,17 @@ public partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    public static void ApplyTheme(string theme)
+    {
+        if (Current is null) return;
+        Current.RequestedThemeVariant = theme?.ToLowerInvariant() switch
+        {
+            "light" => Avalonia.Styling.ThemeVariant.Light,
+            "dark" => Avalonia.Styling.ThemeVariant.Dark,
+            _ => Avalonia.Styling.ThemeVariant.Default
+        };
     }
 
     private static AccountSyncContext BuildAccountContext(ICloudDriveProvider provider, AppSettingsService settings)

@@ -115,11 +115,31 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _cliUpdateStatus = "Not checked yet.";
     private bool _isCliUpdateAvailable;
     private bool _isCliUpdateBusy;
+    private string _theme = "Default";
+    private int _bandwidthLimitKbps;
+    private string _defaultSyncFolder = string.Empty;
+    private string _connectionStatus = "Online";
+    private string _connectionStatusKind = "Online";
+    private string _connectionStatusDescription = "Connected";
+    private long _quotaUsedBytes;
+    private long _quotaTotalBytes = 500L * 1024 * 1024 * 1024;
 
     /// <summary>
     /// What the settings view's provider picker lists — see docs/PLAN-CLOUD-PROVIDERS.md P5/P6.
     /// </summary>
     public IReadOnlyList<ProviderDescriptor> AvailableProviders { get; }
+
+    public ProviderDescriptor? SelectedProvider
+    {
+        get => AvailableProviders.FirstOrDefault(p => p.Id == _provider.Id) ?? AvailableProviders.FirstOrDefault();
+        set
+        {
+            if (value is not null && value.Id != _provider.Id)
+            {
+                _ = SwitchBrowserAccountAsync(value.Id);
+            }
+        }
+    }
 
     public string ActiveProviderDisplayName => _provider.DisplayName;
 
@@ -205,6 +225,9 @@ public sealed class MainWindowViewModel : ObservableObject
         _viewMode = appSettings.ViewModeOrDefault();
         _sortKey = appSettings.SortKeyOrDefault();
         _sortDescending = appSettings.SortDescending;
+        _theme = appSettings.ThemeOrDefault();
+        _bandwidthLimitKbps = appSettings.BandwidthLimitKbps;
+        _defaultSyncFolder = appSettings.DefaultSyncFolder;
         // The browsed provider's own activity is tagged like any other session's, so interleaved
         // lines from ObserveAdditionalProviderActivity (P7, both providers active at once) read
         // consistently regardless of which one happens to be on screen.
@@ -246,6 +269,14 @@ public sealed class MainWindowViewModel : ObservableObject
         InstallCliUpdateCommand = new AsyncCommand(InstallCliUpdateAsync, CanInstallCliUpdate, HandleUnexpectedError);
         ViewSelectedFileCommand = new AsyncCommand(ViewSelectedFileAsync, CanViewSelectedFile, HandleUnexpectedError);
         CloseViewerCommand = new AsyncCommand(CloseViewerAsync, onError: HandleUnexpectedError);
+        SetThemeDefaultCommand = new AsyncCommand(() => SetThemeAsync("Default"), onError: HandleUnexpectedError);
+        SetThemeLightCommand = new AsyncCommand(() => SetThemeAsync("Light"), onError: HandleUnexpectedError);
+        SetThemeDarkCommand = new AsyncCommand(() => SetThemeAsync("Dark"), onError: HandleUnexpectedError);
+        ToggleThemeCommand = new AsyncCommand(CycleThemeAsync, onError: HandleUnexpectedError);
+        ToggleSettingsCommand = new AsyncCommand(ToggleSettingsAsync, onError: HandleUnexpectedError);
+
+        UpdateConnectionTelemetry();
+        UpdateQuotaMetrics();
 
         _browserSessions.Add(new BrowserAccountSession(_provider, _cacheService, _metricsStore, _statsScanner, _previewLoader, _imagePreviewLoader));
     }
@@ -359,6 +390,90 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public AsyncCommand InstallCliUpdateCommand { get; }
 
+    public AsyncCommand SetThemeDefaultCommand { get; }
+
+    public AsyncCommand SetThemeLightCommand { get; }
+
+    public AsyncCommand SetThemeDarkCommand { get; }
+
+    public AsyncCommand ToggleThemeCommand { get; }
+
+    public AsyncCommand ToggleSettingsCommand { get; }
+
+    public string ThemePreference
+    {
+        get => _theme;
+        set
+        {
+            if (SetProperty(ref _theme, value))
+            {
+                App.ApplyTheme(_theme);
+                _settings.Update(s => s.Theme = _theme);
+                OnPropertyChanged(nameof(IsSystemTheme));
+                OnPropertyChanged(nameof(IsLightTheme));
+                OnPropertyChanged(nameof(IsDarkTheme));
+            }
+        }
+    }
+
+    public bool IsSystemTheme => string.Equals(_theme, "Default", StringComparison.OrdinalIgnoreCase);
+
+    public bool IsLightTheme => string.Equals(_theme, "Light", StringComparison.OrdinalIgnoreCase);
+
+    public bool IsDarkTheme => string.Equals(_theme, "Dark", StringComparison.OrdinalIgnoreCase);
+
+    public int BandwidthLimitKbps
+    {
+        get => _bandwidthLimitKbps;
+        set
+        {
+            if (SetProperty(ref _bandwidthLimitKbps, value))
+            {
+                _settings.Update(s => s.BandwidthLimitKbps = value);
+            }
+        }
+    }
+
+    public string DefaultSyncFolder
+    {
+        get => _defaultSyncFolder;
+        set
+        {
+            if (SetProperty(ref _defaultSyncFolder, value))
+            {
+                _settings.Update(s => s.DefaultSyncFolder = value);
+            }
+        }
+    }
+
+    public string ConnectionStatus => _connectionStatus;
+
+    public string ConnectionStatusKind => _connectionStatusKind;
+
+    public string ConnectionStatusDescription => _connectionStatusDescription;
+
+    public bool IsOnline => _connectionStatusKind == "Online";
+
+    public bool IsSyncing => _connectionStatusKind == "Syncing";
+
+    public bool IsDisconnected => _connectionStatusKind == "Disconnected";
+
+    public bool IsRateLimited => _connectionStatusKind == "RateLimited";
+
+    public long QuotaUsedBytes => _quotaUsedBytes;
+
+    public long QuotaTotalBytes => _quotaTotalBytes;
+
+    public double QuotaPercent => _quotaTotalBytes > 0 ? Math.Min(100.0, (double)_quotaUsedBytes / _quotaTotalBytes * 100.0) : 0.0;
+
+    public double QuotaProgress => _quotaTotalBytes > 0 ? Math.Clamp((double)_quotaUsedBytes / _quotaTotalBytes, 0.0, 1.0) : 0.0;
+
+    public string QuotaDisplay => _quotaTotalBytes > 0
+        ? $"{ByteSize.Format(_quotaUsedBytes)} / {ByteSize.Format(_quotaTotalBytes)} ({QuotaPercent:F0}% used)"
+        : ByteSize.Format(_quotaUsedBytes);
+
+    public string QuotaSummary => $"{ByteSize.Format(_quotaUsedBytes)} / {ByteSize.Format(_quotaTotalBytes)}";
+
     /// <summary>Human-readable result of the last update check, or the progress of a running install.</summary>
     public string CliUpdateStatus
     {
@@ -455,6 +570,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 ScanFolderDeeplyCommand.RaiseCanExecuteChanged();
                 CancelDeepScanCommand.RaiseCanExecuteChanged();
+                UpdateConnectionTelemetry();
             }
         }
     }
@@ -581,6 +697,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _isLoading, value))
             {
                 RaiseCommandStates();
+                UpdateConnectionTelemetry();
             }
         }
     }
@@ -594,6 +711,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 PersistSettings();
                 RaiseCommandStates();
+                UpdateConnectionTelemetry();
             }
         }
     }
@@ -606,6 +724,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _statusMessage, value))
             {
                 IsWarning = false;
+                UpdateConnectionTelemetry();
             }
         }
     }
@@ -613,7 +732,13 @@ public sealed class MainWindowViewModel : ObservableObject
     public bool IsWarning
     {
         get => _isWarning;
-        private set => SetProperty(ref _isWarning, value);
+        private set
+        {
+            if (SetProperty(ref _isWarning, value))
+            {
+                UpdateConnectionTelemetry();
+            }
+        }
     }
 
     public string ActiveCommand
@@ -1008,6 +1133,7 @@ public sealed class MainWindowViewModel : ObservableObject
         if (session is null)
         {
             StatusMessage = $"{id} isn't configured.";
+            OnPropertyChanged(nameof(SelectedProvider));
             return;
         }
 
@@ -1043,6 +1169,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _kindFilter = null;
         FilterSummary = string.Empty;
 
+        OnPropertyChanged(nameof(SelectedProvider));
         OnPropertyChanged(nameof(ActiveProviderDisplayName));
         OnPropertyChanged(nameof(BrowserHeaderTitle));
         OnPropertyChanged(nameof(BrowserHeaderSubtitle));
@@ -1767,6 +1894,8 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         RenderItems();
+        UpdateQuotaMetrics();
+        UpdateConnectionTelemetry();
     }
 
     private void RenderItems()
@@ -1939,7 +2068,96 @@ public sealed class MainWindowViewModel : ObservableObject
             settings.ViewMode = ViewMode.ToString();
             settings.SortKey = SortKey.ToString();
             settings.SortDescending = SortDescending;
+            settings.Theme = _theme;
+            settings.BandwidthLimitKbps = _bandwidthLimitKbps;
+            settings.DefaultSyncFolder = _defaultSyncFolder;
         });
+    }
+
+    public void UpdateConnectionTelemetry()
+    {
+        if (!IsAuthenticated)
+        {
+            _connectionStatus = "Disconnected";
+            _connectionStatusKind = "Disconnected";
+            _connectionStatusDescription = $"Disconnected — {_provider.DisplayName} not authenticated.";
+        }
+        else if (_isWarning && (_statusMessage.Contains("Rate limit", StringComparison.OrdinalIgnoreCase) || _statusMessage.Contains("429", StringComparison.OrdinalIgnoreCase)))
+        {
+            _connectionStatus = "Rate-Limited";
+            _connectionStatusKind = "RateLimited";
+            _connectionStatusDescription = $"{_provider.DisplayName} rate limited.";
+        }
+        else if ((_isSyncInProgress is not null && _isSyncInProgress()) || IsLoading || IsDeepScanRunning)
+        {
+            _connectionStatus = "Syncing";
+            _connectionStatusKind = "Syncing";
+            _connectionStatusDescription = IsDeepScanRunning
+                ? $"Scanning {_currentPath} metrics..."
+                : IsLoading
+                    ? $"Loading {CurrentPath}..."
+                    : "Active file synchronization in progress.";
+        }
+        else
+        {
+            _connectionStatus = "Online";
+            _connectionStatusKind = "Online";
+            _connectionStatusDescription = $"Connected to {_provider.DisplayName}.";
+        }
+
+        OnPropertyChanged(nameof(ConnectionStatus));
+        OnPropertyChanged(nameof(ConnectionStatusKind));
+        OnPropertyChanged(nameof(ConnectionStatusDescription));
+        OnPropertyChanged(nameof(IsOnline));
+        OnPropertyChanged(nameof(IsSyncing));
+        OnPropertyChanged(nameof(IsDisconnected));
+        OnPropertyChanged(nameof(IsRateLimited));
+    }
+
+    public void UpdateQuotaMetrics()
+    {
+        _quotaTotalBytes = _provider.Id == ProviderId.OneDrive
+            ? 1024L * 1024 * 1024 * 1024 // 1 TB
+            : 500L * 1024 * 1024 * 1024; // 500 GB
+
+        _quotaUsedBytes = _loadedItems.Where(i => !i.IsFolder && i.Size.HasValue).Sum(i => i.Size!.Value);
+
+        OnPropertyChanged(nameof(QuotaUsedBytes));
+        OnPropertyChanged(nameof(QuotaTotalBytes));
+        OnPropertyChanged(nameof(QuotaPercent));
+        OnPropertyChanged(nameof(QuotaProgress));
+        OnPropertyChanged(nameof(QuotaDisplay));
+        OnPropertyChanged(nameof(QuotaSummary));
+    }
+
+    public async Task SetThemeAsync(string theme)
+    {
+        ThemePreference = theme;
+        await Task.CompletedTask;
+    }
+
+    public async Task CycleThemeAsync()
+    {
+        var nextTheme = _theme switch
+        {
+            "Default" => "Light",
+            "Light" => "Dark",
+            "Dark" => "Default",
+            _ => "Default"
+        };
+        await SetThemeAsync(nextTheme);
+    }
+
+    public async Task ToggleSettingsAsync()
+    {
+        if (IsSettingsView)
+        {
+            await ShowExplorerAsync();
+        }
+        else
+        {
+            await ShowSettingsAsync();
+        }
     }
 
     private void RaiseCommandStates()

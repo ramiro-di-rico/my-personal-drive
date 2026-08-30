@@ -77,6 +77,27 @@ public partial class MainWindow : Window
         viewModel.CliPath = files[0].Path.LocalPath;
     }
 
+    private async void BrowseDefaultSyncFolder(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select default sync folder",
+            AllowMultiple = false
+        });
+
+        if (folders.Count == 0)
+        {
+            return;
+        }
+
+        viewModel.DefaultSyncFolder = folders[0].Path.LocalPath;
+    }
+
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
         if (DataContext is not MainWindowViewModel viewModel)

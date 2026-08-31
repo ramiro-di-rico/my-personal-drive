@@ -150,6 +150,11 @@ public partial class MainWindow : Window
         _localDragCandidate = null;
         _localDragPressedArgs = null;
 
+        // The row's own Button captured the pointer on PointerPressed for its own click tracking
+        // (standard Avalonia ButtonBase behavior) — DoDragDropAsync needs that capture released
+        // first, or it can't take over the pointer to actually track the drag.
+        e.Pointer.Capture(null);
+
         var transfer = new DataTransfer();
         transfer.Add(DataTransferItem.Create(LocalPathsDataFormat, new[] { node.Item.Path }));
         await DragDrop.DoDragDropAsync(pressedArgs, transfer, DragDropEffects.Copy);
@@ -297,6 +302,10 @@ public partial class MainWindow : Window
         _cloudDragStartPoint = null;
         _cloudDragCandidate = null;
         _cloudDragPressedArgs = null;
+
+        // See the matching comment in OnLocalRowPointerMoved: the row's own Button captured the
+        // pointer for its click tracking, and DoDragDropAsync needs that released first.
+        e.Pointer.Capture(null);
 
         var transfer = new DataTransfer();
         transfer.Add(DataTransferItem.Create(CloudItemsDataFormat, new[] { node.Item }));

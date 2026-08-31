@@ -419,13 +419,25 @@ Central state. Key pieces:
   recent buffered line, both shown in a floating status line while the console is collapsed.
 - `TransferQueue : TransferQueueViewModel` — the drag-and-drop transfer queue
   (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5), sequential and cancellable, shown in the Status
-  sidebar when non-empty. `HandleLocalFilesDroppedAsync(localPaths, targetPath)` is the one
-  entry point code-behind's drag/drop handlers call — it resolves the upload-conflict strategy
-  (reusing `UploadAsync`'s own check, factored out as `ResolveUploadConflictStrategyAsync`) and
-  hands off to the queue. Drag-and-drop mechanics themselves (`OnLocalRowPointerPressed/Moved`,
-  `OnCloudListingDragOver/Drop`) live entirely in `MainWindow.axaml.cs`, per the same "no Avalonia
-  types in the VM" rule as everything else — the row Button's own click still works normally
-  below a small pixel threshold; only a real drag (past it) calls `DragDrop.DoDragDropAsync`.
+  sidebar when non-empty. Two entry points, one per direction, are the only calls code-behind's
+  drag/drop handlers make into the VM:
+  - `HandleLocalFilesDroppedAsync(localPaths, targetPath)` — local pane onto cloud pane. Resolves
+    the upload-conflict strategy (reusing `UploadAsync`'s own check, factored out as
+    `ResolveUploadConflictStrategyAsync`) and hands off to the queue.
+  - `HandleCloudItemsDroppedAsync(items, targetPath)` — cloud pane onto local pane. Checks each
+    item's name against the local target via `LocalFileSystemService.Exists` (the VM's own
+    `_localFileSystem` field) and, on a conflict, can only honor "Skip" beyond a plain download —
+    `filesystem download` has no conflict-strategy flag the way upload's `-f`/`-d` do, so
+    "Replace"/"Keep Both" both just fall through to downloading normally; there's no verified way
+    to make the CLI (or this app, without an unbuilt download-to-temp-then-rename step) rename the
+    incoming file instead.
+
+  Drag-and-drop mechanics themselves (`OnLocalRowPointerPressed/Moved`, `OnCloudRowPointerPressed/
+  Moved`, `OnCloudListingDragOver/Drop`, `OnLocalListingDragOver/Drop`) live entirely in
+  `MainWindow.axaml.cs`, per the same "no Avalonia types in the VM" rule as everything else — the
+  row Button's own click still works normally below a small pixel threshold; only a real drag
+  (past it) calls `DragDrop.DoDragDropAsync`. The app's selection model is single-item, so a drag
+  always carries just the row under the pointer, not a multi-selection.
 
 **Extension points toward the View** — the VM doesn't know about Avalonia except for
 `Dispatcher`; dialogs are injected as delegates the View sets in `OnDataContextChanged`:

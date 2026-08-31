@@ -59,4 +59,11 @@ public class LocalFileSystemService
 
     /// <summary>Delegates to the sync domain's own free-space probe rather than duplicating it.</summary>
     public virtual long? AvailableFreeBytes(string path) => LocalFolderInspector.AvailableFreeBytes(path);
+
+    /// <summary>
+    /// Whether a file or folder already sits at <paramref name="path"/> — used by drag-and-drop
+    /// downloads (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5) to detect a naming conflict before
+    /// asking the CLI to download over it.
+    /// </summary>
+    public virtual bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
 }

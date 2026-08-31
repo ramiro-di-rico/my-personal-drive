@@ -189,6 +189,95 @@ public partial class MainWindow : Window
         return viewModel.CurrentPath;
     }
 
+    // Same in-process-only reasoning as LocalPathsDataFormat, for the opposite direction
+    // (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 3).
+    private static readonly DataFormat<DriveItem[]> CloudItemsDataFormat = DataFormat.CreateInProcessFormat<DriveItem[]>("application/x-mypersonaldrive-cloud-items");
+
+    private Point? _cloudDragStartPoint;
+    private DriveNodeViewModel? _cloudDragCandidate;
+    private PointerPressedEventArgs? _cloudDragPressedArgs;
+
+    private void OnCloudRowPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is Control { DataContext: DriveNodeViewModel node } && e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        {
+            _cloudDragStartPoint = e.GetPosition(null);
+            _cloudDragCandidate = node;
+            _cloudDragPressedArgs = e;
+        }
+    }
+
+    /// <summary>
+    /// Both files and folders can be dragged — `filesystem download` is recursive for folders
+    /// (verified in docs/PLAN-LOCAL-SYNC.md), unlike the row's own manual `DownloadCommand`, which
+    /// is folder-restricted for an unrelated, app-level reason (docs/ARCHITECTURE.md §9 item 11).
+    /// </summary>
+    private async void OnCloudRowPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_cloudDragStartPoint is not { } start || _cloudDragCandidate is not { } node || _cloudDragPressedArgs is not { } pressedArgs)
+        {
+            return;
+        }
+
+        if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        {
+            _cloudDragStartPoint = null;
+            _cloudDragCandidate = null;
+            _cloudDragPressedArgs = null;
+            return;
+        }
+
+        var current = e.GetPosition(null);
+        var dx = current.X - start.X;
+        var dy = current.Y - start.Y;
+        if (Math.Sqrt(dx * dx + dy * dy) < DragStartThresholdPixels)
+        {
+            return;
+        }
+
+        _cloudDragStartPoint = null;
+        _cloudDragCandidate = null;
+        _cloudDragPressedArgs = null;
+
+        var transfer = new DataTransfer();
+        transfer.Add(DataTransferItem.Create(CloudItemsDataFormat, new[] { node.Item }));
+        await DragDrop.DoDragDropAsync(pressedArgs, transfer, DragDropEffects.Copy);
+    }
+
+    private void OnLocalListingDragOver(object? sender, DragEventArgs e)
+        => e.DragEffects = e.DataTransfer.Contains(CloudItemsDataFormat) ? DragDropEffects.Copy : DragDropEffects.None;
+
+    private async void OnLocalListingDrop(object? sender, DragEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        if (e.DataTransfer.TryGetValue(CloudItemsDataFormat) is not { Length: > 0 } items)
+        {
+            return;
+        }
+
+        var targetPath = ResolveLocalDropTargetPath(e, viewModel);
+        await viewModel.HandleCloudItemsDroppedAsync(items, targetPath);
+    }
+
+    /// <summary>The local folder row under the drop point, if any — otherwise the currently browsed local folder.</summary>
+    private static string ResolveLocalDropTargetPath(DragEventArgs e, MainWindowViewModel viewModel)
+    {
+        if (e.Source is Visual visual)
+        {
+            var listBoxItem = visual.FindAncestorOfType<ListBoxItem>(includeSelf: true);
+            if (listBoxItem?.DataContext is LocalNodeViewModel { IsFolder: true } node)
+            {
+                return node.Item.Path;
+            }
+        }
+
+        return viewModel.LocalExplorer.CurrentPath;
+    }
+
     private async void BrowseCliPath(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is not MainWindowViewModel viewModel)

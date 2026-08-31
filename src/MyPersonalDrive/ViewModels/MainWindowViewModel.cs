@@ -21,6 +21,7 @@ public sealed class MainWindowViewModel : ObservableObject
     // "persist a preference and ask for a restart" behavior. See _browserSessions.
     private ICloudDriveProvider _provider;
     private DriveCacheService _cacheService;
+    private readonly LocalFileSystemService _localFileSystem;
     private readonly AppSettingsService _settings;
     private readonly IProviderCatalog _providerCatalog;
     private FolderMetricsStore? _metricsStore;
@@ -258,7 +259,8 @@ public sealed class MainWindowViewModel : ObservableObject
         _cacheService = cacheService;
         _settings = settings;
         SyncPanel = syncPanel;
-        LocalExplorer = new LocalExplorerViewModel(localFileSystem ?? new LocalFileSystemService(), settings, HandleUnexpectedError);
+        _localFileSystem = localFileSystem ?? new LocalFileSystemService();
+        LocalExplorer = new LocalExplorerViewModel(_localFileSystem, settings, HandleUnexpectedError);
 
         var appSettings = settings.Load();
         _cliPath = appSettings.CliPath;
@@ -1599,6 +1601,64 @@ public sealed class MainWindowViewModel : ObservableObject
         if (string.Equals(targetPath, CurrentPath, StringComparison.Ordinal))
         {
             _ = RefreshAsync();
+        }
+    }
+
+    /// <summary>
+    /// A cloud pane row (or rows) dropped onto the local pane (docs/INTERFACE_IMPROVEMENT_PLAN.md
+    /// Task 5, Phase 3) — mirrors <see cref="HandleLocalFilesDroppedAsync"/> for the other
+    /// direction. Files and folders both download (`filesystem download` is recursive for folders,
+    /// verified in docs/PLAN-LOCAL-SYNC.md — the row's own manual <c>DownloadCommand</c> disables
+    /// folders for an unrelated, app-level reason, see docs/ARCHITECTURE.md §9 item 11).
+    ///
+    /// Unlike upload, the download operation itself has no conflict-strategy parameter — the CLI's
+    /// `filesystem download` command has no equivalent to upload's <c>-f</c>/<c>-d</c> flags. So
+    /// "Skip" is the only choice this method can actually honor beyond a plain download: it drops
+    /// the conflicting items from the batch. "Replace" and "Keep Both" both fall through to a plain
+    /// download — there is no verified way to make the CLI (or this app, without downloading to a
+    /// temp path and renaming after, which isn't built) rename the incoming file instead of
+    /// whatever the CLI itself does when the target name already exists.
+    /// </summary>
+    public async Task HandleCloudItemsDroppedAsync(IReadOnlyList<DriveItem> items, string targetLocalPath)
+    {
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        var toDownload = items;
+        if (RequestConflictStrategyAsync is not null)
+        {
+            var conflictingNames = items
+                .Where(item => _localFileSystem.Exists(Path.Combine(targetLocalPath, item.Name)))
+                .Select(item => item.Name)
+                .ToList();
+
+            if (conflictingNames.Count > 0)
+            {
+                var strategy = await RequestConflictStrategyAsync(conflictingNames);
+                if (strategy == UploadConflictStrategy.None)
+                {
+                    StatusMessage = "Download cancelled.";
+                    return;
+                }
+
+                if (strategy == UploadConflictStrategy.Skip)
+                {
+                    var skip = conflictingNames.ToHashSet();
+                    toDownload = items.Where(item => !skip.Contains(item.Name)).ToList();
+                }
+            }
+        }
+
+        foreach (var item in toDownload)
+        {
+            await TransferQueue.EnqueueDownload(_provider.Operations, item, targetLocalPath);
+        }
+
+        if (string.Equals(targetLocalPath, LocalExplorer.CurrentPath, StringComparison.Ordinal))
+        {
+            _ = LocalExplorer.RefreshCommand.ExecuteAsync();
         }
     }
 

@@ -764,6 +764,43 @@
           <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
           <StackPanel Spacing="10">
             <TextBlock FontSize="18" Text="Status" />
+
+            <!-- Drag-and-drop transfer queue (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5). Only
+                 status text and a Cancel button — no progress bar/ETA, since nothing in the CLI
+                 wrapper reports byte-level progress to build one from (see
+                 TransferQueueViewModel's own doc comment). -->
+            <StackPanel Spacing="6" IsVisible="{Binding TransferQueue.HasItems}">
+              <TextBlock FontWeight="Bold" Text="{Binding TransferQueue.Summary}" />
+              <ItemsControl ItemsSource="{Binding TransferQueue.Items}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:TransferItemViewModel">
+                    <Border Padding="8" Margin="0,0,0,4" CornerRadius="4" Background="{DynamicResource PanelBackgroundBrush}">
+                      <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" RowSpacing="2">
+                        <TextBlock Grid.Row="0"
+                                   Grid.Column="0"
+                                   FontSize="12"
+                                   TextTrimming="CharacterEllipsis"
+                                   Text="{Binding SourceLabel}" />
+                        <Button Grid.Row="0"
+                                Grid.Column="1"
+                                Padding="4"
+                                Command="{Binding CancelCommand}"
+                                ToolTip.Tip="Cancelar">
+                          <Path Classes="icon" Width="12" Height="12" Data="{StaticResource IconClear}" />
+                        </Button>
+                        <TextBlock Grid.Row="1"
+                                   Grid.Column="0"
+                                   Grid.ColumnSpan="2"
+                                   FontSize="11"
+                                   Opacity="0.7"
+                                   Text="{Binding StatusText}" />
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+
             <Border Name="StatusBorder"
                     Padding="8"
                     CornerRadius="4"

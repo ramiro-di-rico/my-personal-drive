@@ -378,6 +378,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public LocalExplorerViewModel LocalExplorer { get; }
 
+    public TransferQueueViewModel TransferQueue { get; } = new();
+
     /// <summary>
     /// Statistics for the folder on screen, recomputed from the listing on every load
     /// (docs/PLAN-BROWSER-VIEWS.md M2). Shallow only: direct children, no CLI calls.

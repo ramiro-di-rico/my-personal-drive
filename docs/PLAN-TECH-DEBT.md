@@ -499,7 +499,7 @@ the same budget:
 | Item | Assessment |
 |---|---|
 | **TD-10** hardcoded `_rootPath = "/my-files"` | Not harmful. Becomes relevant only if Proton exposes other roots (shared-with-me, devices). Needs F0 to even know what roots exist. ~0.5 d once known. |
-| **TD-11** no recursive operations (folder download/delete) | A real gap, but the sync engine's `RemoteScanner` + `TransferQueue` ([PLAN-LOCAL-SYNC.md §6.2, §7](PLAN-LOCAL-SYNC.md)) build exactly this machinery. **Do it there and reuse it**, rather than writing a throwaway recursive walker now. |
+| **TD-11** no recursive folder download | Folder delete shipped (the CLI's `filesystem trash` already moves a folder's whole subtree server-side in one call — no client-side recursion needed). Folder *download* is still a real gap; the sync engine's `RemoteScanner` + `TransferQueue` ([PLAN-LOCAL-SYNC.md §6.2, §7](PLAN-LOCAL-SYNC.md)) build exactly this machinery. **Do it there and reuse it**, rather than writing a throwaway recursive walker now. |
 | **TD-12** no progress/throughput | Blocked on F0 #12 (does the CLI emit parseable progress?). If it does, the plumbing is small since `CommandOutput` already streams per line. If it doesn't, the honest answer is an indeterminate spinner. |
 
 ---

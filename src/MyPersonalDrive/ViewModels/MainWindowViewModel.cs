@@ -734,6 +734,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public Func<Task<string?>>? RequestSaveActivityAsync { get; set; }
 
+    public Func<string, Task<bool>>? RequestConfirmationAsync { get; set; }
+
     public string CliPath
     {
         get => _cliPath;
@@ -2051,7 +2053,13 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (item.IsFolder)
         {
-            return;
+            var confirm = RequestConfirmationAsync;
+            if (confirm is not null && !await confirm(
+                $"Move the folder \"{item.Name}\" and everything inside it to trash?"))
+            {
+                StatusMessage = $"Cancelled: {item.Name} was not moved to trash.";
+                return;
+            }
         }
 
         try

@@ -568,8 +568,10 @@ compose into three reachable crashes documented there.
 8. **Cache with no versioning or TTL**, and `IsAuthenticated` with no real verification.
 9. **No persistent logging** beyond the in-memory 200-line ring buffer.
 10. **`_rootPath` hardcoded** to `/my-files`.
-11. **No recursive operations**: a whole folder cannot be downloaded/deleted
-    (`DownloadCommand`/`TrashCommand` are disabled for folders).
+11. **No recursive download**: a whole folder cannot be downloaded
+    (`DownloadCommand` is disabled for folders). `TrashCommand` supports folders — the CLI's
+    `filesystem trash` moves the whole subtree server-side in one call, no client-side walk needed
+    — and asks for confirmation first since it's destructive.
 12. **No progress or throughput** for upload/download: just the raw CLI text.
 
 ---

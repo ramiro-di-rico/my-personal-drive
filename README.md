@@ -33,7 +33,7 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
   without downloading them to disk — from a row action, a context menu entry, or the "Visor"
   menu button
 - Upload files to the current folder
-- Move files to trash
+- Move files and folders to trash (folders ask for confirmation first)
 - Sync a remote folder with a local folder — download-only, upload-only, or two-way, running
   automatically with the on/off choice persisted across restarts. Proton and OneDrive each sync
   independently — pausing one doesn't affect the other

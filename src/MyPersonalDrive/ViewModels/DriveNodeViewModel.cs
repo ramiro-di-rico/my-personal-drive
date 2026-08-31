@@ -27,7 +27,7 @@ public sealed class DriveNodeViewModel : ObservableObject
         CanPreview = TextPreviewPolicy.CanPreview(item) || ImagePreviewPolicy.CanPreview(item);
         RowCommand = new AsyncCommand(HandleRowClickAsync, onError: onError);
         DownloadCommand = new AsyncCommand(DownloadAsync, () => !Item.IsFolder, onError);
-        TrashCommand = new AsyncCommand(TrashAsync, () => !Item.IsFolder, onError);
+        TrashCommand = new AsyncCommand(TrashAsync, onError: onError);
         RenameCommand = new AsyncCommand(RenameAsync, onError: onError);
         CopyCommand = new AsyncCommand(CopyAsync, onError: onError);
         PreviewCommand = new AsyncCommand(PreviewAsync, () => CanPreview && _previewItemAsync is not null, onError);
@@ -125,11 +125,6 @@ public sealed class DriveNodeViewModel : ObservableObject
 
     private async Task TrashAsync()
     {
-        if (Item.IsFolder)
-        {
-            return;
-        }
-
         await _trashItemAsync(Item);
     }
 

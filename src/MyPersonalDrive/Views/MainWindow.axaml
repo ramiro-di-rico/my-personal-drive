@@ -533,8 +533,7 @@
                           Classes="rowAction"
                           ToolTip.Tip="Move to trash"
                           Margin="8,0,0,0"
-                          Command="{Binding TrashCommand}"
-                          IsVisible="{Binding IsFile}">
+                          Command="{Binding TrashCommand}">
                     <Path Classes="icon" Data="{StaticResource IconTrash}" />
                   </Button>
                 </Grid>
@@ -566,7 +565,7 @@
                       <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
                       <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
                       <MenuItem Header="Descargar" Command="{Binding DownloadCommand}" IsVisible="{Binding IsFile}" />
-                      <MenuItem Header="Mover a la papelera" Command="{Binding TrashCommand}" IsVisible="{Binding IsFile}" />
+                      <MenuItem Header="Mover a la papelera" Command="{Binding TrashCommand}" />
                     </ContextMenu>
                   </Border.ContextMenu>
                   <Button Command="{Binding RowCommand}"
@@ -615,7 +614,7 @@
                       <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
                       <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
                       <MenuItem Header="Descargar" Command="{Binding DownloadCommand}" IsVisible="{Binding IsFile}" />
-                      <MenuItem Header="Mover a la papelera" Command="{Binding TrashCommand}" IsVisible="{Binding IsFile}" />
+                      <MenuItem Header="Mover a la papelera" Command="{Binding TrashCommand}" />
                     </ContextMenu>
                   </Border.ContextMenu>
                   <Button Command="{Binding RowCommand}"

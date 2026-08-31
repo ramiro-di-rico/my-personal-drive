@@ -35,7 +35,9 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
   automatically with the on/off choice persisted across restarts. Proton and OneDrive each sync
   independently — pausing one doesn't affect the other
 - Live console with realtime output from the CLI (Proton) and Graph requests (OneDrive), tagged
-  by account when both are active
+  by account when both are active — collapsible (`Ctrl/Cmd+~`, remembered across restarts), with a
+  search box, a warnings/errors-only filter, and a floating status line (active operation count,
+  last log line) while collapsed
 - Show the installed `proton-drive` CLI version in the settings view
 - Check Proton's published releases for a newer CLI, and install it after verifying its SHA-512
 

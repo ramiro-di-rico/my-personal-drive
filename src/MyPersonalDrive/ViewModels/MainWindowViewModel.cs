@@ -73,6 +73,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isLoading;
     private bool _isAuthenticated;
     private bool _isCommandConsoleVisible = true;
+    private int _activeOperationCount;
+    private string? _lastLogLine;
+    private bool _showOnlyWarningsAndErrors;
+    private string _logSearchText = string.Empty;
     private double _commandConsoleMaxHeight = 180;
     private double _commandConsoleOpacity = 1;
     private bool _commandConsoleHitTestVisible = true;
@@ -275,6 +279,19 @@ public sealed class MainWindowViewModel : ObservableObject
         _defaultSyncFolder = appSettings.DefaultSyncFolder;
         _isStatusPanelVisible = appSettings.ShowStatusPanel;
         _isLocalExplorerPanelVisible = appSettings.ShowLocalExplorerPanel;
+        _isCommandConsoleVisible = appSettings.ShowCommandConsole;
+        if (!_isCommandConsoleVisible)
+        {
+            // Mirrors IsCommandConsoleVisible's setter directly rather than going through it: this
+            // runs before AsyncCommand fields exist, and that setter's RaiseCommandStates() would
+            // null-ref against them. No PropertyChanged subscriber exists yet either, so there's
+            // nothing SetProperty would have notified at this point regardless.
+            _commandConsoleMaxHeight = 0;
+            _commandConsoleOpacity = 0;
+            _commandConsoleHitTestVisible = false;
+            _commandConsoleToggleLabel = "Show CLI activity";
+            _commandConsoleToggleGlyph = "▲";
+        }
         // The browsed provider's own activity is tagged like any other session's, so interleaved
         // lines from ObserveAdditionalProviderActivity (P7, both providers active at once) read
         // consistently regardless of which one happens to be on screen.
@@ -297,6 +314,7 @@ public sealed class MainWindowViewModel : ObservableObject
         CreateFolderCommand = new AsyncCommand(CreateFolderAsync, CanCreateFolder, HandleUnexpectedError);
         ToggleCommandConsoleCommand = new AsyncCommand(ToggleCommandConsoleAsync, onError: HandleUnexpectedError);
         ToggleLocalExplorerPanelCommand = new AsyncCommand(ToggleLocalExplorerPanelAsync, onError: HandleUnexpectedError);
+        ToggleLogFilterCommand = new AsyncCommand(ToggleLogFilterAsync, onError: HandleUnexpectedError);
         DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity, HandleUnexpectedError);
         ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, HandleUnexpectedError);
         ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
@@ -399,6 +417,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand ToggleCommandConsoleCommand { get; }
 
     public AsyncCommand ToggleLocalExplorerPanelCommand { get; }
+
+    public AsyncCommand ToggleLogFilterCommand { get; }
 
     public AsyncCommand DownloadActivityCommand { get; }
 
@@ -814,6 +834,52 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _commandLogText, value);
     }
 
+    /// <summary>
+    /// How many CLI/Graph operations are currently mid-flight, across every active provider
+    /// session — a real count derived from Started/Finished pairs in <see cref="OnActivity"/>,
+    /// unlike <see cref="ActiveCommand"/> (a single label that Task 4's own comment on
+    /// <see cref="OnActivity"/> notes can't represent two concurrent operations correctly). Shown
+    /// in the floating status line while the console is collapsed.
+    /// </summary>
+    public int ActiveOperationCount
+    {
+        get => _activeOperationCount;
+        private set => SetProperty(ref _activeOperationCount, value);
+    }
+
+    /// <summary>The most recent line added to the log, regardless of the search/warnings filter below — always the real last event, not whatever the filter happens to be hiding.</summary>
+    public string? LastLogLine
+    {
+        get => _lastLogLine;
+        private set => SetProperty(ref _lastLogLine, value);
+    }
+
+    /// <summary>Task 4's "Filter: Toggle error/warning-only log views" — matches lines carrying this app's own <c>[warn]</c>/<c>[err]</c>/<c>[fail]</c> markers (see <see cref="OnActivity"/>/<see cref="HandleUnexpectedError"/>).</summary>
+    public bool ShowOnlyWarningsAndErrors
+    {
+        get => _showOnlyWarningsAndErrors;
+        set
+        {
+            if (SetProperty(ref _showOnlyWarningsAndErrors, value))
+            {
+                RefreshCommandLogText();
+            }
+        }
+    }
+
+    /// <summary>Task 4's log search input — a live, case-insensitive substring filter over the buffered lines.</summary>
+    public string LogSearchText
+    {
+        get => _logSearchText;
+        set
+        {
+            if (SetProperty(ref _logSearchText, value))
+            {
+                RefreshCommandLogText();
+            }
+        }
+    }
+
     public string SelectedName
     {
         get => _selectedName;
@@ -951,6 +1017,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 CommandConsoleHitTestVisible = value;
                 CommandConsoleToggleLabel = value ? "Hide CLI activity" : "Show CLI activity";
                 CommandConsoleToggleGlyph = value ? "▼" : "▲";
+                _settings.Update(s => s.ShowCommandConsole = value);
                 RaiseCommandStates();
             }
         }
@@ -2365,6 +2432,12 @@ public sealed class MainWindowViewModel : ObservableObject
         await Task.CompletedTask;
     }
 
+    private async Task ToggleLogFilterAsync()
+    {
+        ShowOnlyWarningsAndErrors = !ShowOnlyWarningsAndErrors;
+        await Task.CompletedTask;
+    }
+
     private void RaiseSortStates()
     {
         OnPropertyChanged(nameof(IsSortedByName));
@@ -2650,6 +2723,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _commandLog.Clear();
         CommandLogText = "No CLI command running.";
         ActiveCommand = "Idle";
+        LastLogLine = null;
         RaiseCommandStates();
         await Task.CompletedTask;
     }
@@ -2673,6 +2747,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             case ActivityKind.Started:
                 Dispatcher.UIThread.Post(() => ActiveCommand = $"[{accountLabel}] {activity.Label}");
+                Dispatcher.UIThread.Post(() => ActiveOperationCount++);
                 QueueCommandLine($"[{accountLabel}] > {activity.Label}");
                 break;
 
@@ -2687,6 +2762,10 @@ public sealed class MainWindowViewModel : ObservableObject
                 // Started. A single "what's active" label can't represent two concurrent
                 // operations correctly — a real per-session indicator is Phase B's job.
                 Dispatcher.UIThread.Post(() => ActiveCommand = "Idle");
+                // Clamped rather than trusting Started/Finished to always balance: a session added
+                // mid-flight (AddBrowsableAccount) only starts observing from that point on, so its
+                // first-ever event could be a Finished with no matching Started counted yet.
+                Dispatcher.UIThread.Post(() => ActiveOperationCount = Math.Max(0, ActiveOperationCount - 1));
                 break;
         }
     }
@@ -2736,7 +2815,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var countBefore = _commandLog.Count;
         _commandLog.AddRange(batch);
-        CommandLogText = _commandLog.Render();
+        LastLogLine = batch[^1];
+        RefreshCommandLogText();
 
         // Only the two activity commands depend on the line count, and only on the empty/non-empty
         // transition. Re-raising all thirteen on every line was pure waste on the UI thread.
@@ -2745,6 +2825,48 @@ public sealed class MainWindowViewModel : ObservableObject
             DownloadActivityCommand.RaiseCanExecuteChanged();
             ClearActivityCommand.RaiseCanExecuteChanged();
         }
+    }
+
+    /// <summary>
+    /// Re-renders <see cref="CommandLogText"/> from the buffer plus whatever the warnings-only
+    /// filter and search box currently ask for — called both when new lines arrive and when either
+    /// filter input changes, so the two stay in sync without keeping a second copy of the text.
+    /// </summary>
+    private void RefreshCommandLogText()
+    {
+        IEnumerable<string> lines = _commandLog.Lines;
+
+        if (_showOnlyWarningsAndErrors)
+        {
+            lines = lines.Where(line => line.Contains("[warn]", StringComparison.Ordinal)
+                || line.Contains("[err]", StringComparison.Ordinal)
+                || line.Contains("[fail]", StringComparison.Ordinal));
+        }
+
+        if (!string.IsNullOrWhiteSpace(_logSearchText))
+        {
+            lines = lines.Where(line => line.Contains(_logSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        CommandLogText = string.Join(Environment.NewLine, lines);
+    }
+
+    /// <summary>
+    /// Adds lines straight to the buffer and re-renders, bypassing QueueCommandLine/FlushCommandLog's
+    /// <c>Dispatcher.UIThread.Post</c>. Internal rather than private for the same reason as
+    /// <see cref="DisplayItems"/>: that Post never completes without a running Avalonia dispatcher,
+    /// so a test that went through the real activity pipeline to get lines into the log would hang.
+    /// </summary>
+    internal void AppendCommandLogLinesForTests(IEnumerable<string> lines)
+    {
+        var list = lines as IReadOnlyList<string> ?? lines.ToList();
+        _commandLog.AddRange(list);
+        if (list.Count > 0)
+        {
+            LastLogLine = list[^1];
+        }
+
+        RefreshCommandLogText();
     }
 
     /// <summary>

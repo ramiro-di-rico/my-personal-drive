@@ -13,6 +13,8 @@
   <Window.KeyBindings>
     <KeyBinding Gesture="Ctrl+OemComma" Command="{Binding ToggleSettingsCommand}" />
     <KeyBinding Gesture="Cmd+OemComma" Command="{Binding ToggleSettingsCommand}" />
+    <KeyBinding Gesture="Ctrl+OemTilde" Command="{Binding ToggleCommandConsoleCommand}" />
+    <KeyBinding Gesture="Cmd+OemTilde" Command="{Binding ToggleCommandConsoleCommand}" />
   </Window.KeyBindings>
   <Window.Styles>
     <!--
@@ -926,25 +928,67 @@
             <TextBlock VerticalAlignment="Center" Text="Loading..." />
           </StackPanel>
 
-          <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
+          <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+            <Grid.Styles>
+              <Style Selector="Button.viewMode.active">
+                <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+              </Style>
+            </Grid.Styles>
             <TextBlock FontSize="16" FontWeight="Bold" Text="CLI activity" />
             <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding ActiveCommand}" />
-            <Button Grid.Column="2"
+            <TextBox Grid.Column="2"
+                      Width="160"
+                      PlaceholderText="Buscar en el log..."
+                      Text="{Binding LogSearchText, Mode=TwoWay}" />
+            <Button Grid.Column="3"
+                    Classes="viewMode"
+                    Classes.active="{Binding ShowOnlyWarningsAndErrors}"
+                    Command="{Binding ToggleLogFilterCommand}"
+                    ToolTip.Tip="Mostrar solo advertencias y errores">
+              <Path Classes="icon" Data="{StaticResource IconWarning}" />
+            </Button>
+            <Button Grid.Column="4"
                     Command="{Binding ToggleCommandConsoleCommand}"
                     ToolTip.Tip="{Binding CommandConsoleToggleLabel}">
               <TextBlock Text="{Binding CommandConsoleToggleGlyph}" />
             </Button>
-            <Button Grid.Column="3"
+            <Button Grid.Column="5"
                     Command="{Binding DownloadActivityCommand}"
                     ToolTip.Tip="Download activity log">
               <Path Classes="icon" Data="{StaticResource IconSave}" />
             </Button>
-            <Button Grid.Column="4"
+            <Button Grid.Column="6"
                     Command="{Binding ClearActivityCommand}"
                     ToolTip.Tip="Clear activity log">
               <Path Classes="icon" Data="{StaticResource IconClear}" />
             </Button>
           </Grid>
+
+          <!-- Persistent floating status line (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 4): a real
+               in-flight operation count and the last log line, visible only while the console body
+               below is collapsed. No transfer-rate figure — nothing in the activity feed reports
+               bytes/sec today, and inventing one would be exactly what AGENTS.md's "Never invent
+               CLI output shapes" warns against. -->
+          <StackPanel Orientation="Horizontal"
+                      Spacing="8"
+                      IsVisible="{Binding !IsCommandConsoleVisible}">
+            <TextBlock VerticalAlignment="Center"
+                       FontSize="12"
+                       Opacity="0.8"
+                       Text="{Binding ActiveOperationCount, StringFormat='{}{0} operación(es) activa(s)'}" />
+            <TextBlock VerticalAlignment="Center"
+                       FontSize="12"
+                       Opacity="0.5"
+                       Text="·" />
+            <TextBlock VerticalAlignment="Center"
+                       FontSize="12"
+                       Opacity="0.7"
+                       TextTrimming="CharacterEllipsis"
+                       Text="{Binding LastLogLine}"
+                       IsVisible="{Binding LastLogLine, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+
           <Border MaxHeight="{Binding CommandConsoleMaxHeight}"
                   Opacity="{Binding CommandConsoleOpacity}"
                   IsHitTestVisible="{Binding CommandConsoleHitTestVisible}"

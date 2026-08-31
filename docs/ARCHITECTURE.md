@@ -411,6 +411,12 @@ Central state. Key pieces:
   (no command, same pattern as `DefaultSyncFolder`/`BandwidthLimitKbps`).
 - Console block: `_commandLogLines` (ring buffer of 200), `CommandLogText`,
   `ActiveCommand`, and animation properties (`CommandConsoleMaxHeight/Opacity/HitTestVisible/ToggleLabel/Glyph`).
+  Collapse state persists (`AppSettings.ShowCommandConsole`, `Ctrl/Cmd+~`). `ShowOnlyWarningsAndErrors`/
+  `LogSearchText` re-render `CommandLogText` from `CommandLogBuffer.Lines` through `RefreshCommandLogText`
+  rather than keeping a second filtered copy; `ActiveOperationCount` is a real Started/Finished-pair
+  count (not the fabricated "transfer rate" Task 4's wishlist asks for — nothing in the activity feed
+  reports bytes/sec, and AGENTS.md rules out inventing a shape for it) and `LastLogLine` is the most
+  recent buffered line, both shown in a floating status line while the console is collapsed.
 
 **Extension points toward the View** — the VM doesn't know about Avalonia except for
 `Dispatcher`; dialogs are injected as delegates the View sets in `OnDataContextChanged`:

@@ -87,6 +87,9 @@ public sealed class AppSettings
     /// <summary>Whether the local filesystem pane is expanded. Toggled from the header; the persisted value is also next launch's default.</summary>
     public bool ShowLocalExplorerPanel { get; set; } = true;
 
+    /// <summary>Whether the bottom CLI activity panel is expanded. See docs/INTERFACE_IMPROVEMENT_PLAN.md Task 4.</summary>
+    public bool ShowCommandConsole { get; set; } = true;
+
     public string ThemeOrDefault()
         => string.Equals(Theme, "Light", StringComparison.OrdinalIgnoreCase) ? "Light"
          : string.Equals(Theme, "Dark", StringComparison.OrdinalIgnoreCase) ? "Dark"

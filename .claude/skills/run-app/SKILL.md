@@ -20,11 +20,30 @@ on Linux `~/.config/MyPersonalDrive/`:
 - the SQLite cache/state DBs
 
 To reset to a first-launch state, move that folder aside (don't delete it — the user may have a
-real CLI path in there):
+real CLI path in there). **Before moving it**, check for a leftover backup from a previous
+session that never got restored — a stale `~/.config/MyPersonalDrive.bak*` sitting next to a
+*live* `settings.json` that points at a stub path (`/tmp/...`) means an earlier restore silently
+failed and the user's real config is one directory over, not the one currently live. Restore that
+first, and never move a real config over a backup slot that's already occupied — pick a fresh,
+timestamped name instead of reusing `.bak`:
 
 ```bash
-mv ~/.config/MyPersonalDrive ~/.config/MyPersonalDrive.bak
+mv ~/.config/MyPersonalDrive ~/.config/MyPersonalDrive.bak-$(date +%s)
 ```
+
+**After the session, verify the restore actually worked — check content, not just that the file
+exists.** A `mv` can partially fail, or a later step in the same command chain can silently not
+run, leaving the stub config live with a backup directory sitting unused next to it:
+
+```bash
+grep -q '"CliPath": *"/tmp/' ~/.config/MyPersonalDrive/settings.json && echo "STILL STUBBED — restore failed"
+```
+
+**If the app is already running when you start**, don't `mv` its config out from under it and
+assume the swap takes effect — on Linux the running process keeps writing to the old inode via
+its already-open file handle regardless of what the path now points at, so the live app won't
+see a restored config (or notice a broken one) until it's restarted. Either ask the user to
+close it first, or clearly tell them afterward that a restart is needed for the fix to apply.
 
 ## Stub CLI (no Proton account needed)
 
@@ -74,4 +93,6 @@ than implying a visual check.
 ## Cleanup
 
 Remove `/tmp/fake-proton-drive` and `/tmp/fake-listing.json`, and restore any settings folder you
-moved aside.
+moved aside — then verify the restore per the check above, in the same turn, before reporting the
+test as done. Don't just check that `~/.config/MyPersonalDrive/settings.json` exists; a stub
+config existing at that path passes an existence check just as well as a real one does.

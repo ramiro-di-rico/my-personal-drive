@@ -447,7 +447,10 @@
                    Classes="driveListing"
                    ItemsSource="{Binding RootItems}"
                    IsVisible="{Binding IsListView}"
-                   KeyDown="OnListingKeyDown">
+                   KeyDown="OnListingKeyDown"
+                   DragDrop.AllowDrop="True"
+                   DragDrop.DragOver="OnCloudListingDragOver"
+                   DragDrop.Drop="OnCloudListingDrop">
             <ListBox.ItemTemplate>
               <DataTemplate x:DataType="vm:DriveNodeViewModel">
                 <Grid Classes="hoverGroup"
@@ -728,7 +731,11 @@
             <ListBox Grid.Row="1" Classes="driveListing" ItemsSource="{Binding Items}">
               <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="local:LocalNodeViewModel">
-                  <Button Classes="hoverGroup" Command="{Binding RowCommand}" HorizontalContentAlignment="Stretch">
+                  <Button Classes="hoverGroup"
+                          Command="{Binding RowCommand}"
+                          HorizontalContentAlignment="Stretch"
+                          PointerPressed="OnLocalRowPointerPressed"
+                          PointerMoved="OnLocalRowPointerMoved">
                     <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
                       <Path Grid.Column="0"
                             Classes="icon"

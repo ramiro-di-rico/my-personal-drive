@@ -1510,31 +1510,18 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var strategy = UploadConflictStrategy.None;
-        if (RequestConflictStrategyAsync is not null)
+        var strategy = await ResolveUploadConflictStrategyAsync(files, CurrentPath);
+        if (strategy is null)
         {
-            var remoteFileNames = RootItems.Select(ni => ni.Item.Name).ToHashSet();
-            var conflictingFiles = files
-                .Select(Path.GetFileName)
-                .Where(name => name is not null && remoteFileNames.Contains(name))
-                .ToList();
-
-            if (conflictingFiles.Count > 0)
-            {
-                strategy = await RequestConflictStrategyAsync(conflictingFiles!);
-                if (strategy == UploadConflictStrategy.None)
-                {
-                    StatusMessage = "Upload cancelled.";
-                    return;
-                }
-            }
+            StatusMessage = "Upload cancelled.";
+            return;
         }
 
         try
         {
             IsLoading = true;
             StatusMessage = $"Uploading {files.Count} file(s) to {CurrentPath}...";
-            await _provider.Operations.UploadFilesAsync(files, CurrentPath, strategy);
+            await _provider.Operations.UploadFilesAsync(files, CurrentPath, strategy.Value);
             StatusMessage = $"Uploaded {files.Count} file(s) to {CurrentPath}.";
             await InvalidateDeepMetricsAsync(CurrentPath);
 
@@ -1547,6 +1534,71 @@ public sealed class MainWindowViewModel : ObservableObject
         finally
         {
             IsLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// Shared by <see cref="UploadAsync"/> and drag-and-drop uploads (<see
+    /// cref="HandleLocalFilesDroppedAsync"/>): checks <paramref name="localPaths"/>' names against
+    /// what's already at <paramref name="targetPath"/>, and prompts once for the whole batch via
+    /// <see cref="RequestConflictStrategyAsync"/> if any collide. Returns null if the user cancelled
+    /// the prompt (distinct from <see cref="UploadConflictStrategy.None"/>, which also means "no
+    /// conflicts to resolve" when nothing collided in the first place).
+    ///
+    /// The conflict check itself only covers <paramref name="targetPath"/> when it's the folder
+    /// already loaded in memory (<see cref="RootItems"/>) — a drop onto a different folder row skips
+    /// it rather than paying for an extra listing call mid-drag; the CLI's own default handling
+    /// still applies there.
+    /// </summary>
+    private async Task<UploadConflictStrategy?> ResolveUploadConflictStrategyAsync(IReadOnlyList<string> localPaths, string targetPath)
+    {
+        if (RequestConflictStrategyAsync is null || !string.Equals(targetPath, CurrentPath, StringComparison.Ordinal))
+        {
+            return UploadConflictStrategy.None;
+        }
+
+        var remoteFileNames = RootItems.Select(ni => ni.Item.Name).ToHashSet();
+        var conflictingFiles = localPaths
+            .Select(Path.GetFileName)
+            .Where(name => name is not null && remoteFileNames.Contains(name))
+            .ToList();
+
+        if (conflictingFiles.Count == 0)
+        {
+            return UploadConflictStrategy.None;
+        }
+
+        var strategy = await RequestConflictStrategyAsync(conflictingFiles!);
+        return strategy == UploadConflictStrategy.None ? null : strategy;
+    }
+
+    /// <summary>
+    /// A local pane row (or rows) dropped onto the cloud pane (docs/INTERFACE_IMPROVEMENT_PLAN.md
+    /// Task 5, Phase 2) — the code-behind drag/drop handlers translate the gesture into this call
+    /// and do nothing else, per the MVVM rule that view-model business logic stays out of
+    /// code-behind. Routes through <see cref="TransferQueue"/> rather than blocking on
+    /// <see cref="IsLoading"/> the way the toolbar's own <see cref="UploadCommand"/> does — a drag
+    /// shouldn't freeze every other <c>IsLoading</c>-gated control in the window.
+    /// </summary>
+    public async Task HandleLocalFilesDroppedAsync(IReadOnlyList<string> localPaths, string targetPath)
+    {
+        if (localPaths.Count == 0)
+        {
+            return;
+        }
+
+        var strategy = await ResolveUploadConflictStrategyAsync(localPaths, targetPath);
+        if (strategy is null)
+        {
+            StatusMessage = "Upload cancelled.";
+            return;
+        }
+
+        await TransferQueue.EnqueueUpload(_provider.Operations, localPaths, targetPath, strategy.Value);
+
+        if (string.Equals(targetPath, CurrentPath, StringComparison.Ordinal))
+        {
+            _ = RefreshAsync();
         }
     }
 

@@ -1,10 +1,13 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.ViewModels;
+using MyPersonalDrive.ViewModels.Local;
 using MyPersonalDrive.ViewModels.Sync;
 
 namespace MyPersonalDrive.Views;
@@ -90,6 +93,101 @@ public partial class MainWindow : Window
     /// </summary>
     private void ApplyLocalExplorerPanelColumnWidth(bool visible)
         => ExplorerColumnsGrid.ColumnDefinitions[2].Width = visible ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+
+    // In-process only — never crosses the app boundary, so an arbitrary string identifier (not a
+    // registered clipboard/OS format) is fine as the payload's identity.
+    private static readonly DataFormat<string[]> LocalPathsDataFormat = DataFormat.CreateInProcessFormat<string[]>("application/x-mypersonaldrive-local-paths");
+
+    // How far the pointer has to move, while pressed, before a local-pane row press is treated as
+    // a drag rather than the click that navigates into a folder (docs/INTERFACE_IMPROVEMENT_PLAN.md
+    // Task 5 Phase 2). Below this, PointerReleased still reaches the row's own Button normally.
+    private const double DragStartThresholdPixels = 4;
+
+    private Point? _localDragStartPoint;
+    private LocalNodeViewModel? _localDragCandidate;
+    private PointerPressedEventArgs? _localDragPressedArgs;
+
+    private void OnLocalRowPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is Control { DataContext: LocalNodeViewModel node } && e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        {
+            _localDragStartPoint = e.GetPosition(null);
+            _localDragCandidate = node;
+            _localDragPressedArgs = e;
+        }
+    }
+
+    /// <summary>
+    /// Both files and folders can be dragged — <c>filesystem upload</c> already accepts folder
+    /// paths (its <c>-d</c>/folder-conflict-strategy flag exists for exactly this), unlike the
+    /// row's own manual <c>DownloadCommand</c>, which is folder-restricted for an unrelated reason
+    /// (no UI need for it before now, not a CLI limitation — see docs/ARCHITECTURE.md §9 item 11).
+    /// </summary>
+    private async void OnLocalRowPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_localDragStartPoint is not { } start || _localDragCandidate is not { } node || _localDragPressedArgs is not { } pressedArgs)
+        {
+            return;
+        }
+
+        if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        {
+            _localDragStartPoint = null;
+            _localDragCandidate = null;
+            _localDragPressedArgs = null;
+            return;
+        }
+
+        var current = e.GetPosition(null);
+        var dx = current.X - start.X;
+        var dy = current.Y - start.Y;
+        if (Math.Sqrt(dx * dx + dy * dy) < DragStartThresholdPixels)
+        {
+            return;
+        }
+
+        _localDragStartPoint = null;
+        _localDragCandidate = null;
+        _localDragPressedArgs = null;
+
+        var transfer = new DataTransfer();
+        transfer.Add(DataTransferItem.Create(LocalPathsDataFormat, new[] { node.Item.Path }));
+        await DragDrop.DoDragDropAsync(pressedArgs, transfer, DragDropEffects.Copy);
+    }
+
+    private void OnCloudListingDragOver(object? sender, DragEventArgs e)
+        => e.DragEffects = e.DataTransfer.Contains(LocalPathsDataFormat) ? DragDropEffects.Copy : DragDropEffects.None;
+
+    private async void OnCloudListingDrop(object? sender, DragEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        if (e.DataTransfer.TryGetValue(LocalPathsDataFormat) is not { Length: > 0 } localPaths)
+        {
+            return;
+        }
+
+        var targetPath = ResolveCloudDropTargetPath(e, viewModel);
+        await viewModel.HandleLocalFilesDroppedAsync(localPaths, targetPath);
+    }
+
+    /// <summary>The folder row under the drop point, if any — otherwise the currently browsed folder.</summary>
+    private static string ResolveCloudDropTargetPath(DragEventArgs e, MainWindowViewModel viewModel)
+    {
+        if (e.Source is Visual visual)
+        {
+            var listBoxItem = visual.FindAncestorOfType<ListBoxItem>(includeSelf: true);
+            if (listBoxItem?.DataContext is DriveNodeViewModel { IsFolder: true } node)
+            {
+                return node.Path;
+            }
+        }
+
+        return viewModel.CurrentPath;
+    }
 
     private async void BrowseCliPath(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {

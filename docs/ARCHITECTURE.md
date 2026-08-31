@@ -417,6 +417,15 @@ Central state. Key pieces:
   count (not the fabricated "transfer rate" Task 4's wishlist asks for — nothing in the activity feed
   reports bytes/sec, and AGENTS.md rules out inventing a shape for it) and `LastLogLine` is the most
   recent buffered line, both shown in a floating status line while the console is collapsed.
+- `TransferQueue : TransferQueueViewModel` — the drag-and-drop transfer queue
+  (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5), sequential and cancellable, shown in the Status
+  sidebar when non-empty. `HandleLocalFilesDroppedAsync(localPaths, targetPath)` is the one
+  entry point code-behind's drag/drop handlers call — it resolves the upload-conflict strategy
+  (reusing `UploadAsync`'s own check, factored out as `ResolveUploadConflictStrategyAsync`) and
+  hands off to the queue. Drag-and-drop mechanics themselves (`OnLocalRowPointerPressed/Moved`,
+  `OnCloudListingDragOver/Drop`) live entirely in `MainWindow.axaml.cs`, per the same "no Avalonia
+  types in the VM" rule as everything else — the row Button's own click still works normally
+  below a small pixel threshold; only a real drag (past it) calls `DragDrop.DoDragDropAsync`.
 
 **Extension points toward the View** — the VM doesn't know about Avalonia except for
 `Dispatcher`; dialogs are injected as delegates the View sets in `OnDataContextChanged`:

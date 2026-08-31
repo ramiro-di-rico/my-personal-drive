@@ -97,4 +97,51 @@ public sealed class AppSettings
         => Enum.TryParse<Providers.ProviderId>(ActiveProvider, ignoreCase: true, out var id)
             ? id
             : Providers.ProviderId.Proton;
+
+    /// <summary>
+    /// The single place that knows which of the per-provider bool/label field pairs above backs a
+    /// given <see cref="Providers.ProviderId"/> — callers (the header's provider list, sign-in/out,
+    /// account switching) all need the same mapping and used to each re-derive it independently.
+    /// </summary>
+    public bool IsProviderAuthenticated(Providers.ProviderId id) => id switch
+    {
+        Providers.ProviderId.OneDrive => IsOneDriveAuthenticated,
+        Providers.ProviderId.GoogleDrive => IsGoogleDriveAuthenticated,
+        Providers.ProviderId.Nextcloud => IsNextcloudAuthenticated,
+        Providers.ProviderId.S3 => IsS3Authenticated,
+        _ => IsAuthenticated
+    };
+
+    public void SetProviderAuthenticated(Providers.ProviderId id, bool value)
+    {
+        switch (id)
+        {
+            case Providers.ProviderId.OneDrive: IsOneDriveAuthenticated = value; break;
+            case Providers.ProviderId.GoogleDrive: IsGoogleDriveAuthenticated = value; break;
+            case Providers.ProviderId.Nextcloud: IsNextcloudAuthenticated = value; break;
+            case Providers.ProviderId.S3: IsS3Authenticated = value; break;
+            default: IsAuthenticated = value; break;
+        }
+    }
+
+    public string ProviderAccountLabel(Providers.ProviderId id) => id switch
+    {
+        Providers.ProviderId.OneDrive => OneDriveAccountLabel,
+        Providers.ProviderId.GoogleDrive => GoogleDriveAccountLabel,
+        Providers.ProviderId.Nextcloud => NextcloudAccountLabel,
+        Providers.ProviderId.S3 => S3AccountLabel,
+        _ => ProtonAccountLabel
+    };
+
+    public void SetProviderAccountLabel(Providers.ProviderId id, string label)
+    {
+        switch (id)
+        {
+            case Providers.ProviderId.OneDrive: OneDriveAccountLabel = label; break;
+            case Providers.ProviderId.GoogleDrive: GoogleDriveAccountLabel = label; break;
+            case Providers.ProviderId.Nextcloud: NextcloudAccountLabel = label; break;
+            case Providers.ProviderId.S3: S3AccountLabel = label; break;
+            default: ProtonAccountLabel = label; break;
+        }
+    }
 }

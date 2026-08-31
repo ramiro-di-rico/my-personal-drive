@@ -123,7 +123,11 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         Assert.Equal("Online", sut.ConnectionStatus);
 
         sut.StatusMessage = "Rate limit exceeded (HTTP 429). Please wait.";
-        // Setting StatusMessage cleared IsWarning, so simulate warning state
+        // Setting StatusMessage cleared IsWarning; telemetry classifies off the typed DriveErrorKind
+        // a real DriveException(Kind: RateLimited) would have left in _lastErrorKind, not off this
+        // message text, so simulate both directly.
+        typeof(MainWindowViewModel).GetField("_lastErrorKind", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(sut, DriveErrorKind.RateLimited);
         typeof(MainWindowViewModel).GetProperty("IsWarning", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .SetValue(sut, true);
         sut.UpdateConnectionTelemetry();

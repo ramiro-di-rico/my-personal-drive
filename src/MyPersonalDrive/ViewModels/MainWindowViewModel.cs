@@ -125,6 +125,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _connectionStatusDescription = "Connected";
     private long _quotaUsedBytes;
     private long _quotaTotalBytes = 500L * 1024 * 1024 * 1024;
+    private DriveErrorKind _lastErrorKind = DriveErrorKind.Unknown;
 
     /// <summary>
     /// What the settings view's provider picker and header dropdown list — see docs/PLAN-CLOUD-PROVIDERS.md P5/P6.
@@ -138,37 +139,20 @@ public sealed class MainWindowViewModel : ObservableObject
             var available = (_providerCatalog ?? new ProviderCatalog()).Available;
             return available.Select(desc =>
             {
-                var identity = desc.Id switch
-                {
-                    ProviderId.Proton => !string.IsNullOrWhiteSpace(settings.ProtonAccountLabel)
-                        ? settings.ProtonAccountLabel
-                        : ((_provider.Id == ProviderId.Proton ? _isAuthenticated : settings.IsAuthenticated) ? "user@proton.me" : null),
-                    ProviderId.OneDrive => _provider is OneDriveProvider oneDrive && oneDrive.Auth is GraphAuthenticator { AccountLabel: { } label } && label != "Not signed in."
-                        ? label
-                        : (!string.IsNullOrWhiteSpace(settings.OneDriveAccountLabel)
-                            ? settings.OneDriveAccountLabel
-                            : ((_provider.Id == ProviderId.OneDrive ? _isAuthenticated : settings.IsOneDriveAuthenticated) ? "user@outlook.com" : null)),
-                    ProviderId.GoogleDrive => !string.IsNullOrWhiteSpace(settings.GoogleDriveAccountLabel)
-                        ? settings.GoogleDriveAccountLabel
-                        : ((settings.IsGoogleDriveAuthenticated || (_provider.Id == ProviderId.GoogleDrive && _isAuthenticated)) ? "user@gmail.com" : null),
-                    ProviderId.Nextcloud => !string.IsNullOrWhiteSpace(settings.NextcloudAccountLabel)
-                        ? settings.NextcloudAccountLabel
-                        : ((settings.IsNextcloudAuthenticated || (_provider.Id == ProviderId.Nextcloud && _isAuthenticated)) ? "user@nextcloud.local" : null),
-                    ProviderId.S3 => !string.IsNullOrWhiteSpace(settings.S3AccountLabel)
-                        ? settings.S3AccountLabel
-                        : ((settings.IsS3Authenticated || (_provider.Id == ProviderId.S3 && _isAuthenticated)) ? "s3-bucket-primary" : null),
-                    _ => null
-                };
+                // The active provider's live in-memory flag is fresher than settings (which may not
+                // have been persisted yet mid-session); every other provider is read from settings.
+                var isAuth = desc.Id == _provider.Id ? _isAuthenticated : settings.IsProviderAuthenticated(desc.Id);
 
-                var isAuth = desc.Id switch
-                {
-                    ProviderId.Proton => _provider.Id == ProviderId.Proton ? _isAuthenticated : settings.IsAuthenticated,
-                    ProviderId.OneDrive => _provider.Id == ProviderId.OneDrive ? _isAuthenticated : settings.IsOneDriveAuthenticated,
-                    ProviderId.GoogleDrive => settings.IsGoogleDriveAuthenticated || (_provider.Id == ProviderId.GoogleDrive && _isAuthenticated),
-                    ProviderId.Nextcloud => settings.IsNextcloudAuthenticated || (_provider.Id == ProviderId.Nextcloud && _isAuthenticated),
-                    ProviderId.S3 => settings.IsS3Authenticated || (_provider.Id == ProviderId.S3 && _isAuthenticated),
-                    _ => false
-                };
+                // OneDrive's account label lives on its live GraphAuthenticator, not settings, until
+                // AuthenticateAsync persists it — settings can lag behind what's actually signed in.
+                var liveLabel = _provider is OneDriveProvider { Auth: GraphAuthenticator { AccountLabel: { } label } } && label != "Not signed in."
+                    ? label
+                    : null;
+
+                var persistedLabel = settings.ProviderAccountLabel(desc.Id);
+                var identity = liveLabel
+                    ?? (!string.IsNullOrWhiteSpace(persistedLabel) ? persistedLabel : null)
+                    ?? (isAuth ? PlaceholderIdentity(desc.Id) : null);
 
                 return desc with
                 {
@@ -186,7 +170,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (value is not null && value.Id != _provider.Id)
             {
-                _ = SwitchBrowserAccountAsync(value.Id);
+                _ = SwitchProviderAndReportErrorsAsync(value.Id);
             }
         }
     }
@@ -261,7 +245,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // (verified: docs/PLAN-CLOUD-PROVIDERS.md Appendix A), which is exactly the "path no
         // longer exists" warning this was hardcoded into before a second provider existed to catch
         // it.
-        _rootPath = _provider.Id == ProviderId.OneDrive ? "/" : "/my-files";
+        _rootPath = _provider.Id == ProviderId.Proton ? "/my-files" : "/";
         _currentPath = _rootPath;
         _cacheService = cacheService;
         _settings = settings;
@@ -275,7 +259,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // path + version vs. sign-in/out), so there is one bool per provider in AppSettings but
         // only ever one "the active provider is signed in" flag in the VM at a time. Switching
         // providers requires a restart (§2.7), so which field to use never changes mid-session.
-        _isAuthenticated = _provider.Id == ProviderId.OneDrive ? appSettings.IsOneDriveAuthenticated : appSettings.IsAuthenticated;
+        _isAuthenticated = appSettings.IsProviderAuthenticated(_provider.Id);
         // Set through the field, not the property: the property persists, and the constructor has
         // no business writing settings.json back on every launch.
         _viewMode = appSettings.ViewModeOrDefault();
@@ -1150,39 +1134,16 @@ public sealed class MainWindowViewModel : ObservableObject
             IsAuthenticated = true;
             _settings.Update(settings =>
             {
-                switch (_provider.Id)
+                settings.SetProviderAuthenticated(_provider.Id, true);
+                var liveLabel = _provider switch
                 {
-                    case ProviderId.Proton:
-                        settings.IsAuthenticated = true;
-                        break;
-                    case ProviderId.OneDrive:
-                        settings.IsOneDriveAuthenticated = true;
-                        if (_provider is OneDriveProvider oneDrive && oneDrive.Auth is GraphAuthenticator graphAuth && graphAuth.AccountLabel is not null)
-                        {
-                            settings.OneDriveAccountLabel = graphAuth.AccountLabel;
-                        }
-                        break;
-                    case ProviderId.GoogleDrive:
-                        settings.IsGoogleDriveAuthenticated = true;
-                        if (_provider is GenericCloudDriveProvider g && g.AccountIdentity is not null)
-                        {
-                            settings.GoogleDriveAccountLabel = g.AccountIdentity;
-                        }
-                        break;
-                    case ProviderId.Nextcloud:
-                        settings.IsNextcloudAuthenticated = true;
-                        if (_provider is GenericCloudDriveProvider n && n.AccountIdentity is not null)
-                        {
-                            settings.NextcloudAccountLabel = n.AccountIdentity;
-                        }
-                        break;
-                    case ProviderId.S3:
-                        settings.IsS3Authenticated = true;
-                        if (_provider is GenericCloudDriveProvider s && s.AccountIdentity is not null)
-                        {
-                            settings.S3AccountLabel = s.AccountIdentity;
-                        }
-                        break;
+                    OneDriveProvider { Auth: GraphAuthenticator { AccountLabel: { } oneDriveLabel } } => oneDriveLabel,
+                    GenericCloudDriveProvider { AccountIdentity: { } identity } => identity,
+                    _ => null
+                };
+                if (liveLabel is not null)
+                {
+                    settings.SetProviderAccountLabel(_provider.Id, liveLabel);
                 }
             });
             UpdateConnectionTelemetry();
@@ -1210,27 +1171,7 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusMessage = $"Logging out from {_provider.DisplayName}...";
             await _provider.Auth.LogoutAsync();
             IsAuthenticated = false;
-            _settings.Update(settings =>
-            {
-                switch (_provider.Id)
-                {
-                    case ProviderId.Proton:
-                        settings.IsAuthenticated = false;
-                        break;
-                    case ProviderId.OneDrive:
-                        settings.IsOneDriveAuthenticated = false;
-                        break;
-                    case ProviderId.GoogleDrive:
-                        settings.IsGoogleDriveAuthenticated = false;
-                        break;
-                    case ProviderId.Nextcloud:
-                        settings.IsNextcloudAuthenticated = false;
-                        break;
-                    case ProviderId.S3:
-                        settings.IsS3Authenticated = false;
-                        break;
-                }
-            });
+            _settings.Update(settings => settings.SetProviderAuthenticated(_provider.Id, false));
             UpdateConnectionTelemetry();
             UpdateQuotaMetrics();
             OnPropertyChanged(nameof(AvailableProviders));
@@ -1246,6 +1187,24 @@ public sealed class MainWindowViewModel : ObservableObject
         finally
         {
             IsLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="SwitchBrowserAccountAsync"/>, fire-and-forget from a property setter (the header
+    /// ComboBox's <c>SelectedItem</c> binding has nowhere to await a <see cref="Task"/>) but still
+    /// routed through <see cref="HandleUnexpectedError"/> like every other command, instead of
+    /// leaving a thrown exception unobserved and the UI silently stuck mid-switch.
+    /// </summary>
+    private async Task SwitchProviderAndReportErrorsAsync(ProviderId id)
+    {
+        try
+        {
+            await SwitchBrowserAccountAsync(id);
+        }
+        catch (Exception ex)
+        {
+            HandleUnexpectedError(ex);
         }
     }
 
@@ -1292,15 +1251,10 @@ public sealed class MainWindowViewModel : ObservableObject
         SyncPanel.GetRemoteFolderChildren = _provider.Operations.ListFolderAsync;
         SyncPanel.SetActiveAccount(_provider.DisplayName);
         
+        // Re-read fresh rather than trust the field left over from the previous account — it can
+        // otherwise go stale the moment auth changes for the account not currently on screen.
         var currentSettings = _settings.Load();
-        IsAuthenticated = _provider.Id switch
-        {
-            ProviderId.OneDrive => currentSettings.IsOneDriveAuthenticated,
-            ProviderId.GoogleDrive => currentSettings.IsGoogleDriveAuthenticated || (_provider is GenericCloudDriveProvider g && g.IsAuthenticated),
-            ProviderId.Nextcloud => currentSettings.IsNextcloudAuthenticated || (_provider is GenericCloudDriveProvider n && n.IsAuthenticated),
-            ProviderId.S3 => currentSettings.IsS3Authenticated || (_provider is GenericCloudDriveProvider s && s.IsAuthenticated),
-            _ => currentSettings.IsAuthenticated
-        };
+        IsAuthenticated = currentSettings.IsProviderAuthenticated(_provider.Id);
 
         // A deep-scan histogram belongs to one specific folder on one specific account — carrying
         // it over to a different account's (unrelated) folder would show buckets for content that
@@ -2021,6 +1975,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private void HandleLoadError(string path, InvalidOperationException ex)
     {
         var kind = (ex as DriveException)?.Kind ?? DriveErrorKind.Unknown;
+        _lastErrorKind = kind;
 
         if (kind == DriveErrorKind.NotFound)
         {
@@ -2222,14 +2177,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _settings.Update(settings =>
         {
             settings.CliPath = CliPath;
-            if (_provider.Id == ProviderId.OneDrive)
-            {
-                settings.IsOneDriveAuthenticated = IsAuthenticated;
-            }
-            else
-            {
-                settings.IsAuthenticated = IsAuthenticated;
-            }
+            settings.SetProviderAuthenticated(_provider.Id, IsAuthenticated);
 
             settings.ViewMode = ViewMode.ToString();
             settings.SortKey = SortKey.ToString();
@@ -2248,7 +2196,7 @@ public sealed class MainWindowViewModel : ObservableObject
             _connectionStatusKind = "Disconnected";
             _connectionStatusDescription = $"Disconnected — {_provider.DisplayName} not authenticated.";
         }
-        else if (_isWarning && (_statusMessage.Contains("Rate limit", StringComparison.OrdinalIgnoreCase) || _statusMessage.Contains("429", StringComparison.OrdinalIgnoreCase)))
+        else if (_isWarning && _lastErrorKind == DriveErrorKind.RateLimited)
         {
             _connectionStatus = "Rate-Limited";
             _connectionStatusKind = "RateLimited";
@@ -2291,7 +2239,13 @@ public sealed class MainWindowViewModel : ObservableObject
             _ => 500L * 1024 * 1024 * 1024 // 500 GB (Proton)
         };
 
-        _quotaUsedBytes = _loadedItems.Where(i => !i.IsFolder && i.Size.HasValue).Sum(i => i.Size!.Value);
+        // Only the root listing stands in for "account usage" here — there's no real quota API on
+        // the provider seam yet, so this is an approximation. Recomputing it from whatever subfolder
+        // is currently browsed would make the gauge jump to near-zero on every navigation.
+        if (_currentPath == _rootPath)
+        {
+            _quotaUsedBytes = _loadedItems.Where(i => !i.IsFolder && i.Size.HasValue).Sum(i => i.Size!.Value);
+        }
 
         OnPropertyChanged(nameof(QuotaUsedBytes));
         OnPropertyChanged(nameof(QuotaTotalBytes));
@@ -2757,9 +2711,13 @@ public sealed class MainWindowViewModel : ObservableObject
         });
     }
 
-    private static string FormatDriveError(string path, Exception ex)
+    // Records the kind alongside formatting the message so callers like UpdateConnectionTelemetry
+    // can switch on the shared DriveErrorKind taxonomy instead of pattern-matching the human-readable
+    // StatusMessage text it produces (AGENTS.md: "Errors are typed").
+    private string FormatDriveError(string path, Exception ex)
     {
         var kind = (ex as DriveException)?.Kind ?? DriveErrorKind.Unknown;
+        _lastErrorKind = kind;
 
         if (kind == DriveErrorKind.NotAuthenticated)
         {
@@ -2775,6 +2733,16 @@ public sealed class MainWindowViewModel : ObservableObject
 
         return $"Failed to load {path}: {ex.Message}";
     }
+
+    private static string? PlaceholderIdentity(ProviderId id) => id switch
+    {
+        ProviderId.Proton => "user@proton.me",
+        ProviderId.OneDrive => "user@outlook.com",
+        ProviderId.GoogleDrive => "user@gmail.com",
+        ProviderId.Nextcloud => "user@nextcloud.local",
+        ProviderId.S3 => "s3-bucket-primary",
+        _ => null
+    };
 
     private static string GetParentPath(string path)
     {

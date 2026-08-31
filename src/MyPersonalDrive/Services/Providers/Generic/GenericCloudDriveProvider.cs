@@ -77,6 +77,34 @@ public sealed class GenericCloudDriveProvider : ICloudDriveProvider, IDriveOpera
 
     public bool IsLocalNameMappableRemotely(string name) => !string.IsNullOrWhiteSpace(name);
 
+    /// <summary>
+    /// Every real operation below throws this instead of fabricating a result: nothing behind this
+    /// provider talks to an actual Google Drive/Nextcloud/S3 backend yet, and returning fake listings
+    /// or silently no-op'ing uploads/deletes would let a user configure a sync pair against a
+    /// "folder" that doesn't exist and never will (AGENTS.md: "Never invent CLI output shapes").
+    /// </summary>
+    private DriveException NotImplemented(string operation) => new(
+        commandText: nameof(GenericCloudDriveProvider),
+        exitCode: -1,
+        stdout: string.Empty,
+        stderr: string.Empty,
+        message: $"{_displayName} isn't connected to a real backend yet — {operation} isn't implemented.",
+        kind: DriveErrorKind.Unknown);
+
+    private void EnsureAuthenticated()
+    {
+        if (!_isAuthenticated)
+        {
+            throw new DriveException(
+                commandText: nameof(GenericCloudDriveProvider),
+                exitCode: -1,
+                stdout: string.Empty,
+                stderr: string.Empty,
+                message: $"Authentication required for {_displayName}. Please sign in to access files.",
+                kind: DriveErrorKind.NotAuthenticated);
+        }
+    }
+
     public Task AuthenticateAsync(CancellationToken cancellationToken = default)
     {
         _isAuthenticated = true;
@@ -104,42 +132,14 @@ public sealed class GenericCloudDriveProvider : ICloudDriveProvider, IDriveOpera
 
     public Task<IReadOnlyList<DriveItem>> ListFolderAsync(string path, CancellationToken cancellationToken = default)
     {
-        if (!_isAuthenticated)
-        {
-            throw new InvalidOperationException($"Authentication required for {_displayName}. Please sign in to access files.");
-        }
-
-        var normalized = string.IsNullOrWhiteSpace(path) ? "/" : path;
-        IReadOnlyList<DriveItem> items =
-        [
-            new DriveItem(
-                Path: Combine(normalized, "Documents"),
-                Name: "Documents",
-                IsFolder: true,
-                Size: 0,
-                ModifiedAt: DateTimeOffset.UtcNow.AddDays(-1),
-                IsShared: false,
-                Owner: _accountIdentity ?? "User"),
-            new DriveItem(
-                Path: Combine(normalized, "Welcome.txt"),
-                Name: "Welcome.txt",
-                IsFolder: false,
-                Size: 1024,
-                ModifiedAt: DateTimeOffset.UtcNow,
-                IsShared: false,
-                Owner: _accountIdentity ?? "User")
-        ];
-
-        return Task.FromResult(items);
+        EnsureAuthenticated();
+        throw NotImplemented(nameof(ListFolderAsync));
     }
 
     public Task DownloadFileAsync(string path, string localFolder, CancellationToken cancellationToken = default)
     {
-        if (!_isAuthenticated)
-        {
-            throw new InvalidOperationException($"Authentication required for {_displayName}.");
-        }
-        return Task.CompletedTask;
+        EnsureAuthenticated();
+        throw NotImplemented(nameof(DownloadFileAsync));
     }
 
     public Task UploadFilesAsync(
@@ -148,55 +148,37 @@ public sealed class GenericCloudDriveProvider : ICloudDriveProvider, IDriveOpera
         UploadConflictStrategy strategy = UploadConflictStrategy.None,
         CancellationToken cancellationToken = default)
     {
-        if (!_isAuthenticated)
-        {
-            throw new InvalidOperationException($"Authentication required for {_displayName}.");
-        }
-        return Task.CompletedTask;
+        EnsureAuthenticated();
+        throw NotImplemented(nameof(UploadFilesAsync));
     }
 
     public Task TrashItemAsync(string path, CancellationToken cancellationToken = default)
     {
-        if (!_isAuthenticated)
-        {
-            throw new InvalidOperationException($"Authentication required for {_displayName}.");
-        }
-        return Task.CompletedTask;
+        EnsureAuthenticated();
+        throw NotImplemented(nameof(TrashItemAsync));
     }
 
     public Task RenameItemAsync(string path, string newName, CancellationToken cancellationToken = default)
     {
-        if (!_isAuthenticated)
-        {
-            throw new InvalidOperationException($"Authentication required for {_displayName}.");
-        }
-        return Task.CompletedTask;
+        EnsureAuthenticated();
+        throw NotImplemented(nameof(RenameItemAsync));
     }
 
     public Task CreateFolderAsync(string parentPath, string name, CancellationToken cancellationToken = default)
     {
-        if (!_isAuthenticated)
-        {
-            throw new InvalidOperationException($"Authentication required for {_displayName}.");
-        }
-        return Task.CompletedTask;
+        EnsureAuthenticated();
+        throw NotImplemented(nameof(CreateFolderAsync));
     }
 
     public Task MoveItemsAsync(IReadOnlyList<string> paths, string targetParentPath, CancellationToken cancellationToken = default)
     {
-        if (!_isAuthenticated)
-        {
-            throw new InvalidOperationException($"Authentication required for {_displayName}.");
-        }
-        return Task.CompletedTask;
+        EnsureAuthenticated();
+        throw NotImplemented(nameof(MoveItemsAsync));
     }
 
     public Task CopyItemAsync(string sourcePath, string targetParentPath, string? newName = null, CancellationToken cancellationToken = default)
     {
-        if (!_isAuthenticated)
-        {
-            throw new InvalidOperationException($"Authentication required for {_displayName}.");
-        }
-        return Task.CompletedTask;
+        EnsureAuthenticated();
+        throw NotImplemented(nameof(CopyItemAsync));
     }
 }

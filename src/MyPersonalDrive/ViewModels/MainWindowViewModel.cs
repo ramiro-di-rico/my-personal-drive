@@ -1596,13 +1596,30 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        await TransferQueue.EnqueueUpload(_provider.Operations, localPaths, targetPath, strategy.Value);
+        var result = await TransferQueue.EnqueueUpload(_provider.Operations, localPaths, targetPath, strategy.Value);
 
-        if (string.Equals(targetPath, CurrentPath, StringComparison.Ordinal))
+        // Set before kicking off the refresh below, not after: that refresh's own transient
+        // "Loading.../Showing cached items..." messages would otherwise immediately overwrite this
+        // one. It's still the last word for a moment, and the refresh's own eventual "Loaded N
+        // items..." is itself a second, later confirmation once it lands.
+        StatusMessage = result.Status switch
+        {
+            TransferStatus.Done => $"Subido {DescribeBatchForStatus(localPaths)} a {targetPath}.",
+            TransferStatus.Failed => $"Error al subir {DescribeBatchForStatus(localPaths)}: {result.ErrorMessage}",
+            _ => $"Subida de {DescribeBatchForStatus(localPaths)} cancelada.",
+        };
+
+        // Fire-and-forget, same as the toolbar's own UploadAsync: RefreshAsync ends in a
+        // Dispatcher.UIThread.InvokeAsync post that only completes with a running Avalonia
+        // dispatcher, so awaiting it deadlocks headless callers (including every xUnit test).
+        if (result.Status == TransferStatus.Done && string.Equals(targetPath, CurrentPath, StringComparison.Ordinal))
         {
             _ = RefreshAsync();
         }
     }
+
+    private static string DescribeBatchForStatus(IReadOnlyList<string> localPaths)
+        => localPaths.Count == 1 ? Path.GetFileName(localPaths[0]) : $"{localPaths.Count} elementos";
 
     /// <summary>
     /// A cloud pane row (or rows) dropped onto the local pane (docs/INTERFACE_IMPROVEMENT_PLAN.md
@@ -1651,15 +1668,31 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         }
 
+        var results = new List<TransferItemViewModel>(toDownload.Count);
         foreach (var item in toDownload)
         {
-            await TransferQueue.EnqueueDownload(_provider.Operations, item, targetLocalPath);
+            results.Add(await TransferQueue.EnqueueDownload(_provider.Operations, item, targetLocalPath));
         }
 
-        if (string.Equals(targetLocalPath, LocalExplorer.CurrentPath, StringComparison.Ordinal))
+        // Safe to await, unlike the upload side's cloud-pane RefreshAsync (see its comment):
+        // LocalExplorerViewModel.NavigateAsync never touches Dispatcher.UIThread, so it can't
+        // deadlock a headless caller the same way.
+        var anyDone = results.Any(r => r.Status == TransferStatus.Done);
+        if (anyDone && string.Equals(targetLocalPath, LocalExplorer.CurrentPath, StringComparison.Ordinal))
         {
-            _ = LocalExplorer.RefreshCommand.ExecuteAsync();
+            await LocalExplorer.RefreshCommand.ExecuteAsync();
         }
+
+        var failed = results.Where(r => r.Status == TransferStatus.Failed).ToList();
+        var done = results.Count(r => r.Status == TransferStatus.Done);
+        StatusMessage = failed.Count switch
+        {
+            0 when done > 0 => done == 1
+                ? $"Descargado {toDownload[0].Name} a {targetLocalPath}."
+                : $"Descargados {done} elemento(s) a {targetLocalPath}.",
+            0 => $"Descarga a {targetLocalPath} cancelada.",
+            _ => $"{failed.Count} de {results.Count} descarga(s) fallaron: {failed[0].ErrorMessage}",
+        };
     }
 
     private async Task CreateFolderAsync()
@@ -2105,7 +2138,12 @@ public sealed class MainWindowViewModel : ObservableObject
                 StatusMessage = $"Showing cached items for {path}. Fetching latest from CLI...";
                 IsLoading = false;
 
-                // Fire and forget CLI fetch to keep UI responsive and command finished
+                // Fire and forget CLI fetch to keep UI responsive and command finished. (Tried
+                // making this await when forceFreshRemoteView is set, so a post-transfer refresh
+                // could guarantee the listing was current before returning — reverted: this method
+                // posts its own UI update through Dispatcher.UIThread.InvokeAsync, which never
+                // completes without a running Avalonia dispatcher, so awaiting it deadlocked every
+                // test that exercises a forced refresh instead of just running slower.)
                 _ = FetchFromCliAndUpdateCacheAsync(path, clearSelection, forceFreshRemoteView, token);
                 return;
             }

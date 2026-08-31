@@ -63,20 +63,20 @@ public sealed class TransferQueueViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Returns once *this* item settles (Done/Failed/Cancelled) — not once the whole queue drains.
-    /// Callers that only care about "it's queued" (a drop handler) can discard the task; callers
-    /// that need to react afterward (Phase 3's "refresh the local pane once its download lands")
-    /// can await it.
+    /// Returns once *this* item settles (Done/Failed/Cancelled) — not once the whole queue drains —
+    /// with the settled item itself, so a caller can tell success from failure (e.g. to word a
+    /// confirmation message honestly instead of always claiming success). Callers that only care
+    /// that it's queued (most drop handlers) can discard the task.
     /// </summary>
-    public Task EnqueueUpload(IDriveOperations operations, IReadOnlyList<string> localPaths, string targetPath, UploadConflictStrategy strategy)
+    public Task<TransferItemViewModel> EnqueueUpload(IDriveOperations operations, IReadOnlyList<string> localPaths, string targetPath, UploadConflictStrategy strategy)
         => Enqueue(TransferDirection.Upload, DescribeBatch(localPaths), targetPath,
             ct => operations.UploadFilesAsync(localPaths, targetPath, strategy, ct));
 
-    public Task EnqueueDownload(IDriveOperations operations, DriveItem item, string targetPath)
+    public Task<TransferItemViewModel> EnqueueDownload(IDriveOperations operations, DriveItem item, string targetPath)
         => Enqueue(TransferDirection.Download, item.Name, targetPath,
             ct => operations.DownloadFileAsync(item.Path, targetPath, ct));
 
-    private Task Enqueue(TransferDirection direction, string sourceLabel, string targetLabel, Func<CancellationToken, Task> run)
+    private Task<TransferItemViewModel> Enqueue(TransferDirection direction, string sourceLabel, string targetLabel, Func<CancellationToken, Task> run)
     {
         var cts = new CancellationTokenSource();
         var item = new TransferItemViewModel(direction, sourceLabel, targetLabel, cts);
@@ -91,7 +91,7 @@ public sealed class TransferQueueViewModel : ObservableObject
         Items.Add(item);
         OnPropertyChanged(nameof(Summary));
 
-        var completion = new TaskCompletionSource();
+        var completion = new TaskCompletionSource<TransferItemViewModel>();
         lock (_gate)
         {
             _pending.Enqueue(new PendingTransfer(item, run, cts, completion));
@@ -135,7 +135,7 @@ public sealed class TransferQueueViewModel : ObservableObject
             if (cts.IsCancellationRequested)
             {
                 item.Status = TransferStatus.Cancelled;
-                completion.SetResult();
+                completion.SetResult(item);
                 continue;
             }
 
@@ -155,7 +155,7 @@ public sealed class TransferQueueViewModel : ObservableObject
                 item.ErrorMessage = ex.Message;
             }
 
-            completion.SetResult();
+            completion.SetResult(item);
         }
     }
 
@@ -164,5 +164,5 @@ public sealed class TransferQueueViewModel : ObservableObject
             ? Path.GetFileName(localPaths[0])
             : $"{localPaths.Count} elementos";
 
-    private sealed record PendingTransfer(TransferItemViewModel Item, Func<CancellationToken, Task> Run, CancellationTokenSource Cts, TaskCompletionSource Completion);
+    private sealed record PendingTransfer(TransferItemViewModel Item, Func<CancellationToken, Task> Run, CancellationTokenSource Cts, TaskCompletionSource<TransferItemViewModel> Completion);
 }

@@ -165,14 +165,20 @@ public partial class MainWindow : Window
         _localDragCandidate = null;
         _localDragPressedArgs = null;
 
-        // The row's own Button captured the pointer on PointerPressed for its own click tracking
-        // (standard Avalonia ButtonBase behavior) — DoDragDropAsync needs that capture released
-        // first, or it can't take over the pointer to actually track the drag.
-        e.Pointer.Capture(null);
-
         var transfer = new DataTransfer();
         transfer.Add(DataTransferItem.Create(LocalPathsDataFormat, new[] { node.Item.Path }));
-        await DragDrop.DoDragDropAsync(pressedArgs, transfer, DragDropEffects.Copy);
+        try
+        {
+            await DragDrop.DoDragDropAsync(pressedArgs, transfer, DragDropEffects.Copy);
+        }
+        catch (Exception ex)
+        {
+            // This is async void — an exception escaping here would otherwise crash the process.
+            if (DataContext is MainWindowViewModel vm)
+            {
+                vm.StatusMessage = $"Error al iniciar el arrastre: {ex.Message}";
+            }
+        }
     }
 
     private ListBoxItem? _cloudHighlightedDropRow;
@@ -188,7 +194,8 @@ public partial class MainWindow : Window
     private void OnCloudListingDragOver(object? sender, DragEventArgs e)
     {
         var listBox = sender as ListBox;
-        if (!e.DataTransfer.Contains(LocalPathsDataFormat) || DataContext is not MainWindowViewModel viewModel)
+        var hasFormat = e.DataTransfer.Contains(LocalPathsDataFormat);
+        if (!hasFormat || DataContext is not MainWindowViewModel viewModel)
         {
             e.DragEffects = DragDropEffects.None;
             ClearCloudDropHighlight(listBox);
@@ -231,7 +238,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (e.DataTransfer.TryGetValue(LocalPathsDataFormat) is not { Length: > 0 } localPaths)
+        var localPaths = e.DataTransfer.TryGetValue(LocalPathsDataFormat);
+        if (localPaths is not { Length: > 0 })
         {
             return;
         }
@@ -321,13 +329,20 @@ public partial class MainWindow : Window
         _cloudDragCandidate = null;
         _cloudDragPressedArgs = null;
 
-        // See the matching comment in OnLocalRowPointerMoved: the row's own Button captured the
-        // pointer for its click tracking, and DoDragDropAsync needs that released first.
-        e.Pointer.Capture(null);
-
         var transfer = new DataTransfer();
         transfer.Add(DataTransferItem.Create(CloudItemsDataFormat, new[] { node.Item }));
-        await DragDrop.DoDragDropAsync(pressedArgs, transfer, DragDropEffects.Copy);
+        try
+        {
+            await DragDrop.DoDragDropAsync(pressedArgs, transfer, DragDropEffects.Copy);
+        }
+        catch (Exception ex)
+        {
+            // This is async void — an exception escaping here would otherwise crash the process.
+            if (DataContext is MainWindowViewModel vm)
+            {
+                vm.StatusMessage = $"Error al iniciar el arrastre: {ex.Message}";
+            }
+        }
     }
 
     private ListBoxItem? _localHighlightedDropRow;
@@ -336,7 +351,8 @@ public partial class MainWindow : Window
     private void OnLocalListingDragOver(object? sender, DragEventArgs e)
     {
         var listBox = sender as ListBox;
-        if (!e.DataTransfer.Contains(CloudItemsDataFormat) || DataContext is not MainWindowViewModel viewModel)
+        var hasFormat = e.DataTransfer.Contains(CloudItemsDataFormat);
+        if (!hasFormat || DataContext is not MainWindowViewModel viewModel)
         {
             e.DragEffects = DragDropEffects.None;
             ClearLocalDropHighlight(listBox);
@@ -379,7 +395,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (e.DataTransfer.TryGetValue(CloudItemsDataFormat) is not { Length: > 0 } items)
+        var items = e.DataTransfer.TryGetValue(CloudItemsDataFormat);
+        if (items is not { Length: > 0 })
         {
             return;
         }

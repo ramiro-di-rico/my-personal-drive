@@ -438,6 +438,15 @@ Central state. Key pieces:
   row Button's own click still works normally below a small pixel threshold; only a real drag
   (past it) calls `DragDrop.DoDragDropAsync`. The app's selection model is single-item, so a drag
   always carries just the row under the pointer, not a multi-selection.
+- **Drop-target affordances** (Phase 4): a `.dropTarget` CSS-like class, toggled imperatively from
+  the same `DragOver`/`DragLeave` handlers (not bound to any VM property — this is transient
+  gesture feedback the VM has no reason to know about), highlights the pane and, when the drop
+  would land inside a specific folder rather than the pane's current path, that folder's row too.
+  `CloudDropOverlay`/`LocalDropOverlay` (named `Border`s, last child of each pane's overlapping
+  `Grid` cell so they paint above whichever view mode is active) show a "+ Subir a X"/"↓ Descargar
+  a X" badge, its target text computed by the same `ResolveCloudDropTargetPath`/
+  `ResolveLocalDropTargetPath` the `Drop` handlers themselves use — so the badge can never say one
+  folder while the drop actually lands in another.
 
 **Extension points toward the View** — the VM doesn't know about Avalonia except for
 `Dispatcher`; dialogs are injected as delegates the View sets in `OnDataContextChanged`:

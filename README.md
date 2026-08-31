@@ -25,7 +25,8 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
   starts with
 - Drag a file or folder between the cloud and local panes to upload/download it — onto empty space
   to target the folder currently open, or onto a folder row to target that folder — tracked in a
-  cancellable transfer queue (Status sidebar)
+  cancellable transfer queue (Status sidebar). The target pane and, if you're over one, the
+  specific folder row light up, with a badge showing exactly where the drop will land
 - Show file and folder metadata in the status pane
 - Download files
 - View plain-text files and common image formats (JPEG, PNG, GIF, BMP, WebP, ICO) in the app,

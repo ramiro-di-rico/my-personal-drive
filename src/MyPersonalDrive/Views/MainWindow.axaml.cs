@@ -155,11 +155,57 @@ public partial class MainWindow : Window
         await DragDrop.DoDragDropAsync(pressedArgs, transfer, DragDropEffects.Copy);
     }
 
+    private ListBoxItem? _cloudHighlightedDropRow;
+
+    /// <summary>
+    /// The three-part drop-target affordance (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4):
+    /// the pane's own border/background highlight, the specific folder row's highlight when the
+    /// drop would land inside it rather than the pane's current path, and the "+ Subir a X" badge.
+    /// Purely visual — no VM call, nothing here decides where the drop actually goes; that's
+    /// resolved again, identically, in <see cref="OnCloudListingDrop"/> via the same
+    /// <see cref="ResolveCloudDropTargetPath"/>.
+    /// </summary>
     private void OnCloudListingDragOver(object? sender, DragEventArgs e)
-        => e.DragEffects = e.DataTransfer.Contains(LocalPathsDataFormat) ? DragDropEffects.Copy : DragDropEffects.None;
+    {
+        var listBox = sender as ListBox;
+        if (!e.DataTransfer.Contains(LocalPathsDataFormat) || DataContext is not MainWindowViewModel viewModel)
+        {
+            e.DragEffects = DragDropEffects.None;
+            ClearCloudDropHighlight(listBox);
+            return;
+        }
+
+        e.DragEffects = DragDropEffects.Copy;
+        listBox?.Classes.Add("dropTarget");
+
+        var hoveredRow = e.Source is Visual visual ? visual.FindAncestorOfType<ListBoxItem>(includeSelf: true) : null;
+        var targetsAFolderRow = hoveredRow?.DataContext is DriveNodeViewModel { IsFolder: true };
+        if (!ReferenceEquals(hoveredRow, _cloudHighlightedDropRow) || !targetsAFolderRow)
+        {
+            _cloudHighlightedDropRow?.Classes.Remove("dropTarget");
+            _cloudHighlightedDropRow = targetsAFolderRow ? hoveredRow : null;
+            _cloudHighlightedDropRow?.Classes.Add("dropTarget");
+        }
+
+        var targetPath = ResolveCloudDropTargetPath(e, viewModel);
+        CloudDropOverlayText.Text = $"+ Subir a {DisplayNameForDropTarget(targetPath, viewModel.CurrentPath)}";
+        CloudDropOverlay.IsVisible = true;
+    }
+
+    private void OnCloudListingDragLeave(object? sender, DragEventArgs e) => ClearCloudDropHighlight(sender as ListBox);
+
+    private void ClearCloudDropHighlight(ListBox? listBox)
+    {
+        listBox?.Classes.Remove("dropTarget");
+        _cloudHighlightedDropRow?.Classes.Remove("dropTarget");
+        _cloudHighlightedDropRow = null;
+        CloudDropOverlay.IsVisible = false;
+    }
 
     private async void OnCloudListingDrop(object? sender, DragEventArgs e)
     {
+        ClearCloudDropHighlight(sender as ListBox);
+
         if (DataContext is not MainWindowViewModel viewModel)
         {
             return;
@@ -172,6 +218,19 @@ public partial class MainWindow : Window
 
         var targetPath = ResolveCloudDropTargetPath(e, viewModel);
         await viewModel.HandleLocalFilesDroppedAsync(localPaths, targetPath);
+    }
+
+    /// <summary>"la carpeta actual" for the folder already open, otherwise that folder's own name.</summary>
+    private static string DisplayNameForDropTarget(string targetPath, string currentPath)
+    {
+        if (string.Equals(targetPath, currentPath, StringComparison.Ordinal))
+        {
+            return "la carpeta actual";
+        }
+
+        var trimmed = targetPath.TrimEnd('/');
+        var lastSeparator = trimmed.LastIndexOf('/');
+        return lastSeparator >= 0 && lastSeparator < trimmed.Length - 1 ? trimmed[(lastSeparator + 1)..] : trimmed;
     }
 
     /// <summary>The folder row under the drop point, if any — otherwise the currently browsed folder.</summary>
@@ -244,11 +303,50 @@ public partial class MainWindow : Window
         await DragDrop.DoDragDropAsync(pressedArgs, transfer, DragDropEffects.Copy);
     }
 
+    private ListBoxItem? _localHighlightedDropRow;
+
+    /// <summary>Mirrors <see cref="OnCloudListingDragOver"/> for the opposite direction — see its doc comment.</summary>
     private void OnLocalListingDragOver(object? sender, DragEventArgs e)
-        => e.DragEffects = e.DataTransfer.Contains(CloudItemsDataFormat) ? DragDropEffects.Copy : DragDropEffects.None;
+    {
+        var listBox = sender as ListBox;
+        if (!e.DataTransfer.Contains(CloudItemsDataFormat) || DataContext is not MainWindowViewModel viewModel)
+        {
+            e.DragEffects = DragDropEffects.None;
+            ClearLocalDropHighlight(listBox);
+            return;
+        }
+
+        e.DragEffects = DragDropEffects.Copy;
+        listBox?.Classes.Add("dropTarget");
+
+        var hoveredRow = e.Source is Visual visual ? visual.FindAncestorOfType<ListBoxItem>(includeSelf: true) : null;
+        var targetsAFolderRow = hoveredRow?.DataContext is LocalNodeViewModel { IsFolder: true };
+        if (!ReferenceEquals(hoveredRow, _localHighlightedDropRow) || !targetsAFolderRow)
+        {
+            _localHighlightedDropRow?.Classes.Remove("dropTarget");
+            _localHighlightedDropRow = targetsAFolderRow ? hoveredRow : null;
+            _localHighlightedDropRow?.Classes.Add("dropTarget");
+        }
+
+        var targetPath = ResolveLocalDropTargetPath(e, viewModel);
+        LocalDropOverlayText.Text = $"↓ Descargar a {DisplayNameForDropTarget(targetPath, viewModel.LocalExplorer.CurrentPath)}";
+        LocalDropOverlay.IsVisible = true;
+    }
+
+    private void OnLocalListingDragLeave(object? sender, DragEventArgs e) => ClearLocalDropHighlight(sender as ListBox);
+
+    private void ClearLocalDropHighlight(ListBox? listBox)
+    {
+        listBox?.Classes.Remove("dropTarget");
+        _localHighlightedDropRow?.Classes.Remove("dropTarget");
+        _localHighlightedDropRow = null;
+        LocalDropOverlay.IsVisible = false;
+    }
 
     private async void OnLocalListingDrop(object? sender, DragEventArgs e)
     {
+        ClearLocalDropHighlight(sender as ListBox);
+
         if (DataContext is not MainWindowViewModel viewModel)
         {
             return;

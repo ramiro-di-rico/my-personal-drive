@@ -76,6 +76,20 @@
       <Setter Property="Background" Value="Transparent" />
     </Style>
 
+    <!-- Drop-target highlighting (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4): the whole
+         pane while a valid drag is over it anywhere, and additionally the specific folder row
+         when the drop would land inside that folder rather than the pane's current path. Classes
+         toggled imperatively from code-behind's DragOver/DragLeave handlers — this is transient
+         gesture feedback, not state the view model has any reason to know about. -->
+    <Style Selector="ListBox.driveListing.dropTarget">
+      <Setter Property="BorderThickness" Value="2" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+    </Style>
+    <Style Selector="ListBox.driveListing ListBoxItem.dropTarget">
+      <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+    </Style>
+
     <!-- Tile chrome, shared by the icons and gallery modes. -->
     <Style Selector="Border.tile">
       <Setter Property="Background" Value="Transparent" />
@@ -450,6 +464,7 @@
                    KeyDown="OnListingKeyDown"
                    DragDrop.AllowDrop="True"
                    DragDrop.DragOver="OnCloudListingDragOver"
+                   DragDrop.DragLeave="OnCloudListingDragLeave"
                    DragDrop.Drop="OnCloudListingDrop">
             <ListBox.ItemTemplate>
               <DataTemplate x:DataType="vm:DriveNodeViewModel">
@@ -647,6 +662,29 @@
             </ItemsRepeater.ItemTemplate>
           </ItemsRepeater>
           </ScrollViewer>
+
+          <!-- Drop-target badge (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4) — shown only
+               while a local item is being dragged over this pane. Last child of the overlapping
+               Grid.Row="2" (List/Icons/Gallery/auth-fallback all share this cell), so it always
+               paints on top regardless of which view mode is active. Text/visibility toggled from
+               code-behind's drag handlers, not bound to VM state — purely transient UI feedback
+               for a gesture the VM never sees. -->
+          <Border x:Name="CloudDropOverlay"
+                  IsVisible="False"
+                  IsHitTestVisible="False"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Top"
+                  Margin="0,12,0,0"
+                  Padding="12,8"
+                  CornerRadius="6"
+                  BorderThickness="1"
+                  BorderBrush="{DynamicResource AccentBrush}"
+                  Background="{DynamicResource AccentMutedBrush}">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Path Classes="icon" Data="{StaticResource IconUpload}" Width="14" Height="14" Stroke="{DynamicResource AccentBrush}" />
+              <TextBlock x:Name="CloudDropOverlayText" Foreground="{DynamicResource AccentBrush}" FontWeight="Bold" />
+            </StackPanel>
+          </Border>
           </Grid>
         </Grid>
 
@@ -735,6 +773,7 @@
                      ItemsSource="{Binding Items}"
                      DragDrop.AllowDrop="True"
                      DragDrop.DragOver="OnLocalListingDragOver"
+                     DragDrop.DragLeave="OnLocalListingDragLeave"
                      DragDrop.Drop="OnLocalListingDrop">
               <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="local:LocalNodeViewModel">
@@ -768,6 +807,26 @@
                 </DataTemplate>
               </ListBox.ItemTemplate>
             </ListBox>
+
+            <!-- Drop-target badge — mirrors CloudDropOverlay for this pane (docs/
+                 INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4). -->
+            <Border x:Name="LocalDropOverlay"
+                    Grid.Row="1"
+                    IsVisible="False"
+                    IsHitTestVisible="False"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Margin="0,12,0,0"
+                    Padding="12,8"
+                    CornerRadius="6"
+                    BorderThickness="1"
+                    BorderBrush="{DynamicResource AccentBrush}"
+                    Background="{DynamicResource AccentMutedBrush}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Path Classes="icon" Data="{StaticResource IconDownload}" Width="14" Height="14" Stroke="{DynamicResource AccentBrush}" />
+                <TextBlock x:Name="LocalDropOverlayText" Foreground="{DynamicResource AccentBrush}" FontWeight="Bold" />
+              </StackPanel>
+            </Border>
           </Grid>
         </Grid>
         </Grid>

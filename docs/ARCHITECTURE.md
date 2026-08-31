@@ -89,12 +89,16 @@ src/MyPersonalDrive/
         CliErrorClassifier.cs, CliReleaseFeed.cs, CliUpdateInstaller.cs, CliPlatformKey.cs, CliVersionComparer.cs
     DriveCacheService.cs           # SQLite cache of listings
     AppSettings.cs / AppSettingsService.cs / AppJsonContext.cs
+    LocalFileSystemService.cs      # local pane's only filesystem access (read-only browsing)
   ViewModels/
     ObservableObject.cs            # minimal INotifyPropertyChanged
     AsyncCommand.cs                # async ICommand with re-entrancy guard
     MainWindowViewModel.cs         # ~950 lines, the brain of the app
     DriveNodeViewModel.cs          # one row of the listing
     BreadcrumbSegmentViewModel.cs
+    Local/
+      LocalExplorerViewModel.cs    # local pane's state (current path, listing, hidden-files toggle)
+      LocalNodeViewModel.cs        # one row of the local listing — navigation only, no file ops yet
   Views/
     MainWindow.axaml(.cs)          # UI + dialogs built in code-behind
 scripts/publish-linux.sh           # AOT publish + tarball
@@ -394,6 +398,17 @@ Central state. Key pieces:
 - `RootItems : ObservableCollection<DriveNodeViewModel>` — the visible listing.
 - `BreadcrumbItems` — rebuilt entirely on every navigation from the path string.
 - `Selected*` block — 7 flat strings feeding the detail panel.
+- `LocalExplorer : Local.LocalExplorerViewModel` — composed the same way `SyncPanel` is; the local
+  pane's own state (current path, listing, breadcrumb, hidden-files toggle), backed by
+  `LocalFileSystemService`. Read-only browsing only — no local file operations yet.
+- `IsLocalExplorerPanelVisible` / `IsStatusPanelVisible` — whether the local pane and the Status
+  sidebar are shown, each persisted (`AppSettings.ShowLocalExplorerPanel`/`ShowStatusPanel`) so the
+  choice is also next launch's default. The local pane toggles from a header button
+  (`ToggleLocalExplorerPanelCommand`); its column is `*`-sized (for the splitter), so hiding it also
+  needs `MainWindow.axaml.cs` to collapse `ExplorerColumnsGrid.ColumnDefinitions[2]` directly — an
+  `Auto` column (the Status sidebar's) already shrinks to 0 from `IsVisible` alone. The Status
+  sidebar instead toggles from a plain two-way-bound "User Settings" checkbox in the settings view
+  (no command, same pattern as `DefaultSyncFolder`/`BandwidthLimitKbps`).
 - Console block: `_commandLogLines` (ring buffer of 200), `CommandLogText`,
   `ActiveCommand`, and animation properties (`CommandConsoleMaxHeight/Opacity/HitTestVisible/ToggleLabel/Glyph`).
 

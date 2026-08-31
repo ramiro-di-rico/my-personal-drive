@@ -56,6 +56,41 @@ public partial class MainWindow : Window
         node.RowCommand.Execute(null);
     }
 
+    /// <summary>
+    /// Avalonia's <see cref="GridSplitter"/> drags star-sized columns for free but has no built-in
+    /// reset gesture; double-click puts the cloud/local split back to 50/50
+    /// (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 3). Code-behind because it manipulates the visual
+    /// tree's own `Grid.ColumnDefinitions`, not view-model state.
+    /// </summary>
+    private void ExplorerSplitter_DoubleTapped(object? sender, Avalonia.Input.TappedEventArgs e)
+    {
+        if (sender is not Control { Parent: Grid grid })
+        {
+            return;
+        }
+
+        grid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
+        grid.ColumnDefinitions[2].Width = new GridLength(1, GridUnitType.Star);
+    }
+
+    private void OnMainWindowViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainWindowViewModel.IsLocalExplorerPanelVisible) && sender is MainWindowViewModel viewModel)
+        {
+            ApplyLocalExplorerPanelColumnWidth(viewModel.IsLocalExplorerPanelVisible);
+        }
+    }
+
+    /// <summary>
+    /// Collapses/restores the local pane's star-sized column directly, since toggling `IsVisible`
+    /// on its content (done via binding in XAML) has no effect on a `*` column's own width — unlike
+    /// an `Auto` column, which already shrinks to 0 the moment its content stops participating in
+    /// layout. Restoring always goes back to an even split rather than whatever ratio the user last
+    /// dragged to; remembering that ratio isn't worth the extra state for a show/hide toggle.
+    /// </summary>
+    private void ApplyLocalExplorerPanelColumnWidth(bool visible)
+        => ExplorerColumnsGrid.ColumnDefinitions[2].Width = visible ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+
     private async void BrowseCliPath(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is not MainWindowViewModel viewModel)
@@ -115,6 +150,13 @@ public partial class MainWindow : Window
 
         viewModel.BreadcrumbItems.CollectionChanged -= ScrollBreadcrumbToEnd;
         viewModel.BreadcrumbItems.CollectionChanged += ScrollBreadcrumbToEnd;
+
+        // ExplorerColumnsGrid.ColumnDefinitions[2] is star-sized so the splitter can resize it —
+        // which also means it doesn't shrink to 0 on its own just because IsVisible on its content
+        // goes false, the way an Auto column (the Status sidebar's) does. Kept in sync here instead.
+        viewModel.PropertyChanged -= OnMainWindowViewModelPropertyChanged;
+        viewModel.PropertyChanged += OnMainWindowViewModelPropertyChanged;
+        ApplyLocalExplorerPanelColumnWidth(viewModel.IsLocalExplorerPanelVisible);
 
         viewModel.SyncPanel.RequestNewPairAsync = () => PromptForNewPairAsync(viewModel.SyncPanel, viewModel.RootPath);
         viewModel.SyncPanel.RequestPreviewConfirmationAsync = ShowPreviewAsync;

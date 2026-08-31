@@ -18,6 +18,12 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
 - Auto-load the active provider's root folder after authentication
 - Browse folders with breadcrumb navigation
 - Go back to parent folders without leaving `/my-files`
+- Browse the local filesystem in a resizable second pane alongside the cloud one — its own
+  breadcrumb, a home shortcut, a hidden-files toggle, and a free-space indicator (read-only for
+  now; file operations and drag-and-drop transfer are still to come)
+- Show or hide the local pane from the header, and the Status/Metrics sidebar from a "User
+  Settings" checkbox in settings — each choice is remembered and is also what the next launch
+  starts with
 - Show file and folder metadata in the status pane
 - Download files
 - View plain-text files and common image formats (JPEG, PNG, GIF, BMP, WebP, ICO) in the app,

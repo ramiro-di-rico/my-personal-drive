@@ -9,6 +9,7 @@ using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Providers.OneDrive;
 using MyPersonalDrive.Services.Providers.Generic;
+using MyPersonalDrive.ViewModels.Local;
 using Avalonia.Threading;
 
 namespace MyPersonalDrive.ViewModels;
@@ -126,6 +127,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private long _quotaUsedBytes;
     private long _quotaTotalBytes = 500L * 1024 * 1024 * 1024;
     private DriveErrorKind _lastErrorKind = DriveErrorKind.Unknown;
+    private bool _isStatusPanelVisible;
+    private bool _isLocalExplorerPanelVisible;
 
     /// <summary>
     /// What the settings view's provider picker and header dropdown list — see docs/PLAN-CLOUD-PROVIDERS.md P5/P6.
@@ -219,7 +222,8 @@ public sealed class MainWindowViewModel : ObservableObject
         FolderStatsScanner? statsScanner = null,
         IProviderCatalog? providerCatalog = null,
         ITextFilePreviewLoader? previewLoader = null,
-        IImageFilePreviewLoader? imagePreviewLoader = null)
+        IImageFilePreviewLoader? imagePreviewLoader = null,
+        LocalFileSystemService? localFileSystem = null)
     {
         // Optional so the many existing view-model tests don't all have to build a database and a
         // scanner to exercise unrelated behavior. When either is absent the deep-scan command
@@ -250,6 +254,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _cacheService = cacheService;
         _settings = settings;
         SyncPanel = syncPanel;
+        LocalExplorer = new LocalExplorerViewModel(localFileSystem ?? new LocalFileSystemService(), settings, HandleUnexpectedError);
 
         var appSettings = settings.Load();
         _cliPath = appSettings.CliPath;
@@ -268,6 +273,8 @@ public sealed class MainWindowViewModel : ObservableObject
         _theme = appSettings.ThemeOrDefault();
         _bandwidthLimitKbps = appSettings.BandwidthLimitKbps;
         _defaultSyncFolder = appSettings.DefaultSyncFolder;
+        _isStatusPanelVisible = appSettings.ShowStatusPanel;
+        _isLocalExplorerPanelVisible = appSettings.ShowLocalExplorerPanel;
         // The browsed provider's own activity is tagged like any other session's, so interleaved
         // lines from ObserveAdditionalProviderActivity (P7, both providers active at once) read
         // consistently regardless of which one happens to be on screen.
@@ -289,6 +296,7 @@ public sealed class MainWindowViewModel : ObservableObject
         UploadCommand = new AsyncCommand(UploadAsync, CanUpload, HandleUnexpectedError);
         CreateFolderCommand = new AsyncCommand(CreateFolderAsync, CanCreateFolder, HandleUnexpectedError);
         ToggleCommandConsoleCommand = new AsyncCommand(ToggleCommandConsoleAsync, onError: HandleUnexpectedError);
+        ToggleLocalExplorerPanelCommand = new AsyncCommand(ToggleLocalExplorerPanelAsync, onError: HandleUnexpectedError);
         DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity, HandleUnexpectedError);
         ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, HandleUnexpectedError);
         ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
@@ -350,6 +358,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public Sync.SyncPanelViewModel SyncPanel { get; }
 
+    public LocalExplorerViewModel LocalExplorer { get; }
+
     /// <summary>
     /// Statistics for the folder on screen, recomputed from the listing on every load
     /// (docs/PLAN-BROWSER-VIEWS.md M2). Shallow only: direct children, no CLI calls.
@@ -387,6 +397,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand CreateFolderCommand { get; }
 
     public AsyncCommand ToggleCommandConsoleCommand { get; }
+
+    public AsyncCommand ToggleLocalExplorerPanelCommand { get; }
 
     public AsyncCommand DownloadActivityCommand { get; }
 
@@ -974,6 +986,39 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _commandConsoleToggleGlyph, value);
     }
 
+    /// <summary>
+    /// Whether the right-hand Status/Metrics sidebar is shown. Persisted: the value the user last
+    /// left it in is also what the next launch starts with, same as <see cref="ShowLocalExplorerPanel"/>-backed
+    /// <see cref="IsLocalExplorerPanelVisible"/> below.
+    /// </summary>
+    /// <summary>A "User Settings" checkbox in the settings view, not a header button — reads/writes
+    /// directly rather than through a command, the way <see cref="DefaultSyncFolder"/> and
+    /// <see cref="BandwidthLimitKbps"/> (both plain two-way-bound settings-view fields) already do.</summary>
+    public bool IsStatusPanelVisible
+    {
+        get => _isStatusPanelVisible;
+        set
+        {
+            if (SetProperty(ref _isStatusPanelVisible, value))
+            {
+                _settings.Update(s => s.ShowStatusPanel = value);
+            }
+        }
+    }
+
+    /// <summary>Whether the local filesystem pane (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 3) is expanded.</summary>
+    public bool IsLocalExplorerPanelVisible
+    {
+        get => _isLocalExplorerPanelVisible;
+        private set
+        {
+            if (SetProperty(ref _isLocalExplorerPanelVisible, value))
+            {
+                _settings.Update(s => s.ShowLocalExplorerPanel = value);
+            }
+        }
+    }
+
     public async Task InitializeAsync()
     {
         // Sync's crash recovery (docs/PLAN-LOCAL-SYNC.md §7) belongs at app startup, before the
@@ -988,6 +1033,8 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             QueueCommandLine($"[warn] Sync startup recovery failed: {ex.Message}");
         }
+
+        await LocalExplorer.InitializeAsync();
 
         var needsCliPath = _provider.Id == ProviderId.Proton;
         if ((!needsCliPath || !string.IsNullOrWhiteSpace(CliPath)) && IsAuthenticated)
@@ -2309,6 +2356,12 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task ToggleCommandConsoleAsync()
     {
         IsCommandConsoleVisible = !IsCommandConsoleVisible;
+        await Task.CompletedTask;
+    }
+
+    private async Task ToggleLocalExplorerPanelAsync()
+    {
+        IsLocalExplorerPanelVisible = !IsLocalExplorerPanelVisible;
         await Task.CompletedTask;
     }
 

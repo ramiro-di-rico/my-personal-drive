@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:MyPersonalDrive.ViewModels"
         xmlns:syncVm="clr-namespace:MyPersonalDrive.ViewModels.Sync"
+        xmlns:local="clr-namespace:MyPersonalDrive.ViewModels.Local"
         xmlns:conv="clr-namespace:MyPersonalDrive.Views.Converters"
         xmlns:providers="clr-namespace:MyPersonalDrive.Services.Providers"
         x:Class="MyPersonalDrive.Views.MainWindow"
@@ -258,7 +259,7 @@
 
     <!-- Explorer view: breadcrumbs, folder browser, status panel and CLI activity log. -->
     <Grid Grid.Row="2" RowDefinitions="Auto,*,Auto" IsVisible="{Binding !IsSettingsView}">
-      <Grid Grid.Row="0" Margin="16" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+      <Grid Grid.Row="0" Margin="16" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
         <Grid.Styles>
           <Style Selector="Button.viewMode.active">
             <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
@@ -320,9 +321,20 @@
                 Command="{Binding ShowGalleryViewCommand}">
           <Path Classes="icon" Data="{StaticResource IconViewGallery}" />
         </Button>
+
+        <!-- Persisted (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 3): the state the user leaves it in
+             is also next launch's default. The Status sidebar has the equivalent checkbox under
+             "User Settings" instead of a header button. -->
+        <Button Grid.Column="7"
+                Classes="viewMode"
+                Classes.active="{Binding IsLocalExplorerPanelVisible}"
+                ToolTip.Tip="Mostrar/ocultar el explorador local"
+                Command="{Binding ToggleLocalExplorerPanelCommand}">
+          <Path Classes="icon" Data="{StaticResource IconPanelRight}" />
+        </Button>
       </Grid>
 
-      <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
+      <Grid x:Name="ExplorerColumnsGrid" Grid.Row="1" ColumnDefinitions="*,Auto,*,Auto">
         <Grid Grid.Column="0" Margin="16,0,16,16" RowDefinitions="Auto,Auto,*">
           <!-- One sort control for all three modes rather than column headers in list mode plus a
                separate control for the tiles: the state is the same either way, and two ways to set
@@ -631,7 +643,120 @@
           </Grid>
         </Grid>
 
-        <Border Grid.Column="1" Margin="0,0,16,16" Padding="16" Width="340" Background="{DynamicResource CardBackgroundBrush}">
+        <!-- Adjustable split between the cloud and local panes (docs/INTERFACE_IMPROVEMENT_PLAN.md
+             Task 3). Drag resizes both star-sized columns automatically; double-click resets them
+             to 50/50 via ExplorerSplitter_DoubleTapped (Avalonia's GridSplitter has no built-in
+             reset gesture). -->
+        <GridSplitter x:Name="ExplorerSplitter"
+                      Grid.Column="1"
+                      Width="6"
+                      Margin="4,16"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      Background="{DynamicResource CardBackgroundBrush}"
+                      Cursor="SizeWestEast"
+                      ResizeDirection="Columns"
+                      DoubleTapped="ExplorerSplitter_DoubleTapped"
+                      IsVisible="{Binding IsLocalExplorerPanelVisible}"
+                      ToolTip.Tip="Drag to resize · double-click to reset" />
+
+        <!-- Local pane: read-only browsing only (navigate, breadcrumb, home, hidden-files toggle,
+             free space). File operations and drag-and-drop transfer are separate plan tasks.
+             Hidden/shown via ToggleLocalExplorerPanelCommand; ExplorerColumnsGrid's own Column[2]
+             width is collapsed to 0 alongside this in MainWindow.axaml.cs, since a star-sized
+             column doesn't shrink on its own just because its content is invisible. IsVisible sits
+             on this outer Grid (still bound to the window's own DataContext) rather than the inner
+             one, which switches DataContext to LocalExplorer and so can't see this VM's property. -->
+        <Grid Grid.Column="2" Margin="0,0,16,16" IsVisible="{Binding IsLocalExplorerPanelVisible}">
+        <Grid RowDefinitions="Auto,*" DataContext="{Binding LocalExplorer}">
+          <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,8">
+            <Grid.Styles>
+              <Style Selector="Button.viewMode.active">
+                <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+              </Style>
+            </Grid.Styles>
+            <Border Grid.Column="0" Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
+              <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <StackPanel Orientation="Horizontal" Spacing="8" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:BreadcrumbSegmentViewModel">
+                      <Button Command="{Binding OpenCommand}"
+                              Content="{Binding Label}"
+                              ToolTip.Tip="{Binding Label}"
+                              IsEnabled="{Binding CanNavigate}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </Border>
+
+            <Button Grid.Column="1" ToolTip.Tip="Go to home folder" Command="{Binding GoHomeCommand}">
+              <Path Classes="icon" Data="{StaticResource IconHome}" />
+            </Button>
+            <Button Grid.Column="2"
+                    Classes="viewMode"
+                    Classes.active="{Binding ShowHiddenFiles}"
+                    ToolTip.Tip="Toggle hidden files"
+                    Command="{Binding ToggleHiddenFilesCommand}">
+              <Path Classes="icon" Data="{StaticResource IconEyeOff}" />
+            </Button>
+            <Button Grid.Column="3" ToolTip.Tip="Refresh" Command="{Binding RefreshCommand}">
+              <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+            </Button>
+            <TextBlock Grid.Column="4"
+                       VerticalAlignment="Center"
+                       Opacity="0.7"
+                       FontSize="12"
+                       Text="{Binding FreeSpaceText, StringFormat='{}{0} free'}" />
+          </Grid>
+
+          <Grid Grid.Row="1" RowDefinitions="Auto,*">
+            <TextBlock Grid.Row="0"
+                       Margin="0,0,0,8"
+                       TextWrapping="Wrap"
+                       Opacity="0.8"
+                       Text="{Binding StatusMessage}"
+                       IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            <ListBox Grid.Row="1" Classes="driveListing" ItemsSource="{Binding Items}">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="local:LocalNodeViewModel">
+                  <Button Classes="hoverGroup" Command="{Binding RowCommand}" HorizontalContentAlignment="Stretch">
+                    <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+                      <Path Grid.Column="0"
+                            Classes="icon"
+                            Width="18"
+                            Height="18"
+                            Data="{Binding FileKind, Converter={x:Static conv:FileKindIconConverter.Instance}}" />
+                      <TextBlock Grid.Column="1"
+                                 VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis"
+                                 Text="{Binding DisplayName}" />
+                      <TextBlock Grid.Column="2"
+                                 VerticalAlignment="Center"
+                                 FontSize="12"
+                                 Opacity="0.8"
+                                 Text="{Binding SizeText}" />
+                      <TextBlock Grid.Column="3"
+                                 VerticalAlignment="Center"
+                                 FontSize="12"
+                                 Opacity="0.7"
+                                 Text="{Binding ModifiedText}" />
+                    </Grid>
+                  </Button>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </Grid>
+        </Grid>
+        </Grid>
+
+        <Border Grid.Column="3" Margin="0,0,16,16" Padding="16" Width="340" Background="{DynamicResource CardBackgroundBrush}" IsVisible="{Binding IsStatusPanelVisible}">
           <!-- Scrollable since the metrics section landed: status + selection + metrics is taller
                than the panel on a short window, and a clipped histogram is worse than a scrollbar. -->
           <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
@@ -959,6 +1084,14 @@
                                Value="{Binding BandwidthLimitKbps, Mode=TwoWay}" />
               </StackPanel>
             </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <!-- User Settings: app-level UI preferences that aren't tied to any provider or CLI. -->
+        <StackPanel Spacing="10">
+          <TextBlock FontSize="18" FontWeight="Bold" Text="User Settings" />
+          <Border Padding="16" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
+            <CheckBox Content="Status Visible" IsChecked="{Binding IsStatusPanelVisible, Mode=TwoWay}" />
           </Border>
         </StackPanel>
 

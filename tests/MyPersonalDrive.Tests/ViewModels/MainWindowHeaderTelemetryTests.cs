@@ -207,4 +207,30 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         Assert.Equal(5120, settings.BandwidthLimitKbps);
         Assert.Equal("/home/user/DriveSync", settings.DefaultSyncFolder);
     }
+
+    [Fact]
+    public async Task PanelVisibilityToggles_FlipStateAndPersist_AndRestoreOnNextLaunch()
+    {
+        var sut = Build();
+        Assert.True(sut.IsStatusPanelVisible);
+        Assert.True(sut.IsLocalExplorerPanelVisible);
+
+        // Status: a plain two-way-bound "User Settings" checkbox, set directly like DefaultSyncFolder.
+        sut.IsStatusPanelVisible = false;
+        // Local explorer: still a header toggle button, backed by a command.
+        await sut.ToggleLocalExplorerPanelCommand.ExecuteAsync();
+
+        Assert.False(sut.IsStatusPanelVisible);
+        Assert.False(sut.IsLocalExplorerPanelVisible);
+
+        var settings = new AppSettingsService().Load();
+        Assert.False(settings.ShowStatusPanel);
+        Assert.False(settings.ShowLocalExplorerPanel);
+
+        // A fresh instance reads back the collapsed state left by the one above — the persisted
+        // value is also next launch's default, not just this session's runtime toggle.
+        var relaunched = Build();
+        Assert.False(relaunched.IsStatusPanelVisible);
+        Assert.False(relaunched.IsLocalExplorerPanelVisible);
+    }
 }

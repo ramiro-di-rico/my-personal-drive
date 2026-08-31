@@ -477,9 +477,7 @@
                           ToolTip.Tip="Select item or open folder"
                           HorizontalAlignment="Stretch"
                           HorizontalContentAlignment="Left"
-                          Focusable="False"
-                          PointerPressed="OnCloudRowPointerPressed"
-                          PointerMoved="OnCloudRowPointerMoved">
+                          Focusable="False">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                       <Path Classes="icon" Data="{StaticResource IconFolder}" IsVisible="{Binding IsFolder}" />
                       <Path Classes="icon" Data="{StaticResource IconFile}" IsVisible="{Binding IsFile}" />
@@ -768,7 +766,8 @@
                        Opacity="0.8"
                        Text="{Binding StatusMessage}"
                        IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-            <ListBox Grid.Row="1"
+            <ListBox x:Name="LocalListing"
+                     Grid.Row="1"
                      Classes="driveListing"
                      ItemsSource="{Binding Items}"
                      DragDrop.AllowDrop="True"
@@ -779,9 +778,7 @@
                 <DataTemplate x:DataType="local:LocalNodeViewModel">
                   <Button Classes="hoverGroup"
                           Command="{Binding RowCommand}"
-                          HorizontalContentAlignment="Stretch"
-                          PointerPressed="OnLocalRowPointerPressed"
-                          PointerMoved="OnLocalRowPointerMoved">
+                          HorizontalContentAlignment="Stretch">
                     <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
                       <Path Grid.Column="0"
                             Classes="icon"

@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -19,6 +20,17 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
         Opened += OnOpened;
+
+        // Tunnel, not the plain bubble subscription a XAML PointerPressed/PointerMoved attribute
+        // on the row Button itself would give: ButtonBase marks these events Handled as part of
+        // its own click tracking (RoutingStrategies.Bubble), so a same-strategy handler attached
+        // on the Button never saw them at all — drag-and-drop never started, full stop. Attaching
+        // at the ListBox with Tunnel runs this before that happens (docs/INTERFACE_IMPROVEMENT_PLAN.md
+        // Task 5).
+        LocalListing.AddHandler(InputElement.PointerPressedEvent, OnLocalRowPointerPressed, RoutingStrategies.Tunnel);
+        LocalListing.AddHandler(InputElement.PointerMovedEvent, OnLocalRowPointerMoved, RoutingStrategies.Tunnel);
+        ListModeListing.AddHandler(InputElement.PointerPressedEvent, OnCloudRowPointerPressed, RoutingStrategies.Tunnel);
+        ListModeListing.AddHandler(InputElement.PointerMovedEvent, OnCloudRowPointerMoved, RoutingStrategies.Tunnel);
     }
 
     /// <summary>
@@ -109,7 +121,10 @@ public partial class MainWindow : Window
 
     private void OnLocalRowPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (sender is Control { DataContext: LocalNodeViewModel node } && e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        // Attached at the ListBox (see the constructor), not the row itself, so the row has to be
+        // resolved by walking up from whatever was actually hit — usually the icon/text inside it.
+        var row = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>(includeSelf: true);
+        if (row?.DataContext is LocalNodeViewModel node && e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
         {
             _localDragStartPoint = e.GetPosition(null);
             _localDragCandidate = node;
@@ -263,7 +278,10 @@ public partial class MainWindow : Window
 
     private void OnCloudRowPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (sender is Control { DataContext: DriveNodeViewModel node } && e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        // Attached at the ListBox (see the constructor), not the row itself — see the matching
+        // comment on OnLocalRowPointerPressed.
+        var row = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>(includeSelf: true);
+        if (row?.DataContext is DriveNodeViewModel node && e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
         {
             _cloudDragStartPoint = e.GetPosition(null);
             _cloudDragCandidate = node;

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.ViewModels.Sync;
 
 namespace MyPersonalDrive.ViewModels.Local;
 
@@ -85,6 +86,22 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
     public AsyncCommand ToggleHiddenFilesCommand { get; }
 
+    /// <summary>A yes/no confirmation, used before permanently deleting a local item.</summary>
+    public Func<string, Task<bool>>? RequestConfirmationAsync { get; set; }
+
+    /// <summary>Prompts for a new name given the current one; null/unchanged means cancelled.</summary>
+    public Func<string, Task<string?>>? RequestRenameAsync { get; set; }
+
+    public Func<string, Task>? RequestCopyToClipboardAsync { get; set; }
+
+    public Func<string, IReadOnlyList<PropertyField>, Task>? RequestShowPropertiesAsync { get; set; }
+
+    /// <summary>Opens the "Add sync pair" wizard pre-filled with this row's local path.</summary>
+    public Func<string, Task>? RequestSyncSelectedPathAsync { get; set; }
+
+    /// <summary>Looks up the configured sync pair (if any) whose local side is a given path.</summary>
+    public Func<string, SyncPairViewModel?>? FindSyncPairByPath { get; set; }
+
     /// <summary>Best-effort: a home directory that can't be listed shows a status message, not a crash at startup.</summary>
     public async Task InitializeAsync()
     {
@@ -112,7 +129,16 @@ public sealed class LocalExplorerViewModel : ObservableObject
             Items.Clear();
             foreach (var item in sorted)
             {
-                Items.Add(new LocalNodeViewModel(item, i => NavigateAsync(i.Path), _onError));
+                Items.Add(new LocalNodeViewModel(item, i => NavigateAsync(i.Path), _onError, new LocalNodeSyncActions
+                {
+                    FindSyncPair = i => FindSyncPairByPath?.Invoke(i.Path),
+                    SyncSelectedPathAsync = SyncSelectedPathAsync,
+                    CopyPathAsync = CopyPathAsync,
+                    RenameAsync = RenameItemAsync,
+                    DeleteAsync = DeleteItemAsync,
+                    ShowPropertiesAsync = ShowPropertiesAsync,
+                    RefreshPaneAsync = () => NavigateAsync(CurrentPath),
+                }));
             }
 
             RebuildBreadcrumbs();
@@ -170,4 +196,115 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
     private static bool PathsEqual(string a, string b)
         => string.Equals(a.TrimEnd(System.IO.Path.DirectorySeparatorChar), b.TrimEnd(System.IO.Path.DirectorySeparatorChar), StringComparison.Ordinal);
+
+    /// <summary>Permanently deletes a local file/folder — there is no local trash to fall back into, so this always confirms first.</summary>
+    public async Task DeleteItemAsync(DriveItem item)
+    {
+        var confirm = RequestConfirmationAsync;
+        var question = item.IsFolder
+            ? $"Delete the folder '{item.Name}' and everything inside it? This cannot be undone."
+            : $"Delete '{item.Name}'? This cannot be undone.";
+
+        if (confirm is not null && !await confirm(question))
+        {
+            StatusMessage = $"Cancelled: {item.Name} was not deleted.";
+            return;
+        }
+
+        try
+        {
+            _service.Delete(item.Path);
+            StatusMessage = $"Deleted {item.Name}.";
+            await NavigateAsync(CurrentPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            StatusMessage = $"Could not delete '{item.Name}': {ex.Message}";
+        }
+    }
+
+    public async Task RenameItemAsync(DriveItem item)
+    {
+        var requester = RequestRenameAsync;
+        if (requester is null)
+        {
+            StatusMessage = "Rename is not available.";
+            return;
+        }
+
+        var newName = await requester(item.Name);
+        if (string.IsNullOrWhiteSpace(newName) || newName == item.Name)
+        {
+            return;
+        }
+
+        try
+        {
+            _service.Rename(item.Path, newName);
+            StatusMessage = $"Renamed {item.Name} to {newName}.";
+            await NavigateAsync(CurrentPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            StatusMessage = $"Could not rename '{item.Name}': {ex.Message}";
+        }
+    }
+
+    public async Task CopyPathAsync(DriveItem item)
+    {
+        var copy = RequestCopyToClipboardAsync;
+        if (copy is null)
+        {
+            StatusMessage = "Copy is not available.";
+            return;
+        }
+
+        await copy(item.Path);
+        StatusMessage = $"Copied path: {item.Path}";
+    }
+
+    public async Task SyncSelectedPathAsync(DriveItem item)
+    {
+        if (!item.IsFolder)
+        {
+            return;
+        }
+
+        var handler = RequestSyncSelectedPathAsync;
+        if (handler is null)
+        {
+            StatusMessage = "Sync is not available.";
+            return;
+        }
+
+        await handler(item.Path);
+    }
+
+    public async Task ShowPropertiesAsync(DriveItem item)
+    {
+        var show = RequestShowPropertiesAsync;
+        if (show is null)
+        {
+            return;
+        }
+
+        var fields = new List<PropertyField>
+        {
+            new("Name", item.Name),
+            new("Path", item.Path),
+            new("Type", item.IsFolder ? "Folder" : "File"),
+        };
+
+        if (item.Size is not null)
+        {
+            fields.Add(new PropertyField("Size", ByteSize.Format(item.Size.Value)));
+        }
+
+        if (item.ModifiedAt is not null)
+        {
+            fields.Add(new PropertyField("Modified", item.ModifiedAt.Value.ToLocalTime().ToString("g")));
+        }
+
+        await show(item.Name, fields);
+    }
 }

@@ -93,26 +93,26 @@ public sealed class RealCliSyncPanelTests : IDisposable
         Assert.Empty(panel.Pairs);
 
         // ---------- a bad remote path is rejected without creating anything (§12 validation)
-        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(
+        panel.RequestNewPairAsync = _ => Task.FromResult<NewSyncPairRequest?>(
             new NewSyncPairRequest("my-files/no-leading-slash", _localRoot, SyncDirection.RemoteToLocal, ConflictPolicy.Ask));
         await panel.AddPairCommand.ExecuteAsync();
         Assert.Empty(panel.Pairs);
         Assert.Contains("absolute path", panel.StatusMessage);
 
         // ---------- refusing to sync the home directory
-        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(
+        panel.RequestNewPairAsync = _ => Task.FromResult<NewSyncPairRequest?>(
             new NewSyncPairRequest(_remoteRoot, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), SyncDirection.RemoteToLocal, ConflictPolicy.Ask));
         await panel.AddPairCommand.ExecuteAsync();
         Assert.Empty(panel.Pairs);
         Assert.Contains("home directory", panel.StatusMessage);
 
         // ---------- cancelling the dialog is a no-op
-        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(null);
+        panel.RequestNewPairAsync = _ => Task.FromResult<NewSyncPairRequest?>(null);
         await panel.AddPairCommand.ExecuteAsync();
         Assert.Empty(panel.Pairs);
 
         // ---------- the real thing
-        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(
+        panel.RequestNewPairAsync = _ => Task.FromResult<NewSyncPairRequest?>(
             new NewSyncPairRequest(_remoteRoot, _localRoot, SyncDirection.RemoteToLocal, ConflictPolicy.Ask));
         await panel.AddPairCommand.ExecuteAsync();
 

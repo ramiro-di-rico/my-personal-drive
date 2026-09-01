@@ -37,6 +37,10 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
 - Sync a remote folder with a local folder — download-only, upload-only, or two-way, running
   automatically with the on/off choice persisted across restarts. Proton and OneDrive each sync
   independently — pausing one doesn't affect the other
+- Right-click a row in either pane for a context menu: copy its path, upload into or download a
+  cloud folder, start a sync pair pre-filled with that path, pause/resume/run-now an existing pair,
+  rename or delete a local item, and view its properties. Folders with an active sync pair show a
+  small badge (paused pairs show a different one) — see badge in list view and the local pane
 - Live console with realtime output from the CLI (Proton) and Graph requests (OneDrive), tagged
   by account when both are active — collapsible (`Ctrl/Cmd+~`, remembered across restarts), with a
   search box, a warnings/errors-only filter, and a floating status line (active operation count,

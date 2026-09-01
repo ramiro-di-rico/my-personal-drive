@@ -260,7 +260,11 @@ public sealed class MainWindowViewModel : ObservableObject
         _settings = settings;
         SyncPanel = syncPanel;
         _localFileSystem = localFileSystem ?? new LocalFileSystemService();
-        LocalExplorer = new LocalExplorerViewModel(_localFileSystem, settings, HandleUnexpectedError);
+        LocalExplorer = new LocalExplorerViewModel(_localFileSystem, settings, HandleUnexpectedError)
+        {
+            RequestSyncSelectedPathAsync = localPath => SyncPanel.AddPairAsync(new SyncPairPrefill(null, localPath)),
+            FindSyncPairByPath = SyncPanel.FindPairByLocalPath,
+        };
 
         var appSettings = settings.Load();
         _cliPath = appSettings.CliPath;
@@ -735,6 +739,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public Func<Task<string?>>? RequestSaveActivityAsync { get; set; }
 
     public Func<string, Task<bool>>? RequestConfirmationAsync { get; set; }
+
+    public Func<string, Task>? RequestCopyToClipboardAsync { get; set; }
+
+    public Func<string, IReadOnlyList<PropertyField>, Task>? RequestShowPropertiesAsync { get; set; }
 
     public string CliPath
     {
@@ -2085,6 +2093,111 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    /// <summary>"Copiar ruta" (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6) — puts the cloud item's path on the system clipboard.</summary>
+    public async Task CopyPathAsync(DriveItem item)
+    {
+        var copy = RequestCopyToClipboardAsync;
+        if (copy is null)
+        {
+            StatusMessage = "Copy is not available.";
+            return;
+        }
+
+        await copy(item.Path);
+        StatusMessage = $"Copied path: {item.Path}";
+    }
+
+    /// <summary>
+    /// "Subir a esta carpeta..." on a cloud folder row — the same upload path as the toolbar's
+    /// <see cref="UploadAsync"/>, but targeting the right-clicked folder instead of always
+    /// <see cref="CurrentPath"/>.
+    /// </summary>
+    public async Task UploadToFolderAsync(DriveItem folder)
+    {
+        if (!folder.IsFolder)
+        {
+            return;
+        }
+
+        var picker = RequestUploadFilesAsync;
+        if (picker is null)
+        {
+            StatusMessage = "Upload is not available.";
+            return;
+        }
+
+        var files = await picker();
+        if (files.Count == 0)
+        {
+            return;
+        }
+
+        var strategy = await ResolveUploadConflictStrategyAsync(files, folder.Path);
+        if (strategy is null)
+        {
+            StatusMessage = "Upload cancelled.";
+            return;
+        }
+
+        try
+        {
+            IsLoading = true;
+            StatusMessage = $"Uploading {files.Count} file(s) to {folder.Path}...";
+            await _provider.Operations.UploadFilesAsync(files, folder.Path, strategy.Value);
+            StatusMessage = $"Uploaded {files.Count} file(s) to {folder.Path}.";
+            await InvalidateDeepMetricsAsync(folder.Path);
+
+            if (string.Equals(folder.Path, CurrentPath, StringComparison.Ordinal))
+            {
+                _ = RefreshAsync(); // Refresh in background
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = FormatDriveError(folder.Path, ex);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    /// <summary>"Descargar aquí" — a quick download into whatever folder the local pane currently shows, reusing the drag-and-drop download path (<see cref="HandleCloudItemsDroppedAsync"/>).</summary>
+    public Task DownloadToLocalPaneAsync(DriveItem item)
+        => HandleCloudItemsDroppedAsync(new[] { item }, LocalExplorer.CurrentPath);
+
+    /// <summary>"Sincronizar esta ruta..." on a cloud folder row — opens the wizard pre-filled with this folder as the remote side.</summary>
+    public Task SyncSelectedRemotePathAsync(DriveItem item)
+        => item.IsFolder ? SyncPanel.AddPairAsync(new SyncPairPrefill(item.Path, null)) : Task.CompletedTask;
+
+    public async Task ShowPropertiesAsync(DriveItem item)
+    {
+        var show = RequestShowPropertiesAsync;
+        if (show is null)
+        {
+            return;
+        }
+
+        var fields = new List<PropertyField>
+        {
+            new("Name", item.Name),
+            new("Path", item.Path),
+            new("Type", item.IsFolder ? "Folder" : "File"),
+        };
+
+        if (item.Size is not null)
+        {
+            fields.Add(new PropertyField("Size", $"{item.Size:n0} bytes"));
+        }
+
+        if (item.ModifiedAt is not null)
+        {
+            fields.Add(new PropertyField("Modified", item.ModifiedAt.Value.ToLocalTime().ToString("g")));
+        }
+
+        await show(item.Name, fields);
+    }
+
     private async Task HandleRowClickAsync(DriveItem item)
     {
         SelectRow(RootItems.FirstOrDefault(node => node.Item.Path == item.Path));
@@ -2308,7 +2421,16 @@ public sealed class MainWindowViewModel : ObservableObject
         RootItems.Clear();
         foreach (var item in DriveItemSorter.Sort(visible, SortKey, SortDescending))
         {
-            var node = new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, PreviewItemAsync, HandleUnexpectedError);
+            var node = new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, PreviewItemAsync, HandleUnexpectedError, new DriveNodeSyncActions
+            {
+                FindSyncPair = i => SyncPanel.FindPairByRemotePath(i.Path),
+                SyncSelectedPathAsync = SyncSelectedRemotePathAsync,
+                CopyPathAsync = CopyPathAsync,
+                UploadToFolderAsync = UploadToFolderAsync,
+                DownloadHereAsync = DownloadToLocalPaneAsync,
+                ShowPropertiesAsync = ShowPropertiesAsync,
+                RefreshPaneAsync = RefreshAsync,
+            });
             if (previouslySelectedPath is not null && item.Path == previouslySelectedPath)
             {
                 node.IsSelected = true;

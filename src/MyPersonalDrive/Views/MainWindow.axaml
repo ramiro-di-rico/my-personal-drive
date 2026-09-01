@@ -472,6 +472,20 @@
                       Classes.selected="{Binding IsSelected}"
                       ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto"
                       Margin="0,0,0,6">
+                  <Grid.ContextMenu>
+                    <ContextMenu>
+                      <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
+                      <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
+                      <Separator IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
+                      <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
+                      <MenuItem Header="Pausar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
+                      <MenuItem Header="Reanudar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
+                      <Separator />
+                      <MenuItem Header="Propiedades" Command="{Binding PropertiesCommand}" />
+                    </ContextMenu>
+                  </Grid.ContextMenu>
                   <Button Grid.Column="0"
                           Command="{Binding RowCommand}"
                           ToolTip.Tip="Select item or open folder"
@@ -482,6 +496,10 @@
                       <Path Classes="icon" Data="{StaticResource IconFolder}" IsVisible="{Binding IsFolder}" />
                       <Path Classes="icon" Data="{StaticResource IconFile}" IsVisible="{Binding IsFile}" />
                       <TextBlock Text="{Binding DisplayName}" />
+                      <Path Classes="icon" Data="{StaticResource IconRefresh}" Width="12" Height="12" Opacity="0.7"
+                            IsVisible="{Binding IsSyncPairActive}" ToolTip.Tip="Par de sincronización activo" />
+                      <Path Classes="icon" Data="{StaticResource IconPause}" Width="12" Height="12" Opacity="0.7"
+                            IsVisible="{Binding IsSyncPairPaused}" ToolTip.Tip="Par de sincronización pausado" />
                     </StackPanel>
                   </Button>
 
@@ -565,7 +583,17 @@
                       <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
                       <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
                       <MenuItem Header="Descargar" Command="{Binding DownloadCommand}" IsVisible="{Binding IsFile}" />
+                      <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
+                      <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
+                      <Separator IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
+                      <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
+                      <MenuItem Header="Pausar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
+                      <MenuItem Header="Reanudar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
+                      <Separator />
                       <MenuItem Header="Mover a la papelera" Command="{Binding TrashCommand}" />
+                      <MenuItem Header="Propiedades" Command="{Binding PropertiesCommand}" />
                     </ContextMenu>
                   </Border.ContextMenu>
                   <Button Command="{Binding RowCommand}"
@@ -614,7 +642,17 @@
                       <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
                       <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
                       <MenuItem Header="Descargar" Command="{Binding DownloadCommand}" IsVisible="{Binding IsFile}" />
+                      <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
+                      <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
+                      <Separator IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
+                      <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
+                      <MenuItem Header="Pausar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
+                      <MenuItem Header="Reanudar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
+                      <Separator />
                       <MenuItem Header="Mover a la papelera" Command="{Binding TrashCommand}" />
+                      <MenuItem Header="Propiedades" Command="{Binding PropertiesCommand}" />
                     </ContextMenu>
                   </Border.ContextMenu>
                   <Button Command="{Binding RowCommand}"
@@ -778,7 +816,21 @@
                   <Button Classes="hoverGroup"
                           Command="{Binding RowCommand}"
                           HorizontalContentAlignment="Stretch">
-                    <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+                    <Button.ContextMenu>
+                      <ContextMenu>
+                        <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
+                        <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
+                        <Separator IsVisible="{Binding IsFolder}" />
+                        <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
+                        <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
+                        <MenuItem Header="Pausar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
+                        <MenuItem Header="Reanudar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
+                        <Separator />
+                        <MenuItem Header="Eliminar" Command="{Binding DeleteCommand}" />
+                        <MenuItem Header="Propiedades" Command="{Binding PropertiesCommand}" />
+                      </ContextMenu>
+                    </Button.ContextMenu>
+                    <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
                       <Path Grid.Column="0"
                             Classes="icon"
                             Width="18"
@@ -788,12 +840,30 @@
                                  VerticalAlignment="Center"
                                  TextTrimming="CharacterEllipsis"
                                  Text="{Binding DisplayName}" />
-                      <TextBlock Grid.Column="2"
+                      <Path Grid.Column="2"
+                            Classes="icon"
+                            Width="12"
+                            Height="12"
+                            Opacity="0.7"
+                            VerticalAlignment="Center"
+                            Data="{StaticResource IconRefresh}"
+                            IsVisible="{Binding IsSyncPairActive}"
+                            ToolTip.Tip="Par de sincronización activo" />
+                      <Path Grid.Column="2"
+                            Classes="icon"
+                            Width="12"
+                            Height="12"
+                            Opacity="0.7"
+                            VerticalAlignment="Center"
+                            Data="{StaticResource IconPause}"
+                            IsVisible="{Binding IsSyncPairPaused}"
+                            ToolTip.Tip="Par de sincronización pausado" />
+                      <TextBlock Grid.Column="3"
                                  VerticalAlignment="Center"
                                  FontSize="12"
                                  Opacity="0.8"
                                  Text="{Binding SizeText}" />
-                      <TextBlock Grid.Column="3"
+                      <TextBlock Grid.Column="4"
                                  VerticalAlignment="Center"
                                  FontSize="12"
                                  Opacity="0.7"

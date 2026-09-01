@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
@@ -477,6 +478,13 @@ public partial class MainWindow : Window
         viewModel.RequestDownloadFolderAsync = PickDownloadFolderAsync;
         viewModel.RequestSaveActivityAsync = PickSaveActivityAsync;
         viewModel.RequestConfirmationAsync = AskAsync;
+        viewModel.RequestCopyToClipboardAsync = CopyToClipboardAsync;
+        viewModel.RequestShowPropertiesAsync = ShowPropertiesAsync;
+
+        viewModel.LocalExplorer.RequestConfirmationAsync = AskAsync;
+        viewModel.LocalExplorer.RequestRenameAsync = PromptForRenameAsync;
+        viewModel.LocalExplorer.RequestCopyToClipboardAsync = CopyToClipboardAsync;
+        viewModel.LocalExplorer.RequestShowPropertiesAsync = ShowPropertiesAsync;
 
         viewModel.BreadcrumbItems.CollectionChanged -= ScrollBreadcrumbToEnd;
         viewModel.BreadcrumbItems.CollectionChanged += ScrollBreadcrumbToEnd;
@@ -488,7 +496,7 @@ public partial class MainWindow : Window
         viewModel.PropertyChanged += OnMainWindowViewModelPropertyChanged;
         ApplyLocalExplorerPanelColumnWidth(viewModel.IsLocalExplorerPanelVisible);
 
-        viewModel.SyncPanel.RequestNewPairAsync = () => PromptForNewPairAsync(viewModel.SyncPanel, viewModel.RootPath);
+        viewModel.SyncPanel.RequestNewPairAsync = prefill => PromptForNewPairAsync(viewModel.SyncPanel, viewModel.RootPath, prefill);
         viewModel.SyncPanel.RequestPreviewConfirmationAsync = ShowPreviewAsync;
         viewModel.SyncPanel.RequestConflictResolutionsAsync = ShowConflictsAsync;
         viewModel.SyncPanel.RequestConfirmationAsync = AskAsync;
@@ -787,11 +795,11 @@ public partial class MainWindow : Window
     /// "Add sync pair", with the remote folder browser as a second face of the same dialog
     /// (swapping its Content) instead of a window stacked on top of it — one modal, not two.
     /// </summary>
-    private async Task<NewSyncPairRequest?> PromptForNewPairAsync(SyncPanelViewModel syncPanel, string remoteRootPath)
+    private async Task<NewSyncPairRequest?> PromptForNewPairAsync(SyncPanelViewModel syncPanel, string remoteRootPath, SyncPairPrefill? prefill = null)
     {
-        var remoteBox = new TextBox { PlaceholderText = "/my-files/Documents", Width = 280 };
+        var remoteBox = new TextBox { PlaceholderText = "/my-files/Documents", Width = 280, Text = prefill?.RemotePath };
         var remoteBrowseButton = new Button { Content = "Browse", IsVisible = syncPanel.GetRemoteFolderChildren is not null };
-        var localBox = new TextBox { Width = 280, IsReadOnly = true, PlaceholderText = "Choose a local folder..." };
+        var localBox = new TextBox { Width = 280, IsReadOnly = true, PlaceholderText = "Choose a local folder...", Text = prefill?.LocalPath };
         var browseButton = new Button { Content = "Browse" };
 
         // RemoteToLocal stays first, and therefore the default: it's the only direction that
@@ -1352,6 +1360,54 @@ public partial class MainWindow : Window
 
         await dialog.ShowDialog(this);
         return apply ? chosen : new Dictionary<long, ConflictResolution>();
+    }
+
+    /// <summary>Puts text on the system clipboard — "Copiar ruta" (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6). Silently a no-op if the platform offers no clipboard (e.g. a headless test host).</summary>
+    private async Task CopyToClipboardAsync(string text)
+    {
+        var clipboard = Clipboard;
+        if (clipboard is not null)
+        {
+            await clipboard.SetTextAsync(text);
+        }
+    }
+
+    /// <summary>A read-only "Properties" info panel — "Propiedades" (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6).</summary>
+    private async Task ShowPropertiesAsync(string title, IReadOnlyList<PropertyField> fields)
+    {
+        var children = new List<Control>
+        {
+            new TextBlock { Text = title, FontWeight = Avalonia.Media.FontWeight.Bold, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+        };
+
+        children.AddRange(fields.Select(field => new TextBlock
+        {
+            Text = $"{field.Label}: {field.Value}",
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+        }));
+
+        var okButton = new Button { Content = "OK", IsDefault = true, IsCancel = true, Width = 80 };
+        children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { okButton },
+        });
+
+        var contentPanel = new StackPanel { Spacing = 10, Margin = new Avalonia.Thickness(20) };
+        contentPanel.Children.AddRange(children);
+
+        var dialog = new Window
+        {
+            Title = "Properties",
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = contentPanel,
+        };
+
+        okButton.Click += (_, _) => dialog.Close();
+        await dialog.ShowDialog(this);
     }
 
     /// <summary>

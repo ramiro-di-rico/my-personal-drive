@@ -66,4 +66,40 @@ public class LocalFileSystemService
     /// asking the CLI to download over it.
     /// </summary>
     public virtual bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
+
+    /// <summary>
+    /// Permanently deletes a local file or folder (recursively for a folder) — docs/
+    /// INTERFACE_IMPROVEMENT_PLAN.md Task 6's local-pane context menu. There is no local "trash":
+    /// unlike the cloud side, the OS provides no CLI-reachable recycle bin here, so the caller must
+    /// confirm with the user before calling this.
+    /// </summary>
+    public virtual void Delete(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, recursive: true);
+        }
+        else if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>Renames a local file or folder in place, returning its new full path.</summary>
+    public virtual string Rename(string path, string newName)
+    {
+        var parent = Path.GetDirectoryName(path) ?? throw new IOException($"'{path}' has no parent directory.");
+        var newPath = Path.Combine(parent, newName);
+
+        if (Directory.Exists(path))
+        {
+            Directory.Move(path, newPath);
+        }
+        else
+        {
+            File.Move(path, newPath);
+        }
+
+        return newPath;
+    }
 }

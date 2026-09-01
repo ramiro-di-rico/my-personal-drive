@@ -65,7 +65,7 @@ public sealed class SyncPanelViewModel : ObservableObject
         AccountSyncToggles = new ObservableCollection<AccountSyncToggleViewModel>();
         ProviderFilters = new ObservableCollection<ProviderFilterViewModel>();
 
-        AddPairCommand = new AsyncCommand(AddPairAsync, () => !IsBusy, ReportError);
+        AddPairCommand = new AsyncCommand(() => AddPairAsync(), () => !IsBusy, ReportError);
         RefreshCommand = new AsyncCommand(LoadPairsAsync, () => !IsBusy, ReportError);
         ToggleAutomaticSyncCommand = new AsyncCommand(ToggleAutomaticSyncAsync, () => Primary.Scheduler is not null, ReportError);
 
@@ -168,8 +168,12 @@ public sealed class SyncPanelViewModel : ObservableObject
         }
     }
 
-    /// <summary>Prompts for a new pair's settings; null means the user canceled.</summary>
-    public Func<Task<NewSyncPairRequest?>>? RequestNewPairAsync { get; set; }
+    /// <summary>
+    /// Prompts for a new pair's settings; null means the user canceled. Takes an optional prefill —
+    /// the "Sync Selected Path..." context-menu action (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6)
+    /// already knows one side of the pair, the toolbar's plain "Add pair" button passes null.
+    /// </summary>
+    public Func<SyncPairPrefill?, Task<NewSyncPairRequest?>>? RequestNewPairAsync { get; set; }
 
     /// <summary>
     /// Lists a remote folder's children, for the "Add pair" dialog's remote folder picker.
@@ -376,7 +380,12 @@ public sealed class SyncPanelViewModel : ObservableObject
         return Task.CompletedTask;
     }
 
-    private async Task AddPairAsync()
+    /// <summary>
+    /// Public (not just <see cref="AddPairCommand"/>) so the explorer's "Sync Selected Path..."
+    /// context-menu action (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6) can drive the exact same
+    /// validated create flow with a prefill, rather than duplicating it.
+    /// </summary>
+    public async Task AddPairAsync(SyncPairPrefill? prefill = null)
     {
         var requester = RequestNewPairAsync;
         if (requester is null)
@@ -385,7 +394,7 @@ public sealed class SyncPanelViewModel : ObservableObject
             return;
         }
 
-        var request = await requester();
+        var request = await requester(prefill);
         if (request is null)
         {
             return;
@@ -458,6 +467,17 @@ public sealed class SyncPanelViewModel : ObservableObject
             $"'{request.LocalPath}' already contains more than {LocalFolderInspector.BusyFolderThreshold} items. " +
             $"Syncing it in this direction will upload all of them to {targetSlot.DisplayName}. Continue?");
     }
+
+    /// <summary>Looks up the configured pair (if any) whose remote side is <paramref name="remotePath"/> — for the cloud pane's sync badges (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6).</summary>
+    public SyncPairViewModel? FindPairByRemotePath(string remotePath)
+        => Pairs.FirstOrDefault(pair => PathsEqual(pair.RemotePath, remotePath));
+
+    /// <summary>Looks up the configured pair (if any) whose local side is <paramref name="localPath"/> — for the local pane's sync badges.</summary>
+    public SyncPairViewModel? FindPairByLocalPath(string localPath)
+        => Pairs.FirstOrDefault(pair => PathsEqual(pair.LocalPath, localPath));
+
+    private static bool PathsEqual(string a, string b)
+        => string.Equals(a.TrimEnd('/', '\\'), b.TrimEnd('/', '\\'), StringComparison.Ordinal);
 
     private static string DirectionArrow(SyncDirection direction) => direction switch
     {

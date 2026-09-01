@@ -42,8 +42,44 @@ public class SyncPanelPairCreationTests : IDisposable
     }
 
     private static void Answer(SyncPanelViewModel panel, string remotePath, string localPath)
-        => panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(
+        => panel.RequestNewPairAsync = _ => Task.FromResult<NewSyncPairRequest?>(
             new NewSyncPairRequest(remotePath, localPath, SyncDirection.TwoWay, ConflictPolicy.Ask));
+
+    [Fact]
+    public async Task AddPairAsync_ForwardsItsPrefillToTheRequester()
+    {
+        var (panel, _) = Build();
+        var outer = Path.Combine(_root, "Docs");
+        Directory.CreateDirectory(outer);
+        SyncPairPrefill? received = null;
+        panel.RequestNewPairAsync = prefill =>
+        {
+            received = prefill;
+            return Task.FromResult<NewSyncPairRequest?>(new NewSyncPairRequest("/my-files/Docs", outer, SyncDirection.TwoWay, ConflictPolicy.Ask));
+        };
+
+        // "Sync Selected Path..." on a cloud row (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6) only
+        // knows the remote side — the local side is still the user's to fill in via the dialog.
+        await panel.AddPairAsync(new SyncPairPrefill("/my-files/Docs", null));
+
+        Assert.Equal(new SyncPairPrefill("/my-files/Docs", null), received);
+    }
+
+    [Fact]
+    public async Task FindPairByRemotePathAndLocalPath_ReturnTheMatchingRow_OrNull()
+    {
+        var (panel, _) = Build();
+        var outer = Path.Combine(_root, "Docs");
+        Directory.CreateDirectory(outer);
+        Answer(panel, "/my-files/Docs", outer);
+
+        await panel.AddPairCommand.ExecuteAsync();
+
+        Assert.NotNull(panel.FindPairByRemotePath("/my-files/Docs"));
+        Assert.NotNull(panel.FindPairByLocalPath(outer));
+        Assert.Null(panel.FindPairByRemotePath("/my-files/Nope"));
+        Assert.Null(panel.FindPairByLocalPath(Path.Combine(_root, "Nope")));
+    }
 
     [Fact]
     public async Task ANestedLocalFolder_IsRefused_AndNothingIsPersisted()
@@ -160,7 +196,7 @@ public class SyncPanelPairCreationTests : IDisposable
             return Task.FromResult(false); // the user declines
         };
 
-        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(
+        panel.RequestNewPairAsync = _ => Task.FromResult<NewSyncPairRequest?>(
             new NewSyncPairRequest("/my-files/Docs", busy, SyncDirection.LocalToRemote, ConflictPolicy.Ask));
         await panel.AddPairCommand.ExecuteAsync();
 
@@ -182,7 +218,7 @@ public class SyncPanelPairCreationTests : IDisposable
         }
 
         panel.RequestConfirmationAsync = _ => Task.FromResult(true);
-        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(
+        panel.RequestNewPairAsync = _ => Task.FromResult<NewSyncPairRequest?>(
             new NewSyncPairRequest("/my-files/Docs", busy, SyncDirection.TwoWay, ConflictPolicy.Ask));
 
         await panel.AddPairCommand.ExecuteAsync();
@@ -210,7 +246,7 @@ public class SyncPanelPairCreationTests : IDisposable
             return Task.FromResult(true);
         };
 
-        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(
+        panel.RequestNewPairAsync = _ => Task.FromResult<NewSyncPairRequest?>(
             new NewSyncPairRequest("/my-files/Docs", busy, SyncDirection.RemoteToLocal, ConflictPolicy.Ask));
         await panel.AddPairCommand.ExecuteAsync();
 
@@ -234,7 +270,7 @@ public class SyncPanelPairCreationTests : IDisposable
     public async Task CancellingTheDialog_ChangesNothing()
     {
         var (panel, store) = Build();
-        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(null);
+        panel.RequestNewPairAsync = _ => Task.FromResult<NewSyncPairRequest?>(null);
 
         await panel.AddPairCommand.ExecuteAsync();
 

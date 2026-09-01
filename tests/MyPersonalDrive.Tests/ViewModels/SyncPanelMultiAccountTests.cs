@@ -171,7 +171,7 @@ public class SyncPanelMultiAccountTests : IDisposable
         var accountB = BuildAccount("account-b");
         var panel = new SyncPanelViewModel(accountA.Store, accountA.Executor, new SyncCrashRecovery(accountA.Store), accountA.Scheduler, "Account A");
         panel.AddAccount(accountB.Store, accountB.Executor, new SyncCrashRecovery(accountB.Store), accountB.Scheduler, "Account B");
-        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(
+        panel.RequestNewPairAsync = _ => Task.FromResult<NewSyncPairRequest?>(
             new NewSyncPairRequest("/remote-b", _localRootB, SyncDirection.RemoteToLocal, ConflictPolicy.Ask));
 
         panel.SetActiveAccount("Account B");
@@ -187,7 +187,7 @@ public class SyncPanelMultiAccountTests : IDisposable
     {
         var accountA = BuildAccount("account-a");
         var panel = new SyncPanelViewModel(accountA.Store, accountA.Executor, new SyncCrashRecovery(accountA.Store), accountA.Scheduler, "Account A");
-        panel.RequestNewPairAsync = () => Task.FromResult<NewSyncPairRequest?>(
+        panel.RequestNewPairAsync = _ => Task.FromResult<NewSyncPairRequest?>(
             new NewSyncPairRequest("/remote-a", _localRootA, SyncDirection.RemoteToLocal, ConflictPolicy.Ask));
 
         panel.SetActiveAccount("Some Account That Was Removed");

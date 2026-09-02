@@ -831,14 +831,22 @@ public partial class MainWindow : Window
 
         var policyLabel = new TextBlock { Text = "When both sides changed:", FontWeight = Avalonia.Media.FontWeight.Bold };
 
+        // Only meaningful for a one-way pair (SyncPair.MirrorDeletes) — a two-way pair already
+        // tracks deletions through its baseline, so there is no "extra file at the destination"
+        // for this to opt out of. Checked by default: today's only behavior before this existed
+        // was a strict mirror, and every new pair should keep that unless asked otherwise.
+        var mirrorDeletesCheckBox = new CheckBox { Content = "Delete files at the destination that no longer exist at the source", IsChecked = true };
+
         // The conflict policy is only ever consulted in two-way mode — a one-way mirror's source
         // side wins by definition, so showing the choice there would imply a decision that
-        // doesn't exist.
+        // doesn't exist. "Delete extra files" is the opposite: it only means something for a
+        // one-way pair, so it's hidden exactly when the policy picker is shown.
         void SyncPolicyVisibility()
         {
             var isTwoWay = directionBox.SelectedIndex == 2;
             policyBox.IsVisible = isTwoWay;
             policyLabel.IsVisible = isTwoWay;
+            mirrorDeletesCheckBox.IsVisible = !isTwoWay;
         }
 
         directionBox.SelectionChanged += (_, _) => SyncPolicyVisibility();
@@ -885,6 +893,7 @@ public partial class MainWindow : Window
                 directionBox,
                 policyLabel,
                 policyBox,
+                mirrorDeletesCheckBox,
                 new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
@@ -899,7 +908,7 @@ public partial class MainWindow : Window
         {
             Title = "Add sync pair",
             Width = 480,
-            Height = 520,
+            Height = 560,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Content = formPanel,
         };
@@ -931,7 +940,7 @@ public partial class MainWindow : Window
                     _ => ConflictPolicy.Ask,
                 };
 
-                result = new NewSyncPairRequest(remoteBox.Text.Trim(), localBox.Text.Trim(), direction, policy);
+                result = new NewSyncPairRequest(remoteBox.Text.Trim(), localBox.Text.Trim(), direction, policy, mirrorDeletesCheckBox.IsChecked ?? true);
             }
 
             dialog.Close();
@@ -988,11 +997,14 @@ public partial class MainWindow : Window
 
         var policyLabel = new TextBlock { Text = "When both sides changed:", FontWeight = Avalonia.Media.FontWeight.Bold };
 
+        var mirrorDeletesCheckBox = new CheckBox { Content = "Delete files at the destination that no longer exist at the source", IsChecked = pair.MirrorDeletes };
+
         void SyncPolicyVisibility()
         {
             var isTwoWay = directionBox.SelectedIndex == 2;
             policyBox.IsVisible = isTwoWay;
             policyLabel.IsVisible = isTwoWay;
+            mirrorDeletesCheckBox.IsVisible = !isTwoWay;
         }
 
         directionBox.SelectionChanged += (_, _) => SyncPolicyVisibility();
@@ -1005,7 +1017,7 @@ public partial class MainWindow : Window
         {
             Title = "Edit sync pair",
             Width = 440,
-            Height = 320,
+            Height = 360,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Content = new StackPanel
             {
@@ -1019,6 +1031,7 @@ public partial class MainWindow : Window
                     directionBox,
                     policyLabel,
                     policyBox,
+                    mirrorDeletesCheckBox,
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -1049,7 +1062,7 @@ public partial class MainWindow : Window
                 _ => ConflictPolicy.Ask,
             };
 
-            result = new EditSyncPairRequest(direction, policy);
+            result = new EditSyncPairRequest(direction, policy, mirrorDeletesCheckBox.IsChecked ?? true);
             dialog.Close();
         };
 

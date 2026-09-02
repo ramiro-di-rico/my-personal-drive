@@ -30,7 +30,8 @@ public static class SyncReconciler
         IReadOnlyDictionary<string, NodeFingerprint> remote,
         IReadOnlyDictionary<string, SyncBaselineEntry> baseline,
         DateTimeOffset conflictTimestamp,
-        TimeSpan? mtimeTolerance = null)
+        TimeSpan? mtimeTolerance = null,
+        bool mirrorDeletes = true)
     {
         var tolerance = mtimeTolerance ?? DefaultMtimeTolerance;
         var actions = new List<SyncAction>();
@@ -74,6 +75,7 @@ public static class SyncReconciler
                         createDestinationFolder: SyncOperation.CreateLocalFolder,
                         transferToDestination: SyncOperation.DownloadFile,
                         deleteDestination: SyncOperation.DeleteLocal,
+                        mirrorDeletes,
                         actions);
                     break;
 
@@ -82,6 +84,7 @@ public static class SyncReconciler
                         createDestinationFolder: SyncOperation.CreateRemoteFolder,
                         transferToDestination: SyncOperation.UploadFile,
                         deleteDestination: SyncOperation.TrashRemote,
+                        mirrorDeletes,
                         actions);
                     break;
 
@@ -258,15 +261,22 @@ public static class SyncReconciler
     /// consulted — a one-way mirror doesn't need one, and diverging destination-side changes
     /// are simply overwritten (per §5.2's note on one-way modes), which is exactly why F1
     /// starts with RemoteToLocal: it's the direction that can't destroy cloud data.
+    ///
+    /// <paramref name="mirrorDeletes"/> is the opt-out from the "mirror" half of that: when
+    /// false, a destination-only item is left alone instead of deleted, turning the pair into an
+    /// additive one-way copy (docs/INTERFACE_IMPROVEMENT_PLAN.md — "keep what's already there").
+    /// Creates and transfers are unaffected either way; the source side is still authoritative
+    /// for anything it actually has an opinion about.
     /// </summary>
     private static void ReconcileOneWay(
         string path, bool isFolder, NodeFingerprint? source, NodeFingerprint? destination, TimeSpan tolerance,
         SyncOperation createDestinationFolder, SyncOperation transferToDestination, SyncOperation deleteDestination,
+        bool mirrorDeletes,
         List<SyncAction> actions)
     {
         if (source is null)
         {
-            if (destination is not null)
+            if (destination is not null && mirrorDeletes)
             {
                 actions.Add(new SyncAction(deleteDestination, path, null, null, PriorityFor(deleteDestination, path)));
             }

@@ -229,5 +229,12 @@ public static class DriveDatabaseMigrations
 
             ALTER TABLE SyncState ADD COLUMN HashAlgorithm TEXT;
             """),
+        // Per-pair opt-out from mirroring destination-only deletes in one-way sync (docs/
+        // INTERFACE_IMPROVEMENT_PLAN.md) — only consulted for RemoteToLocal/LocalToRemote,
+        // ignored for TwoWay. Defaults to 1 so every existing pair keeps today's strict-mirror
+        // behavior unchanged.
+        new SqliteMigration(7, """
+            ALTER TABLE SyncPairs ADD COLUMN MirrorDeletes INTEGER NOT NULL DEFAULT 1;
+            """),
     ];
 }

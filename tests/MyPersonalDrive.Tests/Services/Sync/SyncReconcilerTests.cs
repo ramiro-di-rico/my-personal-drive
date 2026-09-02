@@ -38,8 +38,9 @@ public class SyncReconcilerTests
         Dictionary<string, NodeFingerprint>? local = null,
         Dictionary<string, NodeFingerprint>? remote = null,
         Dictionary<string, SyncBaselineEntry>? baseline = null,
-        ConflictPolicy policy = ConflictPolicy.Ask)
-        => SyncReconciler.Reconcile(pairId: 1, direction, policy, local ?? Empty, remote ?? Empty, baseline ?? NoBaseline, Timestamp);
+        ConflictPolicy policy = ConflictPolicy.Ask,
+        bool mirrorDeletes = true)
+        => SyncReconciler.Reconcile(pairId: 1, direction, policy, local ?? Empty, remote ?? Empty, baseline ?? NoBaseline, Timestamp, mirrorDeletes: mirrorDeletes);
 
     // ---- TwoWay: row by row from §5.2 ----
 
@@ -394,6 +395,14 @@ public class SyncReconcilerTests
     }
 
     [Fact]
+    public void RemoteToLocal_RemovedFromRemote_WithMirrorDeletesOff_KeepsLocal()
+    {
+        var plan = Reconcile(SyncDirection.RemoteToLocal, local: Map(FileFp("a.txt")), mirrorDeletes: false);
+
+        Assert.Empty(plan.Actions);
+    }
+
+    [Fact]
     public void RemoteToLocal_NeverTouchesRemote()
     {
         var plan = Reconcile(SyncDirection.RemoteToLocal, local: Map(FileFp("orphan.txt")));
@@ -417,6 +426,24 @@ public class SyncReconcilerTests
         var plan = Reconcile(SyncDirection.LocalToRemote, remote: Map(FileFp("a.txt")));
 
         Assert.Equal(SyncOperation.TrashRemote, Assert.Single(plan.Actions).Operation);
+    }
+
+    [Fact]
+    public void LocalToRemote_RemovedLocally_WithMirrorDeletesOff_KeepsRemote()
+    {
+        var plan = Reconcile(SyncDirection.LocalToRemote, remote: Map(FileFp("a.txt")), mirrorDeletes: false);
+
+        Assert.Empty(plan.Actions);
+    }
+
+    [Fact]
+    public void LocalToRemote_WithMirrorDeletesOff_StillUploadsNewLocalFiles()
+    {
+        // Turning off the mirror only opts out of destination-only deletes — it must not become a
+        // no-op for the direction's actual job.
+        var plan = Reconcile(SyncDirection.LocalToRemote, local: Map(FileFp("a.txt")), mirrorDeletes: false);
+
+        Assert.Equal(SyncOperation.UploadFile, Assert.Single(plan.Actions).Operation);
     }
 
     [Fact]

@@ -9,4 +9,5 @@ public sealed record NewSyncPairRequest(
     string RemotePath,
     string LocalPath,
     SyncDirection Direction,
-    ConflictPolicy ConflictPolicy);
+    ConflictPolicy ConflictPolicy,
+    bool MirrorDeletes = true);

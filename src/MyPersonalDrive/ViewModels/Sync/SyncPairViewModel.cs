@@ -65,6 +65,9 @@ public sealed class SyncPairViewModel : ObservableObject
 
     public ConflictPolicy ConflictPolicy => _pair.ConflictPolicy;
 
+    /// <summary>True mirrors the source side exactly (deletes destination-only items); false keeps the pair additive. Only meaningful for a one-way pair — see <see cref="SyncPair.MirrorDeletes"/>.</summary>
+    public bool MirrorDeletes => _pair.MirrorDeletes;
+
     public string StatusText
     {
         get => _statusText;
@@ -366,11 +369,12 @@ public sealed class SyncPairViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            await _stateStore.UpdatePairSettingsAsync(_pair.Id, request.Direction, request.ConflictPolicy);
+            await _stateStore.UpdatePairSettingsAsync(_pair.Id, request.Direction, request.ConflictPolicy, request.MirrorDeletes);
             _pair = await _stateStore.GetPairAsync(_pair.Id) ?? _pair;
             OnPropertyChanged(nameof(DirectionText));
             OnPropertyChanged(nameof(Direction));
             OnPropertyChanged(nameof(ConflictPolicy));
+            OnPropertyChanged(nameof(MirrorDeletes));
             UpdateStatusText();
         }
         finally

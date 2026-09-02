@@ -37,6 +37,32 @@ public class SyncStateStoreTests : IDisposable
         Assert.Equal(["*.tmp", ".git/"], pair.ExcludeGlobs);
         Assert.Equal(SyncPairStatus.Never, pair.LastStatus);
         Assert.Null(pair.LastSyncAt);
+        Assert.True(pair.MirrorDeletes);
+    }
+
+    [Fact]
+    public async Task CreatePair_WithMirrorDeletesOff_RoundTrips()
+    {
+        var sut = CreateSut();
+
+        var created = await sut.CreatePairAsync("/my-files/Docs", "/home/user/Docs", SyncDirection.LocalToRemote, ConflictPolicy.Ask, mirrorDeletes: false);
+        Assert.False(created.MirrorDeletes);
+
+        var pair = Assert.Single(await sut.GetPairsAsync());
+        Assert.False(pair.MirrorDeletes);
+        Assert.False((await sut.GetPairAsync(pair.Id))!.MirrorDeletes);
+    }
+
+    [Fact]
+    public async Task UpdatePairSettings_ChangesMirrorDeletes()
+    {
+        var sut = CreateSut();
+        var pair = await sut.CreatePairAsync("/my-files/A", "/home/user/A", SyncDirection.LocalToRemote, ConflictPolicy.Ask);
+        Assert.True(pair.MirrorDeletes);
+
+        await sut.UpdatePairSettingsAsync(pair.Id, SyncDirection.LocalToRemote, ConflictPolicy.Ask, mirrorDeletes: false);
+
+        Assert.False((await sut.GetPairAsync(pair.Id))!.MirrorDeletes);
     }
 
     [Fact]

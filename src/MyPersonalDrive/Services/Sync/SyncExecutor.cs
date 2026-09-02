@@ -93,7 +93,7 @@ public sealed class SyncExecutor
         var baseline = await LoadBaselineAsync(pair, cancellationToken);
         var (local, remote, _) = await ScanBothSidesAsync(pair, baseline, cancellationToken);
         var plan = SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote,
-            baseline, _timeProvider.GetUtcNow());
+            baseline, _timeProvider.GetUtcNow(), mirrorDeletes: pair.MirrorDeletes);
         await _stateStore.ClearStaleFailedActionsAsync(pair.Id, plan.Actions, cancellationToken);
         return plan;
     }
@@ -126,7 +126,7 @@ public sealed class SyncExecutor
         var (local, remote, mapper) = await ScanBothSidesAsync(pair, baseline, cancellationToken);
         var now = _timeProvider.GetUtcNow();
         var plan = SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote,
-            baseline, now);
+            baseline, now, mirrorDeletes: pair.MirrorDeletes);
 
         await _stateStore.EnqueueActionsAsync(pair.Id, plan.Actions, now, cancellationToken);
 

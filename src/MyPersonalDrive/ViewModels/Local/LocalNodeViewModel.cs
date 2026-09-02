@@ -13,14 +13,15 @@ namespace MyPersonalDrive.ViewModels.Local;
 public sealed class LocalNodeViewModel : ObservableObject
 {
     private readonly LocalNodeSyncActions? _syncActions;
+    private bool _isSelected;
 
-    public LocalNodeViewModel(DriveItem item, Func<DriveItem, Task> navigateAsync, Action<Exception>? onError = null, LocalNodeSyncActions? syncActions = null)
+    public LocalNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Action<Exception>? onError = null, LocalNodeSyncActions? syncActions = null)
     {
         Item = item;
         FileKind = FileKindClassifier.Classify(item.Name, item.IsFolder);
         _syncActions = syncActions;
         SyncPair = syncActions?.FindSyncPair?.Invoke(item);
-        RowCommand = new AsyncCommand(() => IsFolder ? navigateAsync(Item) : Task.CompletedTask, onError: onError);
+        RowCommand = new AsyncCommand(() => handleRowClickAsync(Item), onError: onError);
         CopyPathCommand = new AsyncCommand(CopyPathAsync, () => _syncActions?.CopyPathAsync is not null, onError);
         RenameCommand = new AsyncCommand(RenameAsync, () => _syncActions?.RenameAsync is not null, onError);
         DeleteCommand = new AsyncCommand(DeleteAsync, () => _syncActions?.DeleteAsync is not null, onError);
@@ -30,6 +31,13 @@ public sealed class LocalNodeViewModel : ObservableObject
     }
 
     public DriveItem Item { get; }
+
+    /// <summary>Driven by <c>LocalExplorerViewModel</c>'s multi-select (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2), mirrors <c>DriveNodeViewModel.IsSelected</c>.</summary>
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set => SetProperty(ref _isSelected, value);
+    }
 
     public bool IsFolder => Item.IsFolder;
 

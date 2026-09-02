@@ -211,6 +211,130 @@ public class LocalExplorerViewModelTests : IDisposable
         Assert.Equal(Path.Combine(_root, "note.txt"), copied);
     }
 
+    // ---------------------------------------------------------------- multi-select (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2)
+
+    /// <summary>Four files, alphabetically named so the default name sort leaves them in this exact order — folders sort first (see <see cref="NavigateAsync_ListsAndSortsWithFoldersFirst"/>), so mixing one in would make the indices these tests depend on unpredictable.</summary>
+    private async Task<LocalExplorerViewModel> LoadFourFilesAsync()
+    {
+        foreach (var name in new[] { "a.txt", "b.txt", "c.txt", "d.txt" })
+        {
+            File.WriteAllText(Path.Combine(_root, name), "x");
+        }
+
+        var sut = Build(_root);
+        await sut.NavigateAsync(_root);
+        return sut;
+    }
+
+    private static LocalNodeViewModel Row(LocalExplorerViewModel sut, string name)
+        => sut.Items.Single(i => i.DisplayName == name);
+
+    [Fact]
+    public async Task ToggleSelection_AddsARowWithoutClearingOthers()
+    {
+        var sut = await LoadFourFilesAsync();
+
+        sut.ToggleSelection(Row(sut, "a.txt"));
+        sut.ToggleSelection(Row(sut, "d.txt"));
+
+        Assert.Equal(2, sut.SelectedCount);
+        Assert.True(Row(sut, "a.txt").IsSelected);
+        Assert.True(Row(sut, "d.txt").IsSelected);
+        Assert.False(Row(sut, "b.txt").IsSelected);
+    }
+
+    [Fact]
+    public async Task ToggleSelection_TwiceOnTheSameRow_DeselectsIt()
+    {
+        var sut = await LoadFourFilesAsync();
+        var row = Row(sut, "a.txt");
+
+        sut.ToggleSelection(row);
+        sut.ToggleSelection(row);
+
+        Assert.Equal(0, sut.SelectedCount);
+        Assert.False(row.IsSelected);
+    }
+
+    [Fact]
+    public async Task SelectRange_SelectsEveryRowBetweenTheAnchorAndTheTarget_Inclusive()
+    {
+        var sut = await LoadFourFilesAsync();
+        sut.ToggleSelection(Row(sut, "a.txt")); // anchor = a.txt (index 0)
+
+        sut.SelectRange(Row(sut, "d.txt")); // index 3
+
+        Assert.Equal(4, sut.SelectedCount);
+        Assert.All(sut.Items, node => Assert.True(node.IsSelected));
+    }
+
+    [Fact]
+    public async Task SelectAllCommand_SelectsEveryRow()
+    {
+        var sut = await LoadFourFilesAsync();
+
+        await sut.SelectAllCommand.ExecuteAsync();
+
+        Assert.Equal(4, sut.SelectedCount);
+    }
+
+    [Fact]
+    public async Task APlainClick_ResetsAMultiSelectionDownToOneRow()
+    {
+        var sut = await LoadFourFilesAsync();
+        await sut.SelectAllCommand.ExecuteAsync();
+
+        await Row(sut, "b.txt").RowCommand.ExecuteAsync();
+
+        Assert.Equal(1, sut.SelectedCount);
+        Assert.True(Row(sut, "b.txt").IsSelected);
+    }
+
+    [Fact]
+    public async Task NavigatingAway_ClearsTheSelection()
+    {
+        var sub = Directory.CreateDirectory(Path.Combine(_root, "sub")).FullName;
+        var sut = await LoadFourFilesAsync();
+        await sut.SelectAllCommand.ExecuteAsync();
+
+        await sut.NavigateAsync(sub);
+
+        Assert.Equal(0, sut.SelectedCount);
+    }
+
+    [Fact]
+    public async Task DeleteSelectedCommand_DeletesEverySelectedItem_AfterOneConfirmation()
+    {
+        var sut = await LoadFourFilesAsync();
+        var asked = new List<string>();
+        sut.RequestConfirmationAsync = question =>
+        {
+            asked.Add(question);
+            return Task.FromResult(true);
+        };
+        await sut.SelectAllCommand.ExecuteAsync();
+
+        await sut.DeleteSelectedCommand.ExecuteAsync();
+
+        Assert.Single(asked);
+        Assert.False(File.Exists(Path.Combine(_root, "a.txt")));
+        Assert.False(File.Exists(Path.Combine(_root, "d.txt")));
+        Assert.Empty(sut.Items);
+    }
+
+    [Fact]
+    public async Task DeleteSelectedCommand_WhenDeclined_DeletesNothing()
+    {
+        var sut = await LoadFourFilesAsync();
+        sut.RequestConfirmationAsync = _ => Task.FromResult(false);
+        await sut.SelectAllCommand.ExecuteAsync();
+
+        await sut.DeleteSelectedCommand.ExecuteAsync();
+
+        Assert.True(File.Exists(Path.Combine(_root, "a.txt")));
+        Assert.Equal(4, sut.Items.Count);
+    }
+
     [Fact]
     public async Task SyncSelectedPathAsync_OnAFolder_OpensTheWizardWithThatLocalPath()
     {

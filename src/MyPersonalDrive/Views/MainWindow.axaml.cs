@@ -56,6 +56,16 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnListingKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
     {
+        // Ctrl/Cmd+A (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) — scoped to this ListBox's own
+        // KeyDown rather than a window-level KeyBinding, so it never steals the same gesture from a
+        // focused TextBox (the search box, the CLI log filter) selecting its own text instead.
+        if (e.Key == Avalonia.Input.Key.A && e.KeyModifiers.HasFlag(KeyModifiers.Control) && DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.SelectAllRowsCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key is not (Avalonia.Input.Key.Enter or Avalonia.Input.Key.Space))
         {
             return;
@@ -70,6 +80,16 @@ public partial class MainWindow : Window
         // Fire and forget through the command, so the AsyncCommand's own error routing applies
         // rather than this handler becoming an `async void` that can take the process down.
         node.RowCommand.Execute(null);
+    }
+
+    /// <summary>The local pane's counterpart to <see cref="OnListingKeyDown"/>'s Ctrl/Cmd+A handling — the local pane has no Enter/Space activation to also cover, since its rows aren't focusable buttons the way the cloud pane's are.</summary>
+    private void OnLocalListingKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
+    {
+        if (e.Key == Avalonia.Input.Key.A && e.KeyModifiers.HasFlag(KeyModifiers.Control) && DataContext is MainWindowViewModel { LocalExplorer: { } explorer })
+        {
+            explorer.SelectAllCommand.Execute(null);
+            e.Handled = true;
+        }
     }
 
     /// <summary>
@@ -125,12 +145,48 @@ public partial class MainWindow : Window
         // Attached at the ListBox (see the constructor), not the row itself, so the row has to be
         // resolved by walking up from whatever was actually hit — usually the icon/text inside it.
         var row = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>(includeSelf: true);
-        if (row?.DataContext is LocalNodeViewModel node && e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        if (row?.DataContext is not LocalNodeViewModel node || !e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
         {
-            _localDragStartPoint = e.GetPosition(null);
-            _localDragCandidate = node;
-            _localDragPressedArgs = e;
+            return;
         }
+
+        // Ctrl/Shift+Click (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) is a selection gesture, not an
+        // activation or a drag start: handling it here, before the Button's own Click fires (this
+        // handler runs on Tunnel — see the constructor's comment), stops it from also opening a
+        // folder or resetting the multi-selection back down to one row.
+        if (DataContext is MainWindowViewModel { LocalExplorer: { } explorer } && HandleMultiSelectGesture(e, () => explorer.ToggleSelection(node), () => explorer.SelectRange(node)))
+        {
+            return;
+        }
+
+        _localDragStartPoint = e.GetPosition(null);
+        _localDragCandidate = node;
+        _localDragPressedArgs = e;
+    }
+
+    /// <summary>
+    /// Shared Ctrl/Shift-click routing for both panes' row-pressed handlers. Returns true (and
+    /// marks the event handled) when a modifier gesture was recognized and acted on, so the caller
+    /// skips its own plain-click handling (drag-start tracking, which would otherwise arm on a
+    /// selection gesture too).
+    /// </summary>
+    private static bool HandleMultiSelectGesture(PointerPressedEventArgs e, Action toggleSelection, Action selectRange)
+    {
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            selectRange();
+        }
+        else if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            toggleSelection();
+        }
+        else
+        {
+            return false;
+        }
+
+        e.Handled = true;
+        return true;
     }
 
     /// <summary>
@@ -290,12 +346,21 @@ public partial class MainWindow : Window
         // Attached at the ListBox (see the constructor), not the row itself — see the matching
         // comment on OnLocalRowPointerPressed.
         var row = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>(includeSelf: true);
-        if (row?.DataContext is DriveNodeViewModel node && e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        if (row?.DataContext is not DriveNodeViewModel node || !e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
         {
-            _cloudDragStartPoint = e.GetPosition(null);
-            _cloudDragCandidate = node;
-            _cloudDragPressedArgs = e;
+            return;
         }
+
+        // Ctrl/Shift+Click (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) — see the matching comment on
+        // OnLocalRowPointerPressed.
+        if (DataContext is MainWindowViewModel viewModel && HandleMultiSelectGesture(e, () => viewModel.ToggleSelection(node), () => viewModel.SelectRange(node)))
+        {
+            return;
+        }
+
+        _cloudDragStartPoint = e.GetPosition(null);
+        _cloudDragCandidate = node;
+        _cloudDragPressedArgs = e;
     }
 
     /// <summary>

@@ -55,6 +55,14 @@
       <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
     </Style>
 
+    <!-- The local pane's row root is a Button rather than a Grid (docs/INTERFACE_IMPROVEMENT_PLAN.md
+         §2.2's multi-select needed a highlight there too, which it never had before). Button
+         already supplies its own hover/pressed states from the theme, so only .selected needs its
+         own rule here. -->
+    <Style Selector="Button.hoverGroup.selected">
+      <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+    </Style>
+
     <!--
       The listing is hosted in a ListBox for its panel and keyboard focus handling, but the row
       chrome is entirely ours (.hoverGroup / .selected above, driven by the view model's own
@@ -359,7 +367,7 @@
       </Grid>
 
       <Grid x:Name="ExplorerColumnsGrid" Grid.Row="1" ColumnDefinitions="*,Auto,*,Auto">
-        <Grid Grid.Column="0" Margin="16,0,16,16" RowDefinitions="Auto,Auto,*">
+        <Grid Grid.Column="0" Margin="16,0,16,16" RowDefinitions="Auto,Auto,Auto,*">
           <!-- One sort control for all three modes rather than column headers in list mode plus a
                separate control for the tiles: the state is the same either way, and two ways to set
                it means two places to keep in step (docs/PLAN-BROWSER-VIEWS.md V4). Sorting is done
@@ -418,11 +426,27 @@
                        IsVisible="{Binding FilterSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           </StackPanel>
 
+          <!-- Batch action bar (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) — only worth showing once
+               Ctrl/Shift+Click or Ctrl+A has actually marked more than one row; a single selection
+               already has its own row-level actions (inline buttons, context menu). -->
+          <Border Grid.Row="1"
+                  Padding="10,8"
+                  Margin="0,0,0,8"
+                  CornerRadius="6"
+                  Background="{DynamicResource AccentMutedBrush}"
+                  IsVisible="{Binding HasMultipleSelected}">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <TextBlock VerticalAlignment="Center" FontWeight="Bold" Text="{Binding SelectionSummaryText}" />
+              <Button Content="Descargar seleccionados" Command="{Binding DownloadSelectedCommand}" />
+              <Button Content="Mover a la papelera" Command="{Binding TrashSelectedCommand}" />
+            </StackPanel>
+          </Border>
+
           <!-- Filter by type. The chips come from the metrics histogram, so they only ever offer
                kinds the folder actually contains (docs/PLAN-BROWSER-VIEWS.md M6). Filtering is a
                view of what was already loaded - it makes no CLI call, and it does not change the
                metrics panel, which keeps describing the whole folder. -->
-          <ItemsControl Grid.Row="1" ItemsSource="{Binding KindFilters}" Margin="0,0,0,8">
+          <ItemsControl Grid.Row="2" ItemsSource="{Binding KindFilters}" Margin="0,0,0,8">
             <ItemsControl.Styles>
               <Style Selector="Button.kindChip">
                 <Setter Property="Padding" Value="8,3" />
@@ -451,7 +475,7 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
 
-          <Grid Grid.Row="2">
+          <Grid Grid.Row="3">
           <!-- Unauthenticated / Expired Session Fallback Card -->
           <Border IsVisible="{Binding !IsAuthenticated}"
                   Background="{DynamicResource CardBackgroundBrush}"
@@ -825,17 +849,33 @@
                        Text="{Binding FreeSpaceText, StringFormat='{}{0} free'}" />
           </Grid>
 
-          <Grid Grid.Row="1" RowDefinitions="Auto,*">
+          <Grid Grid.Row="1" RowDefinitions="Auto,Auto,*">
             <TextBlock Grid.Row="0"
                        Margin="0,0,0,8"
                        TextWrapping="Wrap"
                        Opacity="0.8"
                        Text="{Binding StatusMessage}"
                        IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+            <!-- Batch action bar — the local pane's counterpart to the cloud pane's own
+                 (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2). -->
+            <Border Grid.Row="1"
+                    Padding="10,8"
+                    Margin="0,0,0,8"
+                    CornerRadius="6"
+                    Background="{DynamicResource AccentMutedBrush}"
+                    IsVisible="{Binding HasMultipleSelected}">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <TextBlock VerticalAlignment="Center" FontWeight="Bold" Text="{Binding SelectionSummaryText}" />
+                <Button Content="Eliminar seleccionados" Command="{Binding DeleteSelectedCommand}" />
+              </StackPanel>
+            </Border>
+
             <ListBox x:Name="LocalListing"
-                     Grid.Row="1"
+                     Grid.Row="2"
                      Classes="driveListing"
                      ItemsSource="{Binding Items}"
+                     KeyDown="OnLocalListingKeyDown"
                      DragDrop.AllowDrop="True"
                      DragDrop.DragOver="OnLocalListingDragOver"
                      DragDrop.DragLeave="OnLocalListingDragLeave"
@@ -843,6 +883,7 @@
               <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="local:LocalNodeViewModel">
                   <Button Classes="hoverGroup"
+                          Classes.selected="{Binding IsSelected}"
                           Command="{Binding RowCommand}"
                           HorizontalContentAlignment="Stretch">
                     <Button.ContextMenu>
@@ -906,7 +947,7 @@
             <!-- Drop-target badge — mirrors CloudDropOverlay for this pane (docs/
                  INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4). -->
             <Border x:Name="LocalDropOverlay"
-                    Grid.Row="1"
+                    Grid.Row="2"
                     IsVisible="False"
                     IsHitTestVisible="False"
                     HorizontalAlignment="Center"
@@ -1004,7 +1045,15 @@
                        Text="Select a file or folder to see its details."
                        IsVisible="{Binding !HasSelection}" />
 
-            <StackPanel Spacing="10" IsVisible="{Binding HasSelection}">
+            <!-- Multi-select summary (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) replaces the
+                 single-item details below once more than one row is marked — "the size" of three
+                 different files isn't one field. -->
+            <StackPanel Spacing="10" IsVisible="{Binding HasMultipleSelected}">
+              <TextBlock FontWeight="Bold" Text="{Binding SelectionSummaryText}" />
+              <TextBlock Opacity="0.7" TextWrapping="Wrap" Text="Usá la barra de acciones sobre la lista para descargar o mover a la papelera." />
+            </StackPanel>
+
+            <StackPanel Spacing="10" IsVisible="{Binding IsSingleSelected}">
               <TextBlock FontWeight="Bold" Text="Selected item" />
               <TextBlock Text="{Binding SelectedName}" />
               <TextBlock FontWeight="Bold" Text="Type" />

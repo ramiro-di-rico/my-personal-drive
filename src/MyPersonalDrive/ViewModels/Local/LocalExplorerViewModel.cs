@@ -23,6 +23,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
     private bool _isLoading;
     private string? _statusMessage;
     private string _searchText = string.Empty;
+    private string? _selectionAnchorPath;
 
     /// <summary>Everything the current folder holds, before filtering — mirrors <c>MainWindowViewModel._loadedItems</c>, and for the same reason: <see cref="Items"/> is a filtered view of this, never the source of truth for what's actually in the folder.</summary>
     private IReadOnlyList<DriveItem> _loadedItems = [];
@@ -42,6 +43,8 @@ public sealed class LocalExplorerViewModel : ObservableObject
         GoHomeCommand = new AsyncCommand(() => NavigateAsync(HomePath), () => !IsLoading, onError);
         BackCommand = new AsyncCommand(GoBackAsync, () => !IsLoading && CanGoBack, onError);
         ToggleHiddenFilesCommand = new AsyncCommand(ToggleHiddenFilesAsync, () => !IsLoading, onError);
+        SelectAllCommand = new AsyncCommand(SelectAllAsync, () => Items.Count > 0, onError);
+        DeleteSelectedCommand = new AsyncCommand(DeleteSelectedAsync, () => SelectedCount > 0, onError);
     }
 
     public ObservableCollection<LocalNodeViewModel> Items { get; }
@@ -89,6 +92,22 @@ public sealed class LocalExplorerViewModel : ObservableObject
     public AsyncCommand BackCommand { get; }
 
     public AsyncCommand ToggleHiddenFilesCommand { get; }
+
+    public AsyncCommand SelectAllCommand { get; }
+
+    public AsyncCommand DeleteSelectedCommand { get; }
+
+    /// <summary>How many rows are currently selected — docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2.</summary>
+    public int SelectedCount => Items.Count(i => i.IsSelected);
+
+    public bool HasMultipleSelected => SelectedCount > 1;
+
+    public string SelectionSummaryText => SelectedCount switch
+    {
+        0 => string.Empty,
+        1 => "1 elemento seleccionado",
+        _ => $"{SelectedCount} elementos seleccionados",
+    };
 
     /// <summary>A yes/no confirmation, used before permanently deleting a local item.</summary>
     public Func<string, Task<bool>>? RequestConfirmationAsync { get; set; }
@@ -175,10 +194,11 @@ public sealed class LocalExplorerViewModel : ObservableObject
             ? _loadedItems
             : _loadedItems.Where(item => item.Name.Contains(_searchText, StringComparison.OrdinalIgnoreCase)).ToList();
 
+        _selectionAnchorPath = null;
         Items.Clear();
         foreach (var item in visible)
         {
-            Items.Add(new LocalNodeViewModel(item, i => NavigateAsync(i.Path), _onError, new LocalNodeSyncActions
+            Items.Add(new LocalNodeViewModel(item, HandleRowClickAsync, _onError, new LocalNodeSyncActions
             {
                 FindSyncPair = i => FindSyncPairByPath?.Invoke(i.Path),
                 SyncSelectedPathAsync = SyncSelectedPathAsync,
@@ -189,6 +209,137 @@ public sealed class LocalExplorerViewModel : ObservableObject
                 RefreshPaneAsync = () => NavigateAsync(CurrentPath),
             }));
         }
+
+        RaiseSelectionChanged();
+    }
+
+    /// <summary>
+    /// A plain click (no modifier): activates like before Task 2.2 existed — selects just this row,
+    /// then opens it if it's a folder — but now also clears any multi-selection, the same way a
+    /// plain click always resets a file manager's selection to "just this one."
+    /// </summary>
+    private async Task HandleRowClickAsync(DriveItem item)
+    {
+        SelectSingle(item.Path);
+
+        if (item.IsFolder)
+        {
+            await NavigateAsync(item.Path);
+        }
+    }
+
+    private void SelectSingle(string path)
+    {
+        foreach (var node in Items)
+        {
+            node.IsSelected = node.Item.Path == path;
+        }
+
+        _selectionAnchorPath = path;
+        RaiseSelectionChanged();
+    }
+
+    /// <summary>Ctrl/Cmd+Click: adds or removes just this row, leaving every other row's selection untouched.</summary>
+    public void ToggleSelection(LocalNodeViewModel node)
+    {
+        node.IsSelected = !node.IsSelected;
+        _selectionAnchorPath = node.Item.Path;
+        RaiseSelectionChanged();
+    }
+
+    /// <summary>Shift+Click: selects the contiguous run between the last-touched row (the anchor) and this one, replacing whatever was selected before — standard file-manager range-select.</summary>
+    public void SelectRange(LocalNodeViewModel target)
+    {
+        var items = Items;
+        var anchorIndex = _selectionAnchorPath is null ? -1 : IndexOfPath(items, _selectionAnchorPath);
+        var targetIndex = items.IndexOf(target);
+        if (anchorIndex < 0 || targetIndex < 0)
+        {
+            SelectSingle(target.Item.Path);
+            return;
+        }
+
+        var (lo, hi) = anchorIndex <= targetIndex ? (anchorIndex, targetIndex) : (targetIndex, anchorIndex);
+        for (var i = 0; i < items.Count; i++)
+        {
+            items[i].IsSelected = i >= lo && i <= hi;
+        }
+
+        RaiseSelectionChanged();
+    }
+
+    private static int IndexOfPath(ObservableCollection<LocalNodeViewModel> items, string path)
+    {
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (items[i].Item.Path == path)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private Task SelectAllAsync()
+    {
+        foreach (var node in Items)
+        {
+            node.IsSelected = true;
+        }
+
+        _selectionAnchorPath = Items.Count > 0 ? Items[0].Item.Path : null;
+        RaiseSelectionChanged();
+        return Task.CompletedTask;
+    }
+
+    private void RaiseSelectionChanged()
+    {
+        OnPropertyChanged(nameof(SelectedCount));
+        OnPropertyChanged(nameof(HasMultipleSelected));
+        OnPropertyChanged(nameof(SelectionSummaryText));
+        SelectAllCommand.RaiseCanExecuteChanged();
+        DeleteSelectedCommand.RaiseCanExecuteChanged();
+    }
+
+    /// <summary>The batch counterpart to <see cref="DeleteItemAsync"/> — one confirmation for the whole selection, then each item deleted independently so one failure doesn't abandon the rest.</summary>
+    private async Task DeleteSelectedAsync()
+    {
+        var selected = Items.Where(i => i.IsSelected).ToList();
+        if (selected.Count == 0)
+        {
+            return;
+        }
+
+        var confirm = RequestConfirmationAsync;
+        var question = selected.Count == 1
+            ? $"Delete '{selected[0].DisplayName}'? This cannot be undone."
+            : $"Delete {selected.Count} selected items? This cannot be undone.";
+
+        if (confirm is not null && !await confirm(question))
+        {
+            StatusMessage = "Cancelled — nothing was deleted.";
+            return;
+        }
+
+        var failures = new List<string>();
+        foreach (var node in selected)
+        {
+            try
+            {
+                _service.Delete(node.Item.Path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                failures.Add($"{node.DisplayName}: {ex.Message}");
+            }
+        }
+
+        StatusMessage = failures.Count == 0
+            ? $"Deleted {selected.Count} item(s)."
+            : $"Deleted {selected.Count - failures.Count} of {selected.Count} item(s). Failures: {string.Join("; ", failures)}";
+
+        await NavigateAsync(CurrentPath);
     }
 
     private Task GoBackAsync()

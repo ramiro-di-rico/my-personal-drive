@@ -25,6 +25,9 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
 - Show or hide the local pane from the header, and the Status/Metrics sidebar from a "User
   Settings" checkbox in settings — each choice is remembered and is also what the next launch
   starts with
+- Select several rows at once in either pane — Ctrl/Cmd+Click adds or removes one row,
+  Shift+Click selects the range from the last one you touched, Ctrl/Cmd+A selects everything — and
+  batch-download or trash them in the cloud pane, or batch-delete them locally
 - Drag a file or folder between the cloud and local panes to upload/download it — onto empty space
   to target the folder currently open, or onto a folder row to target that folder — tracked in a
   cancellable transfer queue (Status sidebar). The target pane and, if you're over one, the

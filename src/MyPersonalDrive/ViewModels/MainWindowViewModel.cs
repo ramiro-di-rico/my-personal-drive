@@ -36,6 +36,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly RemoteViewFreshnessPolicy _remoteViewFreshness = new();
     private CancellationTokenSource? _cts;
     private DriveNodeViewModel? _selectedNode;
+    private string? _selectionAnchorPath;
     private string _rootPath;
 
     /// <summary>
@@ -352,6 +353,9 @@ public sealed class MainWindowViewModel : ObservableObject
         InstallCliUpdateCommand = new AsyncCommand(InstallCliUpdateAsync, CanInstallCliUpdate, HandleUnexpectedError);
         ViewSelectedFileCommand = new AsyncCommand(ViewSelectedFileAsync, CanViewSelectedFile, HandleUnexpectedError);
         CloseViewerCommand = new AsyncCommand(CloseViewerAsync, onError: HandleUnexpectedError);
+        SelectAllRowsCommand = new AsyncCommand(SelectAllRowsAsync, () => RootItems.Count > 0, HandleUnexpectedError);
+        DownloadSelectedCommand = new AsyncCommand(DownloadSelectedAsync, () => SelectedCount > 0, HandleUnexpectedError);
+        TrashSelectedCommand = new AsyncCommand(TrashSelectedAsync, () => SelectedCount > 0, HandleUnexpectedError);
         SetThemeDefaultCommand = new AsyncCommand(() => SetThemeAsync("Default"), onError: HandleUnexpectedError);
         SetThemeLightCommand = new AsyncCommand(() => SetThemeAsync("Light"), onError: HandleUnexpectedError);
         SetThemeDarkCommand = new AsyncCommand(() => SetThemeAsync("Dark"), onError: HandleUnexpectedError);
@@ -449,6 +453,15 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand ViewSelectedFileCommand { get; }
 
     public AsyncCommand CloseViewerCommand { get; }
+
+    /// <summary>Ctrl/Cmd+A over the listing — docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2.</summary>
+    public AsyncCommand SelectAllRowsCommand { get; }
+
+    /// <summary>Downloads every selected file (folders are skipped, same restriction as the single-row <see cref="DownloadItemAsync"/>) into one picked destination.</summary>
+    public AsyncCommand DownloadSelectedCommand { get; }
+
+    /// <summary>Moves every selected row (files and folders) to trash, after one confirmation for the whole batch.</summary>
+    public AsyncCommand TrashSelectedCommand { get; }
 
     public AsyncCommand CheckCliVersionCommand { get; }
 
@@ -1087,6 +1100,22 @@ public sealed class MainWindowViewModel : ObservableObject
         get => _hasSelection;
         private set => SetProperty(ref _hasSelection, value);
     }
+
+    /// <summary>docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2 — how many rows Ctrl/Shift-click or Ctrl+A currently have marked.</summary>
+    public int SelectedCount => RootItems.Count(node => node.IsSelected);
+
+    /// <summary>Whether the Status panel should show the multi-select summary instead of one item's details.</summary>
+    public bool HasMultipleSelected => SelectedCount > 1;
+
+    /// <summary>Whether the Status panel should show the single-item details block.</summary>
+    public bool IsSingleSelected => SelectedCount == 1;
+
+    public string SelectionSummaryText => SelectedCount switch
+    {
+        0 => string.Empty,
+        1 => "1 elemento seleccionado",
+        _ => $"{SelectedCount} elementos seleccionados",
+    };
 
     public bool IsCommandConsoleVisible
     {
@@ -2339,14 +2368,20 @@ public sealed class MainWindowViewModel : ObservableObject
         await NavigateIntoAsync(item.Path);
     }
 
+    /// <summary>
+    /// A plain click (no modifier): selects just <paramref name="node"/>, clearing every other
+    /// row's selection — a plain click always resets a file manager's selection to "just this one",
+    /// even if several rows were multi-selected beforehand.
+    /// </summary>
     private void SelectRow(DriveNodeViewModel? node)
     {
-        if (_selectedNode is not null)
+        foreach (var selected in RootItems.Where(n => n.IsSelected).ToList())
         {
-            _selectedNode.IsSelected = false;
+            selected.IsSelected = false;
         }
 
         _selectedNode = node;
+        _selectionAnchorPath = node?.Path;
 
         if (node is not null)
         {
@@ -2354,6 +2389,166 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         ViewSelectedFileCommand.RaiseCanExecuteChanged();
+        RaiseSelectionSummaryChanged();
+    }
+
+    /// <summary>Ctrl/Cmd+Click: adds or removes just this row, leaving every other row's selection untouched (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2).</summary>
+    public void ToggleSelection(DriveNodeViewModel node)
+    {
+        node.IsSelected = !node.IsSelected;
+        _selectionAnchorPath = node.Path;
+        _selectedNode = SelectedCount == 1 ? RootItems.FirstOrDefault(n => n.IsSelected) : null;
+        ViewSelectedFileCommand.RaiseCanExecuteChanged();
+        RaiseSelectionSummaryChanged();
+    }
+
+    /// <summary>Shift+Click: selects the contiguous run between the last-touched row (the anchor) and this one, replacing whatever was selected before — standard file-manager range-select.</summary>
+    public void SelectRange(DriveNodeViewModel target)
+    {
+        var anchorIndex = _selectionAnchorPath is null ? -1 : RootItems.ToList().FindIndex(n => n.Path == _selectionAnchorPath);
+        var targetIndex = RootItems.IndexOf(target);
+        if (anchorIndex < 0 || targetIndex < 0)
+        {
+            SelectRow(target);
+            return;
+        }
+
+        var (lo, hi) = anchorIndex <= targetIndex ? (anchorIndex, targetIndex) : (targetIndex, anchorIndex);
+        for (var i = 0; i < RootItems.Count; i++)
+        {
+            RootItems[i].IsSelected = i >= lo && i <= hi;
+        }
+
+        _selectedNode = SelectedCount == 1 ? RootItems.FirstOrDefault(n => n.IsSelected) : null;
+        ViewSelectedFileCommand.RaiseCanExecuteChanged();
+        RaiseSelectionSummaryChanged();
+    }
+
+    private Task SelectAllRowsAsync()
+    {
+        foreach (var node in RootItems)
+        {
+            node.IsSelected = true;
+        }
+
+        _selectionAnchorPath = RootItems.Count > 0 ? RootItems[0].Path : null;
+        _selectedNode = SelectedCount == 1 ? RootItems.FirstOrDefault(n => n.IsSelected) : null;
+        ViewSelectedFileCommand.RaiseCanExecuteChanged();
+        RaiseSelectionSummaryChanged();
+        return Task.CompletedTask;
+    }
+
+    private void RaiseSelectionSummaryChanged()
+    {
+        OnPropertyChanged(nameof(SelectedCount));
+        OnPropertyChanged(nameof(HasMultipleSelected));
+        OnPropertyChanged(nameof(IsSingleSelected));
+        OnPropertyChanged(nameof(SelectionSummaryText));
+        DownloadSelectedCommand.RaiseCanExecuteChanged();
+        TrashSelectedCommand.RaiseCanExecuteChanged();
+    }
+
+    /// <summary>The batch counterpart to <see cref="DownloadItemAsync"/>: every selected file (folders skipped, same rule the single-row command already follows) into one picked destination.</summary>
+    private async Task DownloadSelectedAsync()
+    {
+        var files = RootItems.Where(n => n.IsSelected && n.IsFile).Select(n => n.Item).ToList();
+        if (files.Count == 0)
+        {
+            StatusMessage = "Selecciona al menos un archivo (las carpetas no se pueden descargar en lote).";
+            IsWarning = true;
+            return;
+        }
+
+        var picker = RequestDownloadFolderAsync;
+        if (picker is null)
+        {
+            StatusMessage = "Download is not available.";
+            return;
+        }
+
+        var folder = await picker();
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            return;
+        }
+
+        var failed = new List<string>();
+        try
+        {
+            IsLoading = true;
+            foreach (var file in files)
+            {
+                try
+                {
+                    StatusMessage = $"Downloading {file.Name}...";
+                    await _provider.Operations.DownloadFileAsync(file.Path, folder);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    failed.Add($"{file.Name}: {FormatDriveError(file.Path, ex)}");
+                }
+            }
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+
+        StatusMessage = failed.Count == 0
+            ? $"Downloaded {files.Count} file(s) to {folder}."
+            : $"Downloaded {files.Count - failed.Count} of {files.Count} file(s). Failures: {string.Join("; ", failed)}";
+        IsWarning = failed.Count > 0;
+    }
+
+    /// <summary>The batch counterpart to <see cref="TrashItemAsync"/>: one confirmation for the whole selection (only asked when it includes a folder, same as the single-row command), then each item independently so one failure doesn't abandon the rest.</summary>
+    private async Task TrashSelectedAsync()
+    {
+        var selected = RootItems.Where(n => n.IsSelected).Select(n => n.Item).ToList();
+        if (selected.Count == 0)
+        {
+            return;
+        }
+
+        if (selected.Any(item => item.IsFolder))
+        {
+            var confirm = RequestConfirmationAsync;
+            if (confirm is not null && !await confirm($"Move {selected.Count} selected item(s) to trash? Some are folders — everything inside them goes too."))
+            {
+                StatusMessage = $"Cancelled: {selected.Count} item(s) were not moved to trash.";
+                return;
+            }
+        }
+
+        var failed = new List<string>();
+        try
+        {
+            IsLoading = true;
+            foreach (var item in selected)
+            {
+                try
+                {
+                    StatusMessage = $"Moving {item.Name} to trash...";
+                    await _provider.Operations.TrashItemAsync(item.Path);
+                    await _cacheService.RemoveItemAsync(item.Path);
+                    await InvalidateDeepMetricsAsync(item.Path);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    failed.Add($"{item.Name}: {FormatDriveError(item.Path, ex)}");
+                }
+            }
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+
+        StatusMessage = failed.Count == 0
+            ? $"Moved {selected.Count} item(s) to trash."
+            : $"Moved {selected.Count - failed.Count} of {selected.Count} item(s) to trash. Failures: {string.Join("; ", failed)}";
+        IsWarning = failed.Count > 0;
+
+        _ = RefreshAsync();
     }
 
     private async Task LoadFolderAsync(string path, bool clearSelection, bool forceFreshRemoteView = false)
@@ -2547,8 +2742,9 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         // Rebuilding replaces every row's view-model, so the previous selection highlight would
         // otherwise vanish even on a plain refresh (which intentionally keeps the side panel's
-        // selection) — carry it forward onto whichever new row still matches that path.
-        var previouslySelectedPath = _selectedNode?.Path;
+        // selection) — carry it forward onto whichever new rows still match those paths, single or
+        // multi alike.
+        var previouslySelectedPaths = RootItems.Where(n => n.IsSelected).Select(n => n.Path).ToHashSet();
         _selectedNode = null;
 
         var visible = _kindFilter is null
@@ -2573,14 +2769,19 @@ public sealed class MainWindowViewModel : ObservableObject
                 ShowPropertiesAsync = ShowPropertiesAsync,
                 RefreshPaneAsync = RefreshAsync,
             });
-            if (previouslySelectedPath is not null && item.Path == previouslySelectedPath)
+            if (previouslySelectedPaths.Contains(item.Path))
             {
                 node.IsSelected = true;
-                _selectedNode = node;
             }
 
             RootItems.Add(node);
         }
+
+        _selectedNode = SelectedCount == 1 ? RootItems.FirstOrDefault(n => n.IsSelected) : null;
+        _selectionAnchorPath = _selectedNode?.Path ?? _selectionAnchorPath;
+        ViewSelectedFileCommand.RaiseCanExecuteChanged();
+        SelectAllRowsCommand.RaiseCanExecuteChanged();
+        RaiseSelectionSummaryChanged();
 
         // Computed here rather than at each call site so the cached paint and the CLI result both
         // update it, and so the numbers can never disagree with the rows actually on screen.
@@ -2696,7 +2897,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void ClearSelection()
     {
+        foreach (var selected in RootItems.Where(n => n.IsSelected).ToList())
+        {
+            selected.IsSelected = false;
+        }
+
         _selectedNode = null;
+        _selectionAnchorPath = null;
         SelectedName = "None";
         SelectedKind = "None";
         SelectedPath = "None";
@@ -2706,6 +2913,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectedShared = "None";
         HasSelection = false;
         ViewSelectedFileCommand.RaiseCanExecuteChanged();
+        RaiseSelectionSummaryChanged();
     }
 
     private void ResetBrowserState()

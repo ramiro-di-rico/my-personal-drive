@@ -29,6 +29,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private CancellationTokenSource? _deepScanCts;
     private ITextFilePreviewLoader? _previewLoader;
     private IImageFilePreviewLoader? _imagePreviewLoader;
+    private IPdfFilePreviewLoader? _pdfPreviewLoader;
     private CancellationTokenSource? _previewCts;
     private readonly Stack<string> _navigationHistory = new();
     private readonly TimeProvider _timeProvider;
@@ -50,7 +51,8 @@ public sealed class MainWindowViewModel : ObservableObject
         FolderMetricsStore? MetricsStore,
         FolderStatsScanner? StatsScanner,
         ITextFilePreviewLoader? PreviewLoader,
-        IImageFilePreviewLoader? ImagePreviewLoader);
+        IImageFilePreviewLoader? ImagePreviewLoader,
+        IPdfFilePreviewLoader? PdfPreviewLoader);
 
     private readonly List<BrowserAccountSession> _browserSessions = new();
     // Doubled from CommandLogBuffer's own default (200): with two provider sessions able to be
@@ -101,6 +103,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _viewerText = string.Empty;
     private string _viewerNote = string.Empty;
     private byte[]? _viewerImageBytes;
+    private IReadOnlyList<byte[]>? _viewerPdfPages;
     private DriveViewMode _viewMode = DriveViewMode.List;
     private bool _isDeepScanRunning;
     private DriveSortKey _sortKey = DriveSortKey.Name;
@@ -228,6 +231,7 @@ public sealed class MainWindowViewModel : ObservableObject
         IProviderCatalog? providerCatalog = null,
         ITextFilePreviewLoader? previewLoader = null,
         IImageFilePreviewLoader? imagePreviewLoader = null,
+        IPdfFilePreviewLoader? pdfPreviewLoader = null,
         LocalFileSystemService? localFileSystem = null)
     {
         // Optional so the many existing view-model tests don't all have to build a database and a
@@ -240,6 +244,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // a loader, and when it's absent the viewer simply can't open (see CanOpenViewer).
         _previewLoader = previewLoader;
         _imagePreviewLoader = imagePreviewLoader;
+        _pdfPreviewLoader = pdfPreviewLoader;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _releaseFeed = releaseFeed;
         _updateInstaller = updateInstaller ?? new CliUpdateInstaller();
@@ -353,7 +358,7 @@ public sealed class MainWindowViewModel : ObservableObject
         UpdateConnectionTelemetry();
         UpdateQuotaMetrics();
 
-        _browserSessions.Add(new BrowserAccountSession(_provider, _cacheService, _metricsStore, _statsScanner, _previewLoader, _imagePreviewLoader));
+        _browserSessions.Add(new BrowserAccountSession(_provider, _cacheService, _metricsStore, _statsScanner, _previewLoader, _imagePreviewLoader, _pdfPreviewLoader));
     }
 
     /// <summary>
@@ -367,8 +372,9 @@ public sealed class MainWindowViewModel : ObservableObject
         FolderMetricsStore? metricsStore = null,
         FolderStatsScanner? statsScanner = null,
         ITextFilePreviewLoader? previewLoader = null,
-        IImageFilePreviewLoader? imagePreviewLoader = null)
-        => _browserSessions.Add(new BrowserAccountSession(provider, cacheService, metricsStore, statsScanner, previewLoader, imagePreviewLoader));
+        IImageFilePreviewLoader? imagePreviewLoader = null,
+        IPdfFilePreviewLoader? pdfPreviewLoader = null)
+        => _browserSessions.Add(new BrowserAccountSession(provider, cacheService, metricsStore, statsScanner, previewLoader, imagePreviewLoader, pdfPreviewLoader));
 
     public ObservableCollection<DriveNodeViewModel> RootItems { get; }
 
@@ -1012,6 +1018,25 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public bool HasViewerImage => _viewerImageBytes is { Length: > 0 };
 
+    /// <summary>
+    /// One PNG-encoded bitmap per rendered PDF page, undecoded for the same reason as
+    /// <see cref="ViewerImageBytes"/> — the View decodes each entry with the same
+    /// <c>BytesToBitmapConverter</c>.
+    /// </summary>
+    public IReadOnlyList<byte[]>? ViewerPdfPages
+    {
+        get => _viewerPdfPages;
+        private set
+        {
+            if (SetProperty(ref _viewerPdfPages, value))
+            {
+                OnPropertyChanged(nameof(HasViewerPdf));
+            }
+        }
+    }
+
+    public bool HasViewerPdf => _viewerPdfPages is { Count: > 0 };
+
     /// <summary>Whether the Status panel's per-item fields (as opposed to the current-folder ones) have anything to show.</summary>
     public bool HasSelection
     {
@@ -1368,6 +1393,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _statsScanner = session.StatsScanner;
         _previewLoader = session.PreviewLoader;
         _imagePreviewLoader = session.ImagePreviewLoader;
+        _pdfPreviewLoader = session.PdfPreviewLoader;
         _rootPath = _provider.Id == ProviderId.Proton ? "/my-files" : "/";
 
         // Both of these used to be wired once at startup and never revisited — harmless before
@@ -1790,13 +1816,19 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        if (PdfPreviewPolicy.CanPreview(item))
+        {
+            await PreviewPdfAsync(item);
+            return;
+        }
+
         if (TextPreviewPolicy.CanPreview(item))
         {
             await PreviewTextAsync(item);
             return;
         }
 
-        StatusMessage = $"{item.Name} no se puede abrir en el visor: solo texto (hasta {TextPreviewPolicy.MaxPreviewBytes / 1024} KB) o imágenes (hasta {ImagePreviewPolicy.MaxPreviewBytes / (1024 * 1024)} MB).";
+        StatusMessage = $"{item.Name} no se puede abrir en el visor: solo texto (hasta {TextPreviewPolicy.MaxPreviewBytes / 1024} KB), imágenes (hasta {ImagePreviewPolicy.MaxPreviewBytes / (1024 * 1024)} MB) o PDF (hasta {PdfPreviewPolicy.MaxPreviewBytes / (1024 * 1024)} MB).";
         IsWarning = true;
     }
 
@@ -1904,6 +1936,54 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    /// <summary>The PDF half of <see cref="PreviewItemAsync"/> — same download-then-show shape, plus rendering the pages the loader already did.</summary>
+    private async Task PreviewPdfAsync(DriveItem item)
+    {
+        if (_pdfPreviewLoader is null)
+        {
+            StatusMessage = "El visor de PDF no está disponible.";
+            IsWarning = true;
+            return;
+        }
+
+        var cts = BeginPreview(item);
+
+        try
+        {
+            var preview = await _pdfPreviewLoader.LoadAsync(item, cts.Token);
+            if (cts.IsCancellationRequested)
+            {
+                return;
+            }
+
+            ViewerPdfPages = preview.Pages;
+            ViewerNote = preview.Pages.Count < preview.TotalPageCount
+                ? $"Mostrando las primeras {preview.Pages.Count} de {preview.TotalPageCount} páginas"
+                : $"{preview.TotalPageCount:n0} página(s)";
+            StatusMessage = $"Mostrando {item.Name} en el visor.";
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded or closed; whoever did that already owns the panel's state.
+        }
+        catch (InvalidOperationException ex)
+        {
+            ViewerNote = "No se pudo abrir el archivo.";
+            StatusMessage = FormatDriveError(item.Path, ex);
+            IsWarning = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ViewerNote = "No se pudo leer el archivo descargado.";
+            StatusMessage = $"No se pudo abrir {item.Name} en el visor: {ex.Message}";
+            IsWarning = true;
+        }
+        finally
+        {
+            EndPreview(cts);
+        }
+    }
+
     /// <summary>
     /// Shared setup for both preview flows: supersede any in-flight download and reset the panel to
     /// a clean loading state for <paramref name="item"/>, clearing whichever content type the
@@ -1922,6 +2002,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ViewerPath = item.Path;
         ViewerText = string.Empty;
         ViewerImageBytes = null;
+        ViewerPdfPages = null;
         ViewerNote = "Descargando el archivo…";
         StatusMessage = $"Abriendo {item.Name} en el visor…";
         return cts;
@@ -1951,7 +2032,7 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     private bool CanViewSelectedFile()
-        => _selectedNode is { CanPreview: true } && (_previewLoader is not null || _imagePreviewLoader is not null);
+        => _selectedNode is { CanPreview: true } && (_previewLoader is not null || _imagePreviewLoader is not null || _pdfPreviewLoader is not null);
 
     private async Task ViewSelectedFileAsync()
     {
@@ -1971,6 +2052,7 @@ public sealed class MainWindowViewModel : ObservableObject
         IsViewerVisible = false;
         IsViewerLoading = false;
         ViewerImageBytes = null;
+        ViewerPdfPages = null;
         ViewerText = string.Empty;
         ViewerNote = string.Empty;
         await Task.CompletedTask;

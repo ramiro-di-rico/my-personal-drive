@@ -58,7 +58,8 @@ public partial class App : Application
                 statsScanner: new FolderStatsScanner(primary.Provider),
                 providerCatalog: catalog,
                 previewLoader: new TextFilePreviewService(primary.Provider.Operations),
-                imagePreviewLoader: new ImageFilePreviewService(primary.Provider.Operations));
+                imagePreviewLoader: new ImageFilePreviewService(primary.Provider.Operations),
+                pdfPreviewLoader: new PdfFilePreviewService(primary.Provider.Operations));
 
             // The console shows every active account's activity regardless of which is browsed —
             // background sync on an account you're not currently looking at is still something
@@ -73,7 +74,8 @@ public partial class App : Application
                     metricsStore: other.MetricsStore,
                     statsScanner: new FolderStatsScanner(other.Provider),
                     previewLoader: new TextFilePreviewService(other.Provider.Operations),
-                    imagePreviewLoader: new ImageFilePreviewService(other.Provider.Operations));
+                    imagePreviewLoader: new ImageFilePreviewService(other.Provider.Operations),
+                    pdfPreviewLoader: new PdfFilePreviewService(other.Provider.Operations));
             }
 
             desktop.MainWindow = new MainWindow

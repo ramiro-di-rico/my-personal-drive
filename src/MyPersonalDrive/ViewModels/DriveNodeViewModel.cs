@@ -28,7 +28,7 @@ public sealed class DriveNodeViewModel : ObservableObject
         _previewItemAsync = previewItemAsync;
         _syncActions = syncActions;
         SyncPair = syncActions?.FindSyncPair?.Invoke(item);
-        CanPreview = TextPreviewPolicy.CanPreview(item) || ImagePreviewPolicy.CanPreview(item);
+        CanPreview = TextPreviewPolicy.CanPreview(item) || ImagePreviewPolicy.CanPreview(item) || PdfPreviewPolicy.CanPreview(item);
         RowCommand = new AsyncCommand(HandleRowClickAsync, onError: onError);
         DownloadCommand = new AsyncCommand(DownloadAsync, () => !Item.IsFolder, onError);
         TrashCommand = new AsyncCommand(TrashAsync, onError: onError);

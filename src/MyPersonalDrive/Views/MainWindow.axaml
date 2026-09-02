@@ -1273,6 +1273,37 @@
                      VerticalAlignment="Center" />
             </ScrollViewer>
           </Border>
+
+          <!-- The PDF counterpart: every rendered page stacked in one vertical scroller — the PDFs
+               this app's own users actually preview are short (a monthly invoice, a couple of
+               pages), so a pager control would be more UI than the common case needs.
+               ViewerPdfPages is converted to a list of decoded Bitmaps up front
+               (PdfPagesToBitmapsConverter) so the item template's x:DataType can be the well-known
+               Bitmap type and stay on compiled bindings — a template over a bare byte[] item has no
+               x:DataType to declare, which would otherwise force reflection bindings and trip the
+               AOT/trim analyzer (see PdfPagesToBitmapsConverter's own doc comment). -->
+          <Border Grid.Row="3"
+                  Padding="12"
+                  CornerRadius="4"
+                  Background="{DynamicResource ConsoleBackgroundBrush}"
+                  IsVisible="{Binding HasViewerPdf}">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+              <ItemsControl ItemsSource="{Binding ViewerPdfPages, Converter={x:Static conv:PdfPagesToBitmapsConverter.Instance}}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <StackPanel Orientation="Vertical" Spacing="12" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="Bitmap">
+                    <Image Source="{Binding}"
+                           Stretch="Uniform"
+                           HorizontalAlignment="Center" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Border>
         </Grid>
       </Border>
     </Grid>

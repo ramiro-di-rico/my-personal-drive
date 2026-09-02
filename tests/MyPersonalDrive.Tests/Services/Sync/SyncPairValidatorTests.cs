@@ -6,14 +6,17 @@ namespace MyPersonalDrive.Tests.Services.Sync;
 
 public class SyncPairValidatorTests
 {
-    private static SyncPair Existing(string remotePath, string localPath) => new(
-        Id: 1, RemotePath: remotePath, LocalPath: localPath,
-        Direction: SyncDirection.TwoWay, ConflictPolicy: ConflictPolicy.Ask,
+    private static SyncPair Existing(string remotePath, string localPath, SyncDirection direction = SyncDirection.TwoWay, int id = 1) => new(
+        Id: id, RemotePath: remotePath, LocalPath: localPath,
+        Direction: direction, ConflictPolicy: ConflictPolicy.Ask,
         IsEnabled: true, IsPaused: false, ExcludeGlobs: [],
         LastSyncAt: null, LastStatus: SyncPairStatus.Never, LastError: null);
 
     private static string? Validate(string remotePath, string localPath, params SyncPair[] existing)
-        => SyncPairValidator.Validate(remotePath, localPath, existing);
+        => SyncPairValidator.Validate(remotePath, localPath, SyncDirection.TwoWay, existing);
+
+    private static string? ValidateUpload(string remotePath, string localPath, params SyncPair[] existing)
+        => SyncPairValidator.Validate(remotePath, localPath, SyncDirection.LocalToRemote, existing);
 
     // ---------------------------------------------------------------- path shape
 
@@ -141,4 +144,115 @@ public class SyncPairValidatorTests
         => Assert.Null(Validate("/my-files/C", "/home/user/C",
             Existing("/my-files/A", "/home/user/A"),
             Existing("/my-files/B", "/home/user/B")));
+
+    // ---------------------------------------------------------------- fan-out uploads (upload-only sharing a local folder)
+
+    [Fact]
+    public void TwoUploadOnlyPairsSharingTheSameLocalFolder_AreBothAccepted()
+        => Assert.Null(ValidateUpload("/my-files/Other", "/home/user/Docs",
+            Existing("/my-files/Docs", "/home/user/Docs", SyncDirection.LocalToRemote)));
+
+    [Fact]
+    public void UploadOnlySharing_AlsoWorksWhenTheNewPairIsNestedInsideTheOther()
+        => Assert.Null(ValidateUpload("/my-files/Other", "/home/user/Docs/Sub",
+            Existing("/my-files/Docs", "/home/user/Docs", SyncDirection.LocalToRemote)));
+
+    [Fact]
+    public void AnUploadOnlyPair_StillRejectsSharingWithATwoWayPair()
+    {
+        // The existing pair can write to the folder (download/delete) — sharing would let it
+        // destroy what the new upload-only pair sends there.
+        var error = ValidateUpload("/my-files/Other", "/home/user/Docs", Existing("/my-files/Docs", "/home/user/Docs"));
+
+        Assert.Contains("already synced", error);
+    }
+
+    [Fact]
+    public void ATwoWayPair_StillRejectsSharingEvenWithAnExistingUploadOnlyPair()
+    {
+        // The exception only holds when *both* sides are upload-only — a new pair that itself
+        // writes locally is unsafe regardless of what the existing pair does.
+        var error = Validate("/my-files/Other", "/home/user/Docs", Existing("/my-files/Docs", "/home/user/Docs", SyncDirection.LocalToRemote));
+
+        Assert.NotNull(error);
+    }
+
+    [Fact]
+    public void UploadOnlySharing_IsAllowedAcrossDifferentAccounts()
+    {
+        // sameAccountPairs is empty (a different account's pair list); allAccountPairs carries the
+        // other account's upload-only pair on the same local folder.
+        var otherAccountPair = Existing("/my-files/Docs", "/home/user/Docs", SyncDirection.LocalToRemote);
+
+        var error = SyncPairValidator.Validate("/onedrive-files/Backup", "/home/user/Docs", SyncDirection.LocalToRemote,
+            sameAccountPairs: [], allAccountPairs: [otherAccountPair]);
+
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void ATwoWayPair_IsRejectedWhenAnotherAccountAlreadyUploadsFromThatFolder()
+    {
+        var otherAccountPair = Existing("/my-files/Docs", "/home/user/Docs", SyncDirection.LocalToRemote);
+
+        var error = SyncPairValidator.Validate("/onedrive-files/Backup", "/home/user/Docs", SyncDirection.TwoWay,
+            sameAccountPairs: [], allAccountPairs: [otherAccountPair]);
+
+        Assert.NotNull(error);
+    }
+
+    [Fact]
+    public void AnIdenticalRemotePathAcrossDifferentAccounts_IsNotFlagged()
+    {
+        // Two different providers' remote trees are unrelated storage — the remote-overlap check
+        // only ever looks at sameAccountPairs, never allAccountPairs.
+        var otherAccountPair = Existing("/my-files/Docs", "/home/user/OtherFolder", SyncDirection.LocalToRemote);
+
+        var error = SyncPairValidator.Validate("/my-files/Docs", "/home/user/NewFolder", SyncDirection.LocalToRemote,
+            sameAccountPairs: [], allAccountPairs: [otherAccountPair]);
+
+        Assert.Null(error);
+    }
+
+    // ---------------------------------------------------------------- ValidateDirectionChange (editing an existing pair)
+
+    [Fact]
+    public void ChangingDirection_ToLocalToRemote_IsAlwaysSafe()
+    {
+        var pair = Existing("/my-files/A", "/home/user/Docs", SyncDirection.TwoWay, id: 1);
+        var other = Existing("/my-files/B", "/home/user/Docs", SyncDirection.LocalToRemote, id: 2);
+
+        Assert.Null(SyncPairValidator.ValidateDirectionChange(pair, SyncDirection.LocalToRemote, [pair, other]));
+    }
+
+    [Fact]
+    public void ChangingDirection_AwayFromLocalToRemote_IsRejectedWhenAnotherPairSharesTheFolder()
+    {
+        var pair = Existing("/my-files/A", "/home/user/Docs", SyncDirection.LocalToRemote, id: 1);
+        var other = Existing("/my-files/B", "/home/user/Docs", SyncDirection.LocalToRemote, id: 2);
+
+        var error = SyncPairValidator.ValidateDirectionChange(pair, SyncDirection.TwoWay, [pair, other]);
+
+        Assert.NotNull(error);
+        Assert.Contains("/my-files/B", error);
+    }
+
+    [Fact]
+    public void ChangingDirection_IsSafeWhenNoOtherPairSharesTheFolder()
+    {
+        var pair = Existing("/my-files/A", "/home/user/Docs", SyncDirection.LocalToRemote, id: 1);
+
+        Assert.Null(SyncPairValidator.ValidateDirectionChange(pair, SyncDirection.TwoWay, [pair]));
+    }
+
+    [Fact]
+    public void ChangingDirection_ToTheSameDirection_IsANoOp()
+    {
+        var pair = Existing("/my-files/A", "/home/user/Docs", SyncDirection.TwoWay, id: 1);
+        var other = Existing("/my-files/B", "/home/user/Docs", SyncDirection.LocalToRemote, id: 2);
+
+        // "Changing" to the direction it already has can't newly break anything, even though the
+        // folder is shared and today's actual direction (TwoWay) would fail the create-time check.
+        Assert.Null(SyncPairValidator.ValidateDirectionChange(pair, SyncDirection.TwoWay, [pair, other]));
+    }
 }

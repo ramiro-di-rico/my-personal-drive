@@ -38,7 +38,10 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
   automatically with the on/off choice persisted across restarts. Proton and OneDrive each sync
   independently — pausing one doesn't affect the other. A one-way pair can mirror the destination
   exactly (deleting whatever isn't at the source, the historical behavior) or, unchecked, sync
-  additively — never deleting files the destination already had
+  additively — never deleting files the destination already had. The same local folder can be
+  synced to several providers at once as long as every pair sharing it is upload-only, since none
+  of them ever writes back to that folder — any other combination (a pair that downloads or
+  mirrors into a shared folder) is rejected
 - Right-click a row in either pane for a context menu: copy its path, upload into or download a
   cloud folder, start a sync pair pre-filled with that path, pause/resume/run-now an existing pair,
   rename or delete a local item, and view its properties. Folders with an active sync pair show a

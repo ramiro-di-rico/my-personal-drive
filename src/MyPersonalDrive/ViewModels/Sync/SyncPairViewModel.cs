@@ -197,6 +197,15 @@ public sealed class SyncPairViewModel : ObservableObject
     /// <summary>Shown this pair's current direction/conflict policy; returns the new values, or null if the user canceled.</summary>
     public Func<SyncPairViewModel, Task<EditSyncPairRequest?>>? RequestEditAsync { get; set; }
 
+    /// <summary>
+    /// Re-runs <see cref="SyncPairValidator"/>'s shared-local-folder rule against a proposed new
+    /// direction, before <see cref="EditAsync"/> applies it — see
+    /// <see cref="SyncPairValidator.ValidateDirectionChange"/>. Returns the error message to show,
+    /// or null when the change is safe. Left null disables the check (e.g. in tests that don't
+    /// care about it), the same way every other optional delegate on this type does.
+    /// </summary>
+    public Func<SyncDirection, Task<string?>>? ValidateDirectionChangeAsync { get; set; }
+
     public Action<string>? OnError { get; set; }
 
     private async Task PreviewAsync()
@@ -363,6 +372,14 @@ public sealed class SyncPairViewModel : ObservableObject
         var request = await requester(this);
         if (request is null)
         {
+            return;
+        }
+
+        var validate = ValidateDirectionChangeAsync;
+        if (validate is not null && await validate(request.Direction) is { } validationError)
+        {
+            StatusText = validationError;
+            OnError?.Invoke(validationError);
             return;
         }
 

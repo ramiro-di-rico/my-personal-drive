@@ -283,6 +283,13 @@
           </Style>
         </Grid.Styles>
         <Border Grid.Column="0" Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
+          <StackPanel Spacing="4">
+            <!-- Which pane this is, for a first-time user: the provider dropdown up in the header
+                 is easy to miss as "this is what the left pane shows." -->
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Path Classes="icon" Data="{StaticResource IconCloud}" Width="12" Height="12" Opacity="0.7" />
+              <TextBlock Text="{Binding ActiveProviderDisplayName}" FontSize="11" FontWeight="Bold" Opacity="0.7" />
+            </StackPanel>
           <ScrollViewer x:Name="BreadcrumbScroll"
                         HorizontalScrollBarVisibility="Auto"
                         VerticalScrollBarVisibility="Disabled">
@@ -302,6 +309,7 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
           </ScrollViewer>
+          </StackPanel>
         </Border>
 
         <Button Grid.Column="1" ToolTip.Tip="Go back" Command="{Binding BackCommand}">
@@ -757,6 +765,13 @@
               </Style>
             </Grid.Styles>
             <Border Grid.Column="0" Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
+              <StackPanel Spacing="4">
+                <!-- Which pane this is, for a first-time user — mirrors the provider label on the
+                     cloud pane's own breadcrumb card. -->
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <Path Classes="icon" Data="{StaticResource IconHome}" Width="12" Height="12" Opacity="0.7" />
+                  <TextBlock Text="Este equipo (local)" FontSize="11" FontWeight="Bold" Opacity="0.7" />
+                </StackPanel>
               <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
                 <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
                   <ItemsControl.ItemsPanel>
@@ -774,6 +789,7 @@
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
               </ScrollViewer>
+              </StackPanel>
             </Border>
 
             <Button Grid.Column="1" ToolTip.Tip="Go to home folder" Command="{Binding GoHomeCommand}">

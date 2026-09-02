@@ -209,6 +209,31 @@ public class MainWindowHeaderTelemetryTests : IDisposable
     }
 
     [Fact]
+    public void ViewerZoom_DefaultsToFiftyPercent_AndPersistsChanges()
+    {
+        var sut = Build();
+        Assert.Equal(0.5, sut.ViewerZoom);
+
+        sut.ViewerZoom = 1.0;
+
+        Assert.Equal(1.0, sut.ViewerZoom);
+        Assert.Equal(1.0, new AppSettingsService().Load().ViewerZoom);
+    }
+
+    [Theory]
+    [InlineData(0.01, AppSettings.MinViewerZoom)]
+    [InlineData(10.0, AppSettings.MaxViewerZoom)]
+    public void ViewerZoom_ClampsOutOfRangeValues(double attempted, double expected)
+    {
+        var sut = Build();
+
+        sut.ViewerZoom = attempted;
+
+        Assert.Equal(expected, sut.ViewerZoom);
+        Assert.Equal(expected, new AppSettingsService().Load().ViewerZoom);
+    }
+
+    [Fact]
     public async Task PanelVisibilityToggles_FlipStateAndPersist_AndRestoreOnNextLaunch()
     {
         var sut = Build();

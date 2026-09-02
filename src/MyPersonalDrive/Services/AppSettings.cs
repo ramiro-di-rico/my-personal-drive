@@ -90,6 +90,22 @@ public sealed class AppSettings
     /// <summary>Whether the bottom CLI activity panel is expanded. See docs/INTERFACE_IMPROVEMENT_PLAN.md Task 4.</summary>
     public bool ShowCommandConsole { get; set; } = true;
 
+    /// <summary>
+    /// The in-app viewer's display scale for images and PDF pages (1.0 = the decoded bitmap's own
+    /// pixel size). Defaults to 0.5 rather than 1.0: a PDF page or a modern photo is routinely
+    /// bigger than the viewer panel, and showing it at full resolution meant scrolling to see any
+    /// of it. Read through <see cref="ViewerZoomOrDefault"/>, which clamps a corrupt or
+    /// out-of-range value rather than handing the view something that would make the content
+    /// vanish (0) or become unusable (a huge multiple).
+    /// </summary>
+    public double ViewerZoom { get; set; } = 0.5;
+
+    public const double MinViewerZoom = 0.25;
+    public const double MaxViewerZoom = 1.5;
+
+    public double ViewerZoomOrDefault()
+        => double.IsFinite(ViewerZoom) ? Math.Clamp(ViewerZoom, MinViewerZoom, MaxViewerZoom) : 0.5;
+
     public string ThemeOrDefault()
         => string.Equals(Theme, "Light", StringComparison.OrdinalIgnoreCase) ? "Light"
          : string.Equals(Theme, "Dark", StringComparison.OrdinalIgnoreCase) ? "Dark"

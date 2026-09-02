@@ -31,7 +31,8 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
 - Download files
 - View plain-text files, common image formats (JPEG, PNG, GIF, BMP, WebP, ICO) and PDFs in the app,
   without downloading them to disk — from a row action, a context menu entry, or the "Visor"
-  menu button. PDF pages are rendered as images (up to the first 20 pages of a document)
+  menu button. PDF pages are rendered as images (up to the first 20 pages of a document); a zoom
+  slider on the image/PDF viewer (default 50%) is remembered across restarts
 - Upload files to the current folder
 - Move files and folders to trash (folders ask for confirmation first)
 - Sync a remote folder with a local folder — download-only, upload-only, or two-way, running

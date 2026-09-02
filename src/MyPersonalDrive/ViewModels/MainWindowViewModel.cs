@@ -128,6 +128,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isCliUpdateBusy;
     private string _theme = "Default";
     private int _bandwidthLimitKbps;
+    private double _viewerZoom;
     private string _defaultSyncFolder = string.Empty;
     private string _connectionStatus = "Online";
     private string _connectionStatusKind = "Online";
@@ -287,6 +288,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _sortDescending = appSettings.SortDescending;
         _theme = appSettings.ThemeOrDefault();
         _bandwidthLimitKbps = appSettings.BandwidthLimitKbps;
+        _viewerZoom = appSettings.ViewerZoomOrDefault();
         _defaultSyncFolder = appSettings.DefaultSyncFolder;
         _isStatusPanelVisible = appSettings.ShowStatusPanel;
         _isLocalExplorerPanelVisible = appSettings.ShowLocalExplorerPanel;
@@ -1012,6 +1014,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _viewerImageBytes, value))
             {
                 OnPropertyChanged(nameof(HasViewerImage));
+                OnPropertyChanged(nameof(HasViewerZoomableContent));
             }
         }
     }
@@ -1031,11 +1034,34 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _viewerPdfPages, value))
             {
                 OnPropertyChanged(nameof(HasViewerPdf));
+                OnPropertyChanged(nameof(HasViewerZoomableContent));
             }
         }
     }
 
     public bool HasViewerPdf => _viewerPdfPages is { Count: > 0 };
+
+    /// <summary>Whether the zoom control has anything to act on — hidden for the text viewer, which sizes by font instead.</summary>
+    public bool HasViewerZoomableContent => HasViewerImage || HasViewerPdf;
+
+    /// <summary>
+    /// The image/PDF viewer's display scale — see <see cref="AppSettings.ViewerZoom"/> for why the
+    /// default isn't 1.0. Clamped the same way on every write, not just on load, since the slider
+    /// itself is already range-limited but a value set some other way (a future keyboard shortcut,
+    /// say) shouldn't be able to hand the view something degenerate.
+    /// </summary>
+    public double ViewerZoom
+    {
+        get => _viewerZoom;
+        set
+        {
+            var clamped = Math.Clamp(value, AppSettings.MinViewerZoom, AppSettings.MaxViewerZoom);
+            if (SetProperty(ref _viewerZoom, clamped))
+            {
+                _settings.Update(s => s.ViewerZoom = clamped);
+            }
+        }
+    }
 
     /// <summary>Whether the Status panel's per-item fields (as opposed to the current-folder ones) have anything to show.</summary>
     public bool HasSelection

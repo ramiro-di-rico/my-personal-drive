@@ -1216,12 +1216,35 @@
               Background="{DynamicResource PanelBackgroundBrush}"
               IsVisible="{Binding IsViewerVisible}">
         <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="8">
-          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
             <StackPanel Spacing="2">
               <TextBlock FontSize="18" FontWeight="Bold" Text="{Binding ViewerTitle}" TextTrimming="CharacterEllipsis" />
               <TextBlock FontSize="12" Opacity="0.7" Text="{Binding ViewerPath}" TextTrimming="CharacterEllipsis" />
             </StackPanel>
-            <Button Grid.Column="1"
+
+            <!-- Only images and PDF pages can be too big for the panel — the text viewer sizes by
+                 font, not by a decoded bitmap, so it has nothing for this to scale. -->
+            <StackPanel Grid.Column="1"
+                        Orientation="Horizontal"
+                        Spacing="8"
+                        VerticalAlignment="Center"
+                        IsVisible="{Binding HasViewerZoomableContent}">
+              <TextBlock VerticalAlignment="Center" FontSize="12" Opacity="0.7" Text="Zoom:" />
+              <Slider Width="140"
+                      VerticalAlignment="Center"
+                      Minimum="0.25"
+                      Maximum="1.5"
+                      SmallChange="0.05"
+                      LargeChange="0.25"
+                      Value="{Binding ViewerZoom, Mode=TwoWay}" />
+              <TextBlock VerticalAlignment="Center"
+                         FontSize="12"
+                         Opacity="0.7"
+                         Width="36"
+                         Text="{Binding ViewerZoom, StringFormat={}{0:P0}}" />
+            </StackPanel>
+
+            <Button Grid.Column="2"
                     VerticalAlignment="Top"
                     Command="{Binding CloseViewerCommand}"
                     ToolTip.Tip="Cerrar el visor">
@@ -1260,17 +1283,22 @@
 
           <!-- The image counterpart: Stretch="Uniform" so a huge photo fits the panel instead of
                overflowing it, and the ScrollViewer stays available for the rare image bigger than
-               the panel even at that scale (a very tall panorama, say). -->
+               the panel even at that scale (a very tall panorama, say). LayoutTransformControl
+               applies ViewerZoom by re-measuring, not just re-painting — a bare RenderTransform
+               would scale the pixels but leave the ScrollViewer's extent (and so how much you have
+               to scroll) exactly as big as the untransformed content. -->
           <Border Grid.Row="3"
                   Padding="12"
                   CornerRadius="4"
                   Background="{DynamicResource ConsoleBackgroundBrush}"
                   IsVisible="{Binding HasViewerImage}">
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-              <Image Source="{Binding ViewerImageBytes, Converter={x:Static conv:BytesToBitmapConverter.Instance}}"
-                     Stretch="Uniform"
-                     HorizontalAlignment="Center"
-                     VerticalAlignment="Center" />
+              <LayoutTransformControl LayoutTransform="{Binding ViewerZoom, Converter={x:Static conv:DoubleToScaleTransformConverter.Instance}}">
+                <Image Source="{Binding ViewerImageBytes, Converter={x:Static conv:BytesToBitmapConverter.Instance}}"
+                       Stretch="Uniform"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center" />
+              </LayoutTransformControl>
             </ScrollViewer>
           </Border>
 
@@ -1288,20 +1316,22 @@
                   Background="{DynamicResource ConsoleBackgroundBrush}"
                   IsVisible="{Binding HasViewerPdf}">
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-              <ItemsControl ItemsSource="{Binding ViewerPdfPages, Converter={x:Static conv:PdfPagesToBitmapsConverter.Instance}}">
-                <ItemsControl.ItemsPanel>
-                  <ItemsPanelTemplate>
-                    <StackPanel Orientation="Vertical" Spacing="12" />
-                  </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="Bitmap">
-                    <Image Source="{Binding}"
-                           Stretch="Uniform"
-                           HorizontalAlignment="Center" />
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
+              <LayoutTransformControl LayoutTransform="{Binding ViewerZoom, Converter={x:Static conv:DoubleToScaleTransformConverter.Instance}}">
+                <ItemsControl ItemsSource="{Binding ViewerPdfPages, Converter={x:Static conv:PdfPagesToBitmapsConverter.Instance}}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <StackPanel Orientation="Vertical" Spacing="12" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="Bitmap">
+                      <Image Source="{Binding}"
+                             Stretch="Uniform"
+                             HorizontalAlignment="Center" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </LayoutTransformControl>
             </ScrollViewer>
           </Border>
         </Grid>

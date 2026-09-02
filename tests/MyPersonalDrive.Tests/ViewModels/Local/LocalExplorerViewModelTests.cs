@@ -115,6 +115,47 @@ public class LocalExplorerViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchText_NarrowsToMatchingNames_CaseInsensitively()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "Photos"));
+        File.WriteAllText(Path.Combine(_root, "notes.txt"), "x");
+        var sut = Build(_root);
+        await sut.NavigateAsync(_root);
+
+        sut.SearchText = "PHOTO";
+
+        Assert.Equal("Photos", Assert.Single(sut.Items).DisplayName);
+    }
+
+    [Fact]
+    public async Task ClearingSearchText_RestoresEveryItem()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "Photos"));
+        File.WriteAllText(Path.Combine(_root, "notes.txt"), "x");
+        var sut = Build(_root);
+        await sut.NavigateAsync(_root);
+        sut.SearchText = "Photos";
+
+        sut.SearchText = "";
+
+        Assert.Equal(2, sut.Items.Count);
+    }
+
+    [Fact]
+    public async Task NavigatingToTheNextFolder_DropsTheSearchText()
+    {
+        var sub = Directory.CreateDirectory(Path.Combine(_root, "sub")).FullName;
+        File.WriteAllText(Path.Combine(_root, "notes.txt"), "x");
+        var sut = Build(_root);
+        await sut.NavigateAsync(_root);
+        sut.SearchText = "notes";
+
+        await sut.NavigateAsync(sub);
+
+        Assert.Equal(string.Empty, sut.SearchText);
+    }
+
+    [Fact]
     public async Task DeleteItemAsync_Confirmed_RemovesTheItem_AndRefreshes()
     {
         File.WriteAllText(Path.Combine(_root, "doomed.txt"), "x");

@@ -114,6 +114,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     private IReadOnlyList<DriveItem> _loadedItems = [];
     private FileKind? _kindFilter;
+    private string _searchText = string.Empty;
     private string _filterSummary = string.Empty;
     private bool _sortDescending;
     private const string UnknownCliVersion = "Unknown";
@@ -640,6 +641,23 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _filterSummary;
         private set => SetProperty(ref _filterSummary, value);
+    }
+
+    /// <summary>
+    /// A quick filter over the current folder's file/folder names (case-insensitive substring) —
+    /// docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1's "Global Quick Search". Combines with the kind
+    /// filter chips rather than replacing them: both narrow the same underlying <see cref="_loadedItems"/>.
+    /// </summary>
+    public string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (SetProperty(ref _searchText, value))
+            {
+                RenderItems();
+            }
+        }
     }
 
     public bool IsSortedByName => SortKey == DriveSortKey.Name;
@@ -1441,6 +1459,8 @@ public sealed class MainWindowViewModel : ObservableObject
         // isn't even on screen.
         KindFilters.Clear();
         _kindFilter = null;
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
         FilterSummary = string.Empty;
 
         UpdateQuotaMetrics();
@@ -2509,6 +2529,15 @@ public sealed class MainWindowViewModel : ObservableObject
             _kindFilter = null;
         }
 
+        // Same reasoning, unconditionally: a search term almost never matches anything in a
+        // different folder, and even when it does, silently carrying it over would look like the
+        // listing forgot files rather than like an active filter.
+        if (_searchText.Length > 0)
+        {
+            _searchText = string.Empty;
+            OnPropertyChanged(nameof(SearchText));
+        }
+
         RenderItems();
         UpdateQuotaMetrics();
         UpdateConnectionTelemetry();
@@ -2525,6 +2554,11 @@ public sealed class MainWindowViewModel : ObservableObject
         var visible = _kindFilter is null
             ? _loadedItems
             : _loadedItems.Where(item => FileKindClassifier.Classify(item.Name, item.IsFolder) == _kindFilter).ToList();
+
+        if (_searchText.Length > 0)
+        {
+            visible = visible.Where(item => item.Name.Contains(_searchText, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
 
         RootItems.Clear();
         foreach (var item in DriveItemSorter.Sort(visible, SortKey, SortDescending))
@@ -2556,6 +2590,13 @@ public sealed class MainWindowViewModel : ObservableObject
         var metrics = FolderMetricsCalculator.FromChildren(CurrentPath, _loadedItems, _timeProvider.GetUtcNow());
         Metrics.Update(metrics);
         RebuildKindFilters(metrics);
+
+        // Covers both filters together rather than each setting its own summary: a search term and
+        // a kind chip can be active at once, and the count on screen is the result of whichever of
+        // them are, not just the last one applied.
+        FilterSummary = _kindFilter is not null || _searchText.Length > 0
+            ? $"Mostrando {RootItems.Count:n0} de {_loadedItems.Count:n0} elementos."
+            : string.Empty;
 
         // Fire and forget: a stored folder size is a nice-to-have annotation, and the rows must
         // paint without waiting on the database.
@@ -2843,7 +2884,6 @@ public sealed class MainWindowViewModel : ObservableObject
         if (metrics.Buckets.Count <= 1)
         {
             // One kind (or none) means every chip would be a no-op, and "Todos" alone is just noise.
-            FilterSummary = string.Empty;
             return;
         }
 
@@ -2859,10 +2899,6 @@ public sealed class MainWindowViewModel : ObservableObject
                 IsActive = _kindFilter == bucket.Kind,
             });
         }
-
-        FilterSummary = _kindFilter is null
-            ? string.Empty
-            : $"Mostrando {RootItems.Count:n0} de {metrics.FileCount + metrics.FolderCount:n0} elementos.";
     }
 
     private async Task ApplyKindFilterAsync(FileKind? kind)

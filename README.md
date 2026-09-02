@@ -18,6 +18,8 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
 - Auto-load the active provider's root folder after authentication
 - Browse folders with breadcrumb navigation
 - Go back to parent folders without leaving `/my-files`
+- Quick-filter either pane's current folder by name (case-insensitive, no CLI call) — combines with
+  the cloud pane's type filter chips; both reset when you navigate to a different folder
 - Browse the local filesystem in a resizable second pane alongside the cloud one — its own
   breadcrumb, a home shortcut, a hidden-files toggle, and a free-space indicator
 - Show or hide the local pane from the header, and the Status/Metrics sidebar from a "User

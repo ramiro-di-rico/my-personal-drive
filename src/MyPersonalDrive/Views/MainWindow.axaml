@@ -377,6 +377,13 @@
                 <Setter Property="FontWeight" Value="Bold" />
               </Style>
             </StackPanel.Styles>
+            <!-- Quick filter over the folder's names (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1's
+                 "Global Quick Search") — narrows what's already loaded, no CLI call, combines with
+                 the kind chips below rather than replacing them. -->
+            <TextBox Width="200"
+                     PlaceholderText="Buscar en esta carpeta…"
+                     Text="{Binding SearchText, Mode=TwoWay}"
+                     Margin="0,0,8,0" />
             <TextBlock Text="Ordenar por:" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
             <Button Classes="sortKey" Classes.active="{Binding IsSortedByName}" Command="{Binding SortByNameCommand}">
               <StackPanel Orientation="Horizontal" Spacing="4">
@@ -789,6 +796,12 @@
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
               </ScrollViewer>
+              <!-- Quick filter over this folder's names — the local pane's counterpart to the
+                   cloud pane's own search box (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1). -->
+              <TextBox Width="200"
+                       HorizontalAlignment="Left"
+                       PlaceholderText="Buscar en esta carpeta…"
+                       Text="{Binding SearchText, Mode=TwoWay}" />
               </StackPanel>
             </Border>
 

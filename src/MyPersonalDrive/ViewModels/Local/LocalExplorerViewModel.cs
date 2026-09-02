@@ -22,6 +22,10 @@ public sealed class LocalExplorerViewModel : ObservableObject
     private string _freeSpaceText = string.Empty;
     private bool _isLoading;
     private string? _statusMessage;
+    private string _searchText = string.Empty;
+
+    /// <summary>Everything the current folder holds, before filtering — mirrors <c>MainWindowViewModel._loadedItems</c>, and for the same reason: <see cref="Items"/> is a filtered view of this, never the source of truth for what's actually in the folder.</summary>
+    private IReadOnlyList<DriveItem> _loadedItems = [];
 
     public LocalExplorerViewModel(LocalFileSystemService service, AppSettingsService settings, Action<Exception>? onError = null)
     {
@@ -102,6 +106,24 @@ public sealed class LocalExplorerViewModel : ObservableObject
     /// <summary>Looks up the configured sync pair (if any) whose local side is a given path.</summary>
     public Func<string, SyncPairViewModel?>? FindSyncPairByPath { get; set; }
 
+    /// <summary>
+    /// A quick filter over the current folder's file/folder names (case-insensitive substring,
+    /// same rule as the cloud pane's own search — docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1's "Global
+    /// Quick Search"). Reset on navigation: a search term belongs to the folder it was typed in, the
+    /// same reasoning <c>MainWindowViewModel</c>'s kind filter already follows.
+    /// </summary>
+    public string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (SetProperty(ref _searchText, value))
+            {
+                RenderItems();
+            }
+        }
+    }
+
     /// <summary>Best-effort: a home directory that can't be listed shows a status message, not a crash at startup.</summary>
     public async Task InitializeAsync()
     {
@@ -123,23 +145,16 @@ public sealed class LocalExplorerViewModel : ObservableObject
         try
         {
             var items = await Task.Run(() => _service.ListDirectory(path, ShowHiddenFiles));
-            var sorted = DriveItemSorter.Sort(items, DriveSortKey.Name, descending: false);
+            _loadedItems = DriveItemSorter.Sort(items, DriveSortKey.Name, descending: false);
 
             CurrentPath = path;
-            Items.Clear();
-            foreach (var item in sorted)
-            {
-                Items.Add(new LocalNodeViewModel(item, i => NavigateAsync(i.Path), _onError, new LocalNodeSyncActions
-                {
-                    FindSyncPair = i => FindSyncPairByPath?.Invoke(i.Path),
-                    SyncSelectedPathAsync = SyncSelectedPathAsync,
-                    CopyPathAsync = CopyPathAsync,
-                    RenameAsync = RenameItemAsync,
-                    DeleteAsync = DeleteItemAsync,
-                    ShowPropertiesAsync = ShowPropertiesAsync,
-                    RefreshPaneAsync = () => NavigateAsync(CurrentPath),
-                }));
-            }
+            // A search term belongs to the folder it was typed in — carrying it into the next one
+            // would hide files the user never filtered, or make an unrelated folder look empty.
+            // Set through the field, not the property: the property re-renders on its own, which
+            // here would just repeat the render RenderItems() below already does.
+            _searchText = string.Empty;
+            OnPropertyChanged(nameof(SearchText));
+            RenderItems();
 
             RebuildBreadcrumbs();
             FreeSpaceText = _service.AvailableFreeBytes(path) is { } bytes ? ByteSize.Format(bytes) : "—";
@@ -151,6 +166,28 @@ public sealed class LocalExplorerViewModel : ObservableObject
         finally
         {
             IsLoading = false;
+        }
+    }
+
+    private void RenderItems()
+    {
+        var visible = string.IsNullOrWhiteSpace(_searchText)
+            ? _loadedItems
+            : _loadedItems.Where(item => item.Name.Contains(_searchText, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        Items.Clear();
+        foreach (var item in visible)
+        {
+            Items.Add(new LocalNodeViewModel(item, i => NavigateAsync(i.Path), _onError, new LocalNodeSyncActions
+            {
+                FindSyncPair = i => FindSyncPairByPath?.Invoke(i.Path),
+                SyncSelectedPathAsync = SyncSelectedPathAsync,
+                CopyPathAsync = CopyPathAsync,
+                RenameAsync = RenameItemAsync,
+                DeleteAsync = DeleteItemAsync,
+                ShowPropertiesAsync = ShowPropertiesAsync,
+                RefreshPaneAsync = () => NavigateAsync(CurrentPath),
+            }));
         }
     }
 

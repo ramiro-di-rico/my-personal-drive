@@ -139,14 +139,14 @@ public sealed class SyncStateStore
 
     public Task<SyncPair> CreatePairAsync(
         string remotePath, string localPath, SyncDirection direction, ConflictPolicy conflictPolicy,
-        IReadOnlyList<string>? excludeGlobs = null, CancellationToken ct = default)
+        IReadOnlyList<string>? excludeGlobs = null, bool mirrorDeletes = true, CancellationToken ct = default)
         => SqliteOffThread.RunAsync<SyncPair>(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO SyncPairs (AccountKey, RemotePath, LocalPath, Direction, ConflictPolicy, ExcludeGlobs, LastSyncStatus)
-            VALUES (@AccountKey, @RemotePath, @LocalPath, @Direction, @ConflictPolicy, @ExcludeGlobs, 'Never');
+            INSERT INTO SyncPairs (AccountKey, RemotePath, LocalPath, Direction, ConflictPolicy, ExcludeGlobs, LastSyncStatus, MirrorDeletes)
+            VALUES (@AccountKey, @RemotePath, @LocalPath, @Direction, @ConflictPolicy, @ExcludeGlobs, 'Never', @MirrorDeletes);
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("@AccountKey", _accountKey);
@@ -155,10 +155,11 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@Direction", direction.ToString());
         command.Parameters.AddWithValue("@ConflictPolicy", conflictPolicy.ToString());
         command.Parameters.AddWithValue("@ExcludeGlobs", (object?)JoinGlobs(excludeGlobs) ?? DBNull.Value);
+        command.Parameters.AddWithValue("@MirrorDeletes", mirrorDeletes ? 1 : 0);
         var id = Convert.ToInt32(await command.ExecuteScalarAsync(ct));
 
         return new SyncPair(id, remotePath, localPath, direction, conflictPolicy, IsEnabled: true, IsPaused: false,
-            excludeGlobs ?? [], LastSyncAt: null, SyncPairStatus.Never, LastError: null);
+            excludeGlobs ?? [], LastSyncAt: null, SyncPairStatus.Never, LastError: null, mirrorDeletes);
     });
 
     public Task<IReadOnlyList<SyncPair>> GetPairsAsync(CancellationToken ct = default)
@@ -166,7 +167,7 @@ public sealed class SyncStateStore
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, RemotePath, LocalPath, Direction, ConflictPolicy, IsEnabled, IsPaused, ExcludeGlobs, LastSyncAt, LastSyncStatus, LastError FROM SyncPairs WHERE AccountKey = @AccountKey ORDER BY Id";
+        command.CommandText = "SELECT Id, RemotePath, LocalPath, Direction, ConflictPolicy, IsEnabled, IsPaused, ExcludeGlobs, LastSyncAt, LastSyncStatus, LastError, MirrorDeletes FROM SyncPairs WHERE AccountKey = @AccountKey ORDER BY Id";
         command.Parameters.AddWithValue("@AccountKey", _accountKey);
         var pairs = new List<SyncPair>();
         using var reader = await command.ExecuteReaderAsync(ct);
@@ -183,7 +184,7 @@ public sealed class SyncStateStore
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, RemotePath, LocalPath, Direction, ConflictPolicy, IsEnabled, IsPaused, ExcludeGlobs, LastSyncAt, LastSyncStatus, LastError FROM SyncPairs WHERE AccountKey = @AccountKey AND Id = @Id";
+        command.CommandText = "SELECT Id, RemotePath, LocalPath, Direction, ConflictPolicy, IsEnabled, IsPaused, ExcludeGlobs, LastSyncAt, LastSyncStatus, LastError, MirrorDeletes FROM SyncPairs WHERE AccountKey = @AccountKey AND Id = @Id";
         command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@Id", id);
         using var reader = await command.ExecuteReaderAsync(ct);
@@ -214,14 +215,15 @@ public sealed class SyncStateStore
     /// is simply never read again. Switching *into* `TwoWay` starts with no baseline, same as any
     /// brand-new two-way pair.
     /// </summary>
-    public Task UpdatePairSettingsAsync(int id, SyncDirection direction, ConflictPolicy conflictPolicy, CancellationToken ct = default)
+    public Task UpdatePairSettingsAsync(int id, SyncDirection direction, ConflictPolicy conflictPolicy, bool mirrorDeletes = true, CancellationToken ct = default)
         => SqliteOffThread.RunAsync(async () =>
     {
         using var connection = OpenConnection();
         var command = connection.CreateCommand();
-        command.CommandText = "UPDATE SyncPairs SET Direction = @Direction, ConflictPolicy = @ConflictPolicy WHERE AccountKey = @AccountKey AND Id = @Id";
+        command.CommandText = "UPDATE SyncPairs SET Direction = @Direction, ConflictPolicy = @ConflictPolicy, MirrorDeletes = @MirrorDeletes WHERE AccountKey = @AccountKey AND Id = @Id";
         command.Parameters.AddWithValue("@Direction", direction.ToString());
         command.Parameters.AddWithValue("@ConflictPolicy", conflictPolicy.ToString());
+        command.Parameters.AddWithValue("@MirrorDeletes", mirrorDeletes ? 1 : 0);
         command.Parameters.AddWithValue("@AccountKey", _accountKey);
         command.Parameters.AddWithValue("@Id", id);
         await command.ExecuteNonQueryAsync(ct);
@@ -271,7 +273,8 @@ public sealed class SyncStateStore
             ExcludeGlobs: SplitGlobs(reader.IsDBNull(7) ? null : reader.GetString(7)),
             LastSyncAt: reader.IsDBNull(8) ? null : ParseTimestamp(reader.GetString(8)),
             LastStatus: Enum.Parse<SyncPairStatus>(reader.GetString(9)),
-            LastError: reader.IsDBNull(10) ? null : reader.GetString(10));
+            LastError: reader.IsDBNull(10) ? null : reader.GetString(10),
+            MirrorDeletes: reader.GetInt32(11) != 0);
 
     private static string? JoinGlobs(IReadOnlyList<string>? globs)
         => globs is null || globs.Count == 0 ? null : string.Join('\n', globs);

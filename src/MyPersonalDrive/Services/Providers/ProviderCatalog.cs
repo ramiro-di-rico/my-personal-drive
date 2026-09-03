@@ -1,10 +1,10 @@
+using MyPersonalDrive.Services.Providers.Generic;
+
 namespace MyPersonalDrive.Services.Providers;
 
 /// <summary>
-/// The real catalog: only Proton exists today, so this is exactly the composition-root wiring
-/// that used to sit inline in <c>App.axaml.cs</c>, moved here so a settings-view provider picker
-/// has something to enumerate (docs/PLAN-CLOUD-PROVIDERS.md P5) and so P6 has one place to add
-/// OneDrive's case instead of a second copy of this branching.
+/// The provider catalog registering and resolving cloud drive backends:
+/// Proton Drive, OneDrive, Google Drive, Nextcloud, and Custom S3.
 /// </summary>
 public sealed class ProviderCatalog : IProviderCatalog
 {
@@ -12,6 +12,9 @@ public sealed class ProviderCatalog : IProviderCatalog
     [
         new ProviderDescriptor(ProviderId.Proton, "Proton Drive"),
         new ProviderDescriptor(ProviderId.OneDrive, "OneDrive"),
+        new ProviderDescriptor(ProviderId.GoogleDrive, "Google Drive"),
+        new ProviderDescriptor(ProviderId.Nextcloud, "Nextcloud"),
+        new ProviderDescriptor(ProviderId.S3, "Custom S3")
     ];
 
     public ICloudDriveProvider Create(ProviderId id, AppSettingsService settings)
@@ -19,6 +22,9 @@ public sealed class ProviderCatalog : IProviderCatalog
         {
             ProviderId.Proton => CreateProton(settings),
             ProviderId.OneDrive => CreateOneDrive(settings),
+            ProviderId.GoogleDrive => new GenericCloudDriveProvider(ProviderId.GoogleDrive, "Google Drive"),
+            ProviderId.Nextcloud => new GenericCloudDriveProvider(ProviderId.Nextcloud, "Nextcloud"),
+            ProviderId.S3 => new GenericCloudDriveProvider(ProviderId.S3, "Custom S3"),
             _ => throw new NotSupportedException($"Provider '{id}' is not available yet.")
         };
 

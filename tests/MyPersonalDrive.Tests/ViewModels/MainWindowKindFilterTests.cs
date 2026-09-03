@@ -178,4 +178,66 @@ public class MainWindowKindFilterTests : IDisposable
         Assert.Equal(2, viewModel.RootItems.Count);
         Assert.Equal(string.Empty, viewModel.FilterSummary);
     }
+
+    // ---------------------------------------------------------------- search (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1)
+
+    [Fact]
+    public void SearchText_NarrowsToMatchingNames_CaseInsensitively()
+    {
+        var viewModel = LoadMixedFolder();
+
+        viewModel.SearchText = "JPG";
+
+        Assert.Equal(2, viewModel.RootItems.Count);
+        Assert.All(viewModel.RootItems, node => Assert.Contains("jpg", node.DisplayName, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("2", viewModel.FilterSummary);
+        Assert.Contains("4", viewModel.FilterSummary);
+    }
+
+    [Fact]
+    public async Task SearchText_CombinesWithTheActiveKindChip()
+    {
+        var viewModel = LoadMixedFolder();
+        await Chip(viewModel, FileKind.Image).ApplyCommand.ExecuteAsync(); // narrows to a.jpg, b.jpg
+
+        viewModel.SearchText = "a"; // narrows further to a.jpg only
+
+        Assert.Equal("a.jpg", Assert.Single(viewModel.RootItems).DisplayName);
+    }
+
+    [Fact]
+    public void ClearingSearchText_RestoresEveryItem()
+    {
+        var viewModel = LoadMixedFolder();
+        viewModel.SearchText = "jpg";
+
+        viewModel.SearchText = "";
+
+        Assert.Equal(4, viewModel.RootItems.Count);
+        Assert.Equal(string.Empty, viewModel.FilterSummary);
+    }
+
+    [Fact]
+    public void NavigatingToTheNextFolder_DropsTheSearchText()
+    {
+        var viewModel = LoadMixedFolder();
+        viewModel.SearchText = "jpg";
+
+        viewModel.DisplayItems([Item("report.pdf", 100), Item("notes.txt", 200)]);
+
+        Assert.Equal(string.Empty, viewModel.SearchText);
+        Assert.Equal(2, viewModel.RootItems.Count);
+        Assert.Equal(string.Empty, viewModel.FilterSummary);
+    }
+
+    [Fact]
+    public void SearchText_ThatMatchesNothing_ShowsAnEmptyListing_NotAnError()
+    {
+        var viewModel = LoadMixedFolder();
+
+        viewModel.SearchText = "does-not-exist-anywhere";
+
+        Assert.Empty(viewModel.RootItems);
+        Assert.Contains("0", viewModel.FilterSummary);
+    }
 }

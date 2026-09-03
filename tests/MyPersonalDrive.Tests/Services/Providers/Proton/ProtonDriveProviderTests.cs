@@ -36,4 +36,26 @@ public class ProtonDriveProviderTests
         Assert.False(seen[1].IsError);
         Assert.Equal(0, seen[1].ExitCode);
     }
+
+    /// <summary>
+    /// Proton's CLI has no command to generate a share link — Capabilities.SupportsShareLinks is
+    /// false, and the UI is expected to gate on that rather than ever calling this, but the method
+    /// itself still has to fail loudly (not silently return an empty/placeholder string) for the
+    /// rare caller that doesn't check first.
+    /// </summary>
+    [Fact]
+    public void Capabilities_DoNotSupportShareLinks()
+    {
+        var provider = new ProtonDriveProvider(new ProtonDriveService(new FakeCliExecutor()));
+
+        Assert.False(provider.Capabilities.SupportsShareLinks);
+    }
+
+    [Fact]
+    public async Task CreateShareLinkAsync_Throws()
+    {
+        var provider = new ProtonDriveProvider(new ProtonDriveService(new FakeCliExecutor()));
+
+        await Assert.ThrowsAsync<DriveException>(() => provider.Operations.CreateShareLinkAsync("/my-files/report.pdf"));
+    }
 }

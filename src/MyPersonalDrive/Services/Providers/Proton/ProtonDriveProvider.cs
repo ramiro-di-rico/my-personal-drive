@@ -48,7 +48,8 @@ public sealed class ProtonDriveProvider : ICloudDriveProvider, IDriveOperations,
         MaxSingleShotUploadBytes: null,
         UploadChunkSizeBytes: null,
         MaxRecommendedConcurrency: 8,
-        CanSetRemoteModificationTime: false);
+        CanSetRemoteModificationTime: false,
+        SupportsShareLinks: false);
 
     public IDriveOperations Operations => this;
 
@@ -89,6 +90,11 @@ public sealed class ProtonDriveProvider : ICloudDriveProvider, IDriveOperations,
 
     Task IDriveOperations.CopyItemAsync(string sourcePath, string targetParentPath, string? newName, CancellationToken cancellationToken)
         => _service.CopyItemAsync(sourcePath, targetParentPath, newName, cancellationToken);
+
+    /// <summary>Proton's CLI has no command to generate a share link — Capabilities.SupportsShareLinks is false, so the UI never lets this actually be called; this exists only to satisfy the interface.</summary>
+    Task<string> IDriveOperations.CreateShareLinkAsync(string path, CancellationToken cancellationToken)
+        => throw new DriveException(nameof(ProtonDriveProvider), -1, string.Empty, string.Empty,
+            "Proton Drive's CLI has no command to generate a share link.", DriveErrorKind.Unknown);
 
     Task IDriveAuthenticator.AuthenticateAsync(CancellationToken cancellationToken)
         => _service.AuthenticateAsync(cancellationToken);

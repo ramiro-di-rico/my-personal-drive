@@ -23,6 +23,7 @@ are pointers to these same files.
 | Manual smoke pass | [`smoke-test`](../.claude/skills/smoke-test/SKILL.md) |
 | Write/update a plan doc | [`plan-doc`](../.claude/skills/plan-doc/SKILL.md) |
 | Park an out-of-scope finding | [`debt`](../.claude/skills/debt/SKILL.md) |
+| Create a git commit | [`commit`](../.claude/skills/commit/SKILL.md) |
 
 In VS Code these are also available as prompt files: `/cli-command`, `/add-feature`, and so on.
 

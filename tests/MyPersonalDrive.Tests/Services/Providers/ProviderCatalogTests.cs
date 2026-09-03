@@ -25,7 +25,7 @@ public class ProviderCatalogTests : IDisposable
     }
 
     [Fact]
-    public void Available_ListsProtonAndOneDrive()
+    public void Available_ListsAllSupportedProviders()
     {
         var sut = new ProviderCatalog();
 
@@ -40,6 +40,21 @@ public class ProviderCatalogTests : IDisposable
             {
                 Assert.Equal(ProviderId.OneDrive, oneDrive.Id);
                 Assert.Equal("OneDrive", oneDrive.DisplayName);
+            },
+            google =>
+            {
+                Assert.Equal(ProviderId.GoogleDrive, google.Id);
+                Assert.Equal("Google Drive", google.DisplayName);
+            },
+            nextcloud =>
+            {
+                Assert.Equal(ProviderId.Nextcloud, nextcloud.Id);
+                Assert.Equal("Nextcloud", nextcloud.DisplayName);
+            },
+            s3 =>
+            {
+                Assert.Equal(ProviderId.S3, s3.Id);
+                Assert.Equal("Custom S3", s3.DisplayName);
             });
     }
 

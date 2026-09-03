@@ -18,18 +18,46 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
 - Auto-load the active provider's root folder after authentication
 - Browse folders with breadcrumb navigation
 - Go back to parent folders without leaving `/my-files`
+- Quick-filter either pane's current folder by name (case-insensitive, no CLI call) — combines with
+  the cloud pane's type filter chips; both reset when you navigate to a different folder
+- Browse the local filesystem in a resizable second pane alongside the cloud one — its own
+  breadcrumb, a home shortcut, a hidden-files toggle, and a free-space indicator
+- Show or hide the local pane from the header, and the Status/Metrics sidebar from a "User
+  Settings" checkbox in settings — each choice is remembered and is also what the next launch
+  starts with
+- Select several rows at once in either pane — Ctrl/Cmd+Click adds or removes one row,
+  Shift+Click selects the range from the last one you touched, Ctrl/Cmd+A selects everything — and
+  batch-download or trash them in the cloud pane, or batch-delete them locally
+- Drag a file or folder between the cloud and local panes to upload/download it — onto empty space
+  to target the folder currently open, or onto a folder row to target that folder — tracked in a
+  cancellable transfer queue (Status sidebar). The target pane and, if you're over one, the
+  specific folder row light up, with a badge showing exactly where the drop will land
 - Show file and folder metadata in the status pane
 - Download files
-- View plain-text files and common image formats (JPEG, PNG, GIF, BMP, WebP, ICO) in the app,
+- View plain-text files, common image formats (JPEG, PNG, GIF, BMP, WebP, ICO) and PDFs in the app,
   without downloading them to disk — from a row action, a context menu entry, or the "Visor"
-  menu button
+  menu button. PDF pages are rendered as images (up to the first 20 pages of a document); a zoom
+  slider on the image/PDF viewer (default 50%) is remembered across restarts
 - Upload files to the current folder
-- Move files to trash
+- Move files and folders to trash (folders ask for confirmation first)
 - Sync a remote folder with a local folder — download-only, upload-only, or two-way, running
   automatically with the on/off choice persisted across restarts. Proton and OneDrive each sync
-  independently — pausing one doesn't affect the other
+  independently — pausing one doesn't affect the other. A one-way pair can mirror the destination
+  exactly (deleting whatever isn't at the source, the historical behavior) or, unchecked, sync
+  additively — never deleting files the destination already had. The same local folder can be
+  synced to several providers at once as long as every pair sharing it is upload-only, since none
+  of them ever writes back to that folder — any other combination (a pair that downloads or
+  mirrors into a shared folder) is rejected
+- Right-click a row in either pane for a context menu: copy its path, upload into or download a
+  cloud folder, start a sync pair pre-filled with that path, pause/resume/run-now an existing pair,
+  rename or delete a local item, and view its properties. Folders with an active sync pair show a
+  small badge (paused pairs show a different one) — see badge in list view and the local pane
+- Copy a share link for a cloud item to the clipboard (OneDrive only — Proton Drive's CLI has no
+  such command, so the menu entry stays disabled there, with a tooltip explaining why)
 - Live console with realtime output from the CLI (Proton) and Graph requests (OneDrive), tagged
-  by account when both are active
+  by account when both are active — collapsible (`Ctrl/Cmd+~`, remembered across restarts), with a
+  search box, a warnings/errors-only filter, and a floating status line (active operation count,
+  last log line) while collapsed
 - Show the installed `proton-drive` CLI version in the settings view
 - Check Proton's published releases for a newer CLI, and install it after verifying its SHA-512
 

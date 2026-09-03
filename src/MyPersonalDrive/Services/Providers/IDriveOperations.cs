@@ -29,6 +29,16 @@ public interface IDriveOperations
     Task MoveItemsAsync(IReadOnlyList<string> paths, string targetParentPath, CancellationToken cancellationToken = default);
 
     Task CopyItemAsync(string sourcePath, string targetParentPath, string? newName = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Generates a shareable link for the item, when the provider's
+    /// <see cref="ProviderCapabilities.SupportsShareLinks"/> is true. Callers must gate on that
+    /// capability rather than on catching a failure here — a provider that doesn't support this
+    /// (Proton's CLI has no such command) throws <see cref="DriveException"/> unconditionally, the
+    /// same way <c>Providers.Generic.GenericCloudDriveProvider</c> reports every unimplemented
+    /// operation.
+    /// </summary>
+    Task<string> CreateShareLinkAsync(string path, CancellationToken cancellationToken = default);
 }
 
 public static class DriveOperationsExtensions

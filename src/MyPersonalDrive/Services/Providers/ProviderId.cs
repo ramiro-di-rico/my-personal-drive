@@ -6,5 +6,8 @@ namespace MyPersonalDrive.Services.Providers;
 public enum ProviderId
 {
     Proton,
-    OneDrive
+    OneDrive,
+    GoogleDrive,
+    Nextcloud,
+    S3
 }

@@ -32,6 +32,7 @@ one-line description.
 | [`smoke-test`](.claude/skills/smoke-test/SKILL.md) | Before a PR or release — the manual pass unit tests can't do |
 | [`plan-doc`](.claude/skills/plan-doc/SKILL.md) | Writing or refreshing a `docs/PLAN-*.md` or `ARCHITECTURE.md` |
 | [`debt`](.claude/skills/debt/SKILL.md) | Parking an out-of-scope finding instead of widening the diff |
+| [`commit`](.claude/skills/commit/SKILL.md) | Creating a git commit — no AI co-author trailer in this repo |
 
 ## Non-negotiables
 

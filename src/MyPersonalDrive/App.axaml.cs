@@ -22,6 +22,7 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var settings = new AppSettingsService();
+            ApplyTheme(settings.Load().ThemeOrDefault());
             var catalog = new ProviderCatalog();
 
             // P7 Phase A (docs/PLAN-CLOUD-PROVIDERS.md): a session per provider *type*, not just
@@ -57,7 +58,8 @@ public partial class App : Application
                 statsScanner: new FolderStatsScanner(primary.Provider),
                 providerCatalog: catalog,
                 previewLoader: new TextFilePreviewService(primary.Provider.Operations),
-                imagePreviewLoader: new ImageFilePreviewService(primary.Provider.Operations));
+                imagePreviewLoader: new ImageFilePreviewService(primary.Provider.Operations),
+                pdfPreviewLoader: new PdfFilePreviewService(primary.Provider.Operations));
 
             // The console shows every active account's activity regardless of which is browsed —
             // background sync on an account you're not currently looking at is still something
@@ -72,7 +74,8 @@ public partial class App : Application
                     metricsStore: other.MetricsStore,
                     statsScanner: new FolderStatsScanner(other.Provider),
                     previewLoader: new TextFilePreviewService(other.Provider.Operations),
-                    imagePreviewLoader: new ImageFilePreviewService(other.Provider.Operations));
+                    imagePreviewLoader: new ImageFilePreviewService(other.Provider.Operations),
+                    pdfPreviewLoader: new PdfFilePreviewService(other.Provider.Operations));
             }
 
             desktop.MainWindow = new MainWindow
@@ -104,6 +107,17 @@ public partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    public static void ApplyTheme(string theme)
+    {
+        if (Current is null) return;
+        Current.RequestedThemeVariant = theme?.ToLowerInvariant() switch
+        {
+            "light" => Avalonia.Styling.ThemeVariant.Light,
+            "dark" => Avalonia.Styling.ThemeVariant.Dark,
+            _ => Avalonia.Styling.ThemeVariant.Default
+        };
     }
 
     private static AccountSyncContext BuildAccountContext(ICloudDriveProvider provider, AppSettingsService settings)
@@ -146,7 +160,7 @@ public partial class App : Application
             syncStateStore, syncExecutor, echoSuppressor,
             // The bool that actually matters is this provider's own — mirrors
             // MainWindowViewModel's own IsAuthenticated field selection.
-            isAuthenticated: () => provider.Id == ProviderId.OneDrive ? settings.Load().IsOneDriveAuthenticated : settings.Load().IsAuthenticated);
+            isAuthenticated: () => settings.Load().IsProviderAuthenticated(provider.Id));
 
         return new AccountSyncContext(provider, accountKey, provider.DisplayName, cacheService, syncStateStore, metricsStore, syncExecutor, syncScheduler);
     }

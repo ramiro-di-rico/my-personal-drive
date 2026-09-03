@@ -25,6 +25,8 @@ namespace MyPersonalDrive.Services;
 [JsonSerializable(typeof(GraphCopyRequest))]
 [JsonSerializable(typeof(GraphCreateFolderRequest))]
 [JsonSerializable(typeof(GraphCreateUploadSessionRequest))]
+[JsonSerializable(typeof(GraphSharingLinkRequest))]
+[JsonSerializable(typeof(GraphPermission))]
 [JsonSourceGenerationOptions(WriteIndented = true)]
 internal partial class AppJsonContext : JsonSerializerContext
 {

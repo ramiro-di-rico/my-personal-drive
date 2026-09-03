@@ -22,6 +22,7 @@ plain Markdown procedures, not Claude-specific — they apply to you unchanged.
 | Manual smoke pass | [`.claude/skills/smoke-test/SKILL.md`](../.claude/skills/smoke-test/SKILL.md) |
 | Write/update a plan doc | [`.claude/skills/plan-doc/SKILL.md`](../.claude/skills/plan-doc/SKILL.md) |
 | Park an out-of-scope finding | [`.claude/skills/debt/SKILL.md`](../.claude/skills/debt/SKILL.md) |
+| Create a git commit | [`.claude/skills/commit/SKILL.md`](../.claude/skills/commit/SKILL.md) |
 
 ## Hard rules
 

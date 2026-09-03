@@ -65,7 +65,7 @@ public sealed class SyncPanelViewModel : ObservableObject
         AccountSyncToggles = new ObservableCollection<AccountSyncToggleViewModel>();
         ProviderFilters = new ObservableCollection<ProviderFilterViewModel>();
 
-        AddPairCommand = new AsyncCommand(AddPairAsync, () => !IsBusy, ReportError);
+        AddPairCommand = new AsyncCommand(() => AddPairAsync(), () => !IsBusy, ReportError);
         RefreshCommand = new AsyncCommand(LoadPairsAsync, () => !IsBusy, ReportError);
         ToggleAutomaticSyncCommand = new AsyncCommand(ToggleAutomaticSyncAsync, () => Primary.Scheduler is not null, ReportError);
 
@@ -168,8 +168,12 @@ public sealed class SyncPanelViewModel : ObservableObject
         }
     }
 
-    /// <summary>Prompts for a new pair's settings; null means the user canceled.</summary>
-    public Func<Task<NewSyncPairRequest?>>? RequestNewPairAsync { get; set; }
+    /// <summary>
+    /// Prompts for a new pair's settings; null means the user canceled. Takes an optional prefill —
+    /// the "Sync Selected Path..." context-menu action (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6)
+    /// already knows one side of the pair, the toolbar's plain "Add pair" button passes null.
+    /// </summary>
+    public Func<SyncPairPrefill?, Task<NewSyncPairRequest?>>? RequestNewPairAsync { get; set; }
 
     /// <summary>
     /// Lists a remote folder's children, for the "Add pair" dialog's remote folder picker.
@@ -308,6 +312,8 @@ public sealed class SyncPanelViewModel : ObservableObject
             RequestPreviewConfirmationAsync = RequestPreviewConfirmationAsync,
             RequestConflictResolutionsAsync = RequestConflictResolutionsAsync,
             RequestEditAsync = RequestEditPairAsync,
+            ValidateDirectionChangeAsync = async newDirection
+                => SyncPairValidator.ValidateDirectionChange(pair, newDirection, await GetAllPairsAcrossAccountsAsync()),
             OnError = message => StatusMessage = message,
         };
         Pairs.Add(viewModel);
@@ -376,7 +382,12 @@ public sealed class SyncPanelViewModel : ObservableObject
         return Task.CompletedTask;
     }
 
-    private async Task AddPairAsync()
+    /// <summary>
+    /// Public (not just <see cref="AddPairCommand"/>) so the explorer's "Sync Selected Path..."
+    /// context-menu action (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6) can drive the exact same
+    /// validated create flow with a prefill, rather than duplicating it.
+    /// </summary>
+    public async Task AddPairAsync(SyncPairPrefill? prefill = null)
     {
         var requester = RequestNewPairAsync;
         if (requester is null)
@@ -385,7 +396,7 @@ public sealed class SyncPanelViewModel : ObservableObject
             return;
         }
 
-        var request = await requester();
+        var request = await requester(prefill);
         if (request is null)
         {
             return;
@@ -400,7 +411,9 @@ public sealed class SyncPanelViewModel : ObservableObject
             // against what's actually in the database, not the rows currently loaded in the panel
             // — the scheduler and other windows can have added pairs since.
             var targetSlot = ActiveSlot;
-            var validationError = SyncPairValidator.Validate(request.RemotePath, request.LocalPath, await targetSlot.StateStore.GetPairsAsync())
+            var sameAccountPairs = await targetSlot.StateStore.GetPairsAsync();
+            var allAccountPairs = await GetAllPairsAcrossAccountsAsync();
+            var validationError = SyncPairValidator.Validate(request.RemotePath, request.LocalPath, request.Direction, sameAccountPairs, allAccountPairs)
                                   ?? LocalFolderInspector.CheckWritable(request.LocalPath);
             if (validationError is not null)
             {
@@ -414,7 +427,7 @@ public sealed class SyncPanelViewModel : ObservableObject
                 return;
             }
 
-            var pair = await targetSlot.StateStore.CreatePairAsync(request.RemotePath, request.LocalPath, request.Direction, request.ConflictPolicy);
+            var pair = await targetSlot.StateStore.CreatePairAsync(request.RemotePath, request.LocalPath, request.Direction, request.ConflictPolicy, mirrorDeletes: request.MirrorDeletes);
             AddPairViewModel(pair, targetSlot);
             StatusMessage = $"Added: {pair.RemotePath} {DirectionArrow(pair.Direction)} {pair.LocalPath}";
         }
@@ -458,6 +471,33 @@ public sealed class SyncPanelViewModel : ObservableObject
             $"'{request.LocalPath}' already contains more than {LocalFolderInspector.BusyFolderThreshold} items. " +
             $"Syncing it in this direction will upload all of them to {targetSlot.DisplayName}. Continue?");
     }
+
+    /// <summary>
+    /// Every account's pairs, pooled — for <see cref="SyncPairValidator"/>'s local-overlap check,
+    /// which has to see the whole picture: the local folder a pair points at is the same physical
+    /// path no matter which account's row describes it.
+    /// </summary>
+    private async Task<IReadOnlyList<SyncPair>> GetAllPairsAcrossAccountsAsync()
+    {
+        var all = new List<SyncPair>();
+        foreach (var slot in _slots)
+        {
+            all.AddRange(await slot.StateStore.GetPairsAsync());
+        }
+
+        return all;
+    }
+
+    /// <summary>Looks up the configured pair (if any) whose remote side is <paramref name="remotePath"/> — for the cloud pane's sync badges (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6).</summary>
+    public SyncPairViewModel? FindPairByRemotePath(string remotePath)
+        => Pairs.FirstOrDefault(pair => PathsEqual(pair.RemotePath, remotePath));
+
+    /// <summary>Looks up the configured pair (if any) whose local side is <paramref name="localPath"/> — for the local pane's sync badges.</summary>
+    public SyncPairViewModel? FindPairByLocalPath(string localPath)
+        => Pairs.FirstOrDefault(pair => PathsEqual(pair.LocalPath, localPath));
+
+    private static bool PathsEqual(string a, string b)
+        => string.Equals(a.TrimEnd('/', '\\'), b.TrimEnd('/', '\\'), StringComparison.Ordinal);
 
     private static string DirectionArrow(SyncDirection direction) => direction switch
     {

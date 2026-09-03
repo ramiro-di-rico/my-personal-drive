@@ -209,4 +209,27 @@ public class OneDriveOperationsTests : IDisposable
         var patch = Assert.Single(_handler.Requests, r => r.Method == HttpMethod.Patch);
         Assert.Contains("new.txt", patch.Body);
     }
+
+    [Fact]
+    public async Task CreateShareLinkAsync_PostsCreateLink_AndReturnsTheWebUrl()
+    {
+        _handler.When(HttpMethod.Post, "createLink", _ => FakeHttpMessageHandler.Json(HttpStatusCode.OK, """
+            {"id":"perm1","link":{"type":"view","scope":"anonymous","webUrl":"https://1drv.ms/x/s!abc123"}}
+            """));
+
+        var url = await _sut.CreateShareLinkAsync("/report.pdf");
+
+        Assert.Equal("https://1drv.ms/x/s!abc123", url);
+        var post = Assert.Single(_handler.Requests, r => r.Method == HttpMethod.Post);
+        Assert.Contains("\"view\"", post.Body);
+        Assert.Contains("\"anonymous\"", post.Body);
+    }
+
+    [Fact]
+    public async Task CreateShareLinkAsync_WithNoLinkInTheResponse_ThrowsRatherThanReturningAnEmptyUrl()
+    {
+        _handler.When(HttpMethod.Post, "createLink", _ => FakeHttpMessageHandler.Json(HttpStatusCode.OK, """{"id":"perm1"}"""));
+
+        await Assert.ThrowsAsync<DriveException>(() => _sut.CreateShareLinkAsync("/report.pdf"));
+    }
 }

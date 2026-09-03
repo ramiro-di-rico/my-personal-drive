@@ -65,6 +65,9 @@ public sealed class SyncPairViewModel : ObservableObject
 
     public ConflictPolicy ConflictPolicy => _pair.ConflictPolicy;
 
+    /// <summary>True mirrors the source side exactly (deletes destination-only items); false keeps the pair additive. Only meaningful for a one-way pair — see <see cref="SyncPair.MirrorDeletes"/>.</summary>
+    public bool MirrorDeletes => _pair.MirrorDeletes;
+
     public string StatusText
     {
         get => _statusText;
@@ -193,6 +196,15 @@ public sealed class SyncPairViewModel : ObservableObject
 
     /// <summary>Shown this pair's current direction/conflict policy; returns the new values, or null if the user canceled.</summary>
     public Func<SyncPairViewModel, Task<EditSyncPairRequest?>>? RequestEditAsync { get; set; }
+
+    /// <summary>
+    /// Re-runs <see cref="SyncPairValidator"/>'s shared-local-folder rule against a proposed new
+    /// direction, before <see cref="EditAsync"/> applies it — see
+    /// <see cref="SyncPairValidator.ValidateDirectionChange"/>. Returns the error message to show,
+    /// or null when the change is safe. Left null disables the check (e.g. in tests that don't
+    /// care about it), the same way every other optional delegate on this type does.
+    /// </summary>
+    public Func<SyncDirection, Task<string?>>? ValidateDirectionChangeAsync { get; set; }
 
     public Action<string>? OnError { get; set; }
 
@@ -363,14 +375,23 @@ public sealed class SyncPairViewModel : ObservableObject
             return;
         }
 
+        var validate = ValidateDirectionChangeAsync;
+        if (validate is not null && await validate(request.Direction) is { } validationError)
+        {
+            StatusText = validationError;
+            OnError?.Invoke(validationError);
+            return;
+        }
+
         IsBusy = true;
         try
         {
-            await _stateStore.UpdatePairSettingsAsync(_pair.Id, request.Direction, request.ConflictPolicy);
+            await _stateStore.UpdatePairSettingsAsync(_pair.Id, request.Direction, request.ConflictPolicy, request.MirrorDeletes);
             _pair = await _stateStore.GetPairAsync(_pair.Id) ?? _pair;
             OnPropertyChanged(nameof(DirectionText));
             OnPropertyChanged(nameof(Direction));
             OnPropertyChanged(nameof(ConflictPolicy));
+            OnPropertyChanged(nameof(MirrorDeletes));
             UpdateStatusText();
         }
         finally

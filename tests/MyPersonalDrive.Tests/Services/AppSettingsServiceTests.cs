@@ -85,4 +85,21 @@ public class AppSettingsServiceTests : IDisposable
     [Fact]
     public void ActiveProviderOrDefault_DefaultsToProton()
         => Assert.Equal(MyPersonalDrive.Services.Providers.ProviderId.Proton, new AppSettings().ActiveProviderOrDefault());
+
+    [Fact]
+    public void ViewerZoomOrDefault_DefaultsToFiftyPercent()
+        => Assert.Equal(0.5, new AppSettings().ViewerZoomOrDefault());
+
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(double.NegativeInfinity)]
+    public void ViewerZoomOrDefault_DegradesNonFiniteValuesToFiftyPercent(double corrupt)
+        => Assert.Equal(0.5, new AppSettings { ViewerZoom = corrupt }.ViewerZoomOrDefault());
+
+    [Theory]
+    [InlineData(0.01, AppSettings.MinViewerZoom)]
+    [InlineData(10.0, AppSettings.MaxViewerZoom)]
+    public void ViewerZoomOrDefault_ClampsOutOfRangeValues(double stored, double expected)
+        => Assert.Equal(expected, new AppSettings { ViewerZoom = stored }.ViewerZoomOrDefault());
 }

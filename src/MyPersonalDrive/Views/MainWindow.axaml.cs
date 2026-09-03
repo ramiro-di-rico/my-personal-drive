@@ -1,10 +1,15 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.ViewModels;
+using MyPersonalDrive.ViewModels.Local;
 using MyPersonalDrive.ViewModels.Sync;
 
 namespace MyPersonalDrive.Views;
@@ -16,6 +21,17 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
         Opened += OnOpened;
+
+        // Tunnel, not the plain bubble subscription a XAML PointerPressed/PointerMoved attribute
+        // on the row Button itself would give: ButtonBase marks these events Handled as part of
+        // its own click tracking (RoutingStrategies.Bubble), so a same-strategy handler attached
+        // on the Button never saw them at all — drag-and-drop never started, full stop. Attaching
+        // at the ListBox with Tunnel runs this before that happens (docs/INTERFACE_IMPROVEMENT_PLAN.md
+        // Task 5).
+        LocalListing.AddHandler(InputElement.PointerPressedEvent, OnLocalRowPointerPressed, RoutingStrategies.Tunnel);
+        LocalListing.AddHandler(InputElement.PointerMovedEvent, OnLocalRowPointerMoved, RoutingStrategies.Tunnel);
+        ListModeListing.AddHandler(InputElement.PointerPressedEvent, OnCloudRowPointerPressed, RoutingStrategies.Tunnel);
+        ListModeListing.AddHandler(InputElement.PointerMovedEvent, OnCloudRowPointerMoved, RoutingStrategies.Tunnel);
     }
 
     /// <summary>
@@ -40,6 +56,16 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnListingKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
     {
+        // Ctrl/Cmd+A (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) — scoped to this ListBox's own
+        // KeyDown rather than a window-level KeyBinding, so it never steals the same gesture from a
+        // focused TextBox (the search box, the CLI log filter) selecting its own text instead.
+        if (e.Key == Avalonia.Input.Key.A && e.KeyModifiers.HasFlag(KeyModifiers.Control) && DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.SelectAllRowsCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key is not (Avalonia.Input.Key.Enter or Avalonia.Input.Key.Space))
         {
             return;
@@ -54,6 +80,410 @@ public partial class MainWindow : Window
         // Fire and forget through the command, so the AsyncCommand's own error routing applies
         // rather than this handler becoming an `async void` that can take the process down.
         node.RowCommand.Execute(null);
+    }
+
+    /// <summary>The local pane's counterpart to <see cref="OnListingKeyDown"/>'s Ctrl/Cmd+A handling — the local pane has no Enter/Space activation to also cover, since its rows aren't focusable buttons the way the cloud pane's are.</summary>
+    private void OnLocalListingKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
+    {
+        if (e.Key == Avalonia.Input.Key.A && e.KeyModifiers.HasFlag(KeyModifiers.Control) && DataContext is MainWindowViewModel { LocalExplorer: { } explorer })
+        {
+            explorer.SelectAllCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// Avalonia's <see cref="GridSplitter"/> drags star-sized columns for free but has no built-in
+    /// reset gesture; double-click puts the cloud/local split back to 50/50
+    /// (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 3). Code-behind because it manipulates the visual
+    /// tree's own `Grid.ColumnDefinitions`, not view-model state.
+    /// </summary>
+    private void ExplorerSplitter_DoubleTapped(object? sender, Avalonia.Input.TappedEventArgs e)
+    {
+        if (sender is not Control { Parent: Grid grid })
+        {
+            return;
+        }
+
+        grid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
+        grid.ColumnDefinitions[2].Width = new GridLength(1, GridUnitType.Star);
+    }
+
+    private void OnMainWindowViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainWindowViewModel.IsLocalExplorerPanelVisible) && sender is MainWindowViewModel viewModel)
+        {
+            ApplyLocalExplorerPanelColumnWidth(viewModel.IsLocalExplorerPanelVisible);
+        }
+    }
+
+    /// <summary>
+    /// Collapses/restores the local pane's star-sized column directly, since toggling `IsVisible`
+    /// on its content (done via binding in XAML) has no effect on a `*` column's own width — unlike
+    /// an `Auto` column, which already shrinks to 0 the moment its content stops participating in
+    /// layout. Restoring always goes back to an even split rather than whatever ratio the user last
+    /// dragged to; remembering that ratio isn't worth the extra state for a show/hide toggle.
+    /// </summary>
+    private void ApplyLocalExplorerPanelColumnWidth(bool visible)
+        => ExplorerColumnsGrid.ColumnDefinitions[2].Width = visible ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+
+    // In-process only — never crosses the app boundary, so an arbitrary string identifier (not a
+    // registered clipboard/OS format) is fine as the payload's identity.
+    private static readonly DataFormat<string[]> LocalPathsDataFormat = DataFormat.CreateInProcessFormat<string[]>("application/x-mypersonaldrive-local-paths");
+
+    // How far the pointer has to move, while pressed, before a local-pane row press is treated as
+    // a drag rather than the click that navigates into a folder (docs/INTERFACE_IMPROVEMENT_PLAN.md
+    // Task 5 Phase 2). Below this, PointerReleased still reaches the row's own Button normally.
+    private const double DragStartThresholdPixels = 4;
+
+    private Point? _localDragStartPoint;
+    private LocalNodeViewModel? _localDragCandidate;
+    private PointerPressedEventArgs? _localDragPressedArgs;
+
+    private void OnLocalRowPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        // Attached at the ListBox (see the constructor), not the row itself, so the row has to be
+        // resolved by walking up from whatever was actually hit — usually the icon/text inside it.
+        var row = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>(includeSelf: true);
+        if (row?.DataContext is not LocalNodeViewModel node || !e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        // Ctrl/Shift+Click (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) is a selection gesture, not an
+        // activation or a drag start: handling it here, before the Button's own Click fires (this
+        // handler runs on Tunnel — see the constructor's comment), stops it from also opening a
+        // folder or resetting the multi-selection back down to one row.
+        if (DataContext is MainWindowViewModel { LocalExplorer: { } explorer } && HandleMultiSelectGesture(e, () => explorer.ToggleSelection(node), () => explorer.SelectRange(node)))
+        {
+            return;
+        }
+
+        _localDragStartPoint = e.GetPosition(null);
+        _localDragCandidate = node;
+        _localDragPressedArgs = e;
+    }
+
+    /// <summary>
+    /// Shared Ctrl/Shift-click routing for both panes' row-pressed handlers. Returns true (and
+    /// marks the event handled) when a modifier gesture was recognized and acted on, so the caller
+    /// skips its own plain-click handling (drag-start tracking, which would otherwise arm on a
+    /// selection gesture too).
+    /// </summary>
+    private static bool HandleMultiSelectGesture(PointerPressedEventArgs e, Action toggleSelection, Action selectRange)
+    {
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            selectRange();
+        }
+        else if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            toggleSelection();
+        }
+        else
+        {
+            return false;
+        }
+
+        e.Handled = true;
+        return true;
+    }
+
+    /// <summary>
+    /// Both files and folders can be dragged — <c>filesystem upload</c> already accepts folder
+    /// paths (its <c>-d</c>/folder-conflict-strategy flag exists for exactly this), unlike the
+    /// row's own manual <c>DownloadCommand</c>, which is folder-restricted for an unrelated reason
+    /// (no UI need for it before now, not a CLI limitation — see docs/ARCHITECTURE.md §9 item 11).
+    /// </summary>
+    private async void OnLocalRowPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_localDragStartPoint is not { } start || _localDragCandidate is not { } node || _localDragPressedArgs is not { } pressedArgs)
+        {
+            return;
+        }
+
+        if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        {
+            _localDragStartPoint = null;
+            _localDragCandidate = null;
+            _localDragPressedArgs = null;
+            return;
+        }
+
+        var current = e.GetPosition(null);
+        var dx = current.X - start.X;
+        var dy = current.Y - start.Y;
+        if (Math.Sqrt(dx * dx + dy * dy) < DragStartThresholdPixels)
+        {
+            return;
+        }
+
+        _localDragStartPoint = null;
+        _localDragCandidate = null;
+        _localDragPressedArgs = null;
+
+        var transfer = new DataTransfer();
+        transfer.Add(DataTransferItem.Create(LocalPathsDataFormat, new[] { node.Item.Path }));
+        try
+        {
+            await DragDrop.DoDragDropAsync(pressedArgs, transfer, DragDropEffects.Copy);
+        }
+        catch (Exception ex)
+        {
+            // This is async void — an exception escaping here would otherwise crash the process.
+            if (DataContext is MainWindowViewModel vm)
+            {
+                vm.StatusMessage = $"Error al iniciar el arrastre: {ex.Message}";
+            }
+        }
+    }
+
+    private ListBoxItem? _cloudHighlightedDropRow;
+
+    /// <summary>
+    /// The three-part drop-target affordance (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4):
+    /// the pane's own border/background highlight, the specific folder row's highlight when the
+    /// drop would land inside it rather than the pane's current path, and the "+ Subir a X" badge.
+    /// Purely visual — no VM call, nothing here decides where the drop actually goes; that's
+    /// resolved again, identically, in <see cref="OnCloudListingDrop"/> via the same
+    /// <see cref="ResolveCloudDropTargetPath"/>.
+    /// </summary>
+    private void OnCloudListingDragOver(object? sender, DragEventArgs e)
+    {
+        var listBox = sender as ListBox;
+        var hasFormat = e.DataTransfer.Contains(LocalPathsDataFormat);
+        if (!hasFormat || DataContext is not MainWindowViewModel viewModel)
+        {
+            e.DragEffects = DragDropEffects.None;
+            ClearCloudDropHighlight(listBox);
+            return;
+        }
+
+        e.DragEffects = DragDropEffects.Copy;
+        listBox?.Classes.Add("dropTarget");
+
+        var hoveredRow = e.Source is Visual visual ? visual.FindAncestorOfType<ListBoxItem>(includeSelf: true) : null;
+        var targetsAFolderRow = hoveredRow?.DataContext is DriveNodeViewModel { IsFolder: true };
+        if (!ReferenceEquals(hoveredRow, _cloudHighlightedDropRow) || !targetsAFolderRow)
+        {
+            _cloudHighlightedDropRow?.Classes.Remove("dropTarget");
+            _cloudHighlightedDropRow = targetsAFolderRow ? hoveredRow : null;
+            _cloudHighlightedDropRow?.Classes.Add("dropTarget");
+        }
+
+        var targetPath = ResolveCloudDropTargetPath(e, viewModel);
+        CloudDropOverlayText.Text = $"+ Subir a {DisplayNameForDropTarget(targetPath, viewModel.CurrentPath)}";
+        CloudDropOverlay.IsVisible = true;
+    }
+
+    private void OnCloudListingDragLeave(object? sender, DragEventArgs e) => ClearCloudDropHighlight(sender as ListBox);
+
+    private void ClearCloudDropHighlight(ListBox? listBox)
+    {
+        listBox?.Classes.Remove("dropTarget");
+        _cloudHighlightedDropRow?.Classes.Remove("dropTarget");
+        _cloudHighlightedDropRow = null;
+        CloudDropOverlay.IsVisible = false;
+    }
+
+    private async void OnCloudListingDrop(object? sender, DragEventArgs e)
+    {
+        ClearCloudDropHighlight(sender as ListBox);
+
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var localPaths = e.DataTransfer.TryGetValue(LocalPathsDataFormat);
+        if (localPaths is not { Length: > 0 })
+        {
+            return;
+        }
+
+        var targetPath = ResolveCloudDropTargetPath(e, viewModel);
+        await viewModel.HandleLocalFilesDroppedAsync(localPaths, targetPath);
+    }
+
+    /// <summary>"la carpeta actual" for the folder already open, otherwise that folder's own name.</summary>
+    private static string DisplayNameForDropTarget(string targetPath, string currentPath)
+    {
+        if (string.Equals(targetPath, currentPath, StringComparison.Ordinal))
+        {
+            return "la carpeta actual";
+        }
+
+        var trimmed = targetPath.TrimEnd('/');
+        var lastSeparator = trimmed.LastIndexOf('/');
+        return lastSeparator >= 0 && lastSeparator < trimmed.Length - 1 ? trimmed[(lastSeparator + 1)..] : trimmed;
+    }
+
+    /// <summary>The folder row under the drop point, if any — otherwise the currently browsed folder.</summary>
+    private static string ResolveCloudDropTargetPath(DragEventArgs e, MainWindowViewModel viewModel)
+    {
+        if (e.Source is Visual visual)
+        {
+            var listBoxItem = visual.FindAncestorOfType<ListBoxItem>(includeSelf: true);
+            if (listBoxItem?.DataContext is DriveNodeViewModel { IsFolder: true } node)
+            {
+                return node.Path;
+            }
+        }
+
+        return viewModel.CurrentPath;
+    }
+
+    // Same in-process-only reasoning as LocalPathsDataFormat, for the opposite direction
+    // (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 3).
+    private static readonly DataFormat<DriveItem[]> CloudItemsDataFormat = DataFormat.CreateInProcessFormat<DriveItem[]>("application/x-mypersonaldrive-cloud-items");
+
+    private Point? _cloudDragStartPoint;
+    private DriveNodeViewModel? _cloudDragCandidate;
+    private PointerPressedEventArgs? _cloudDragPressedArgs;
+
+    private void OnCloudRowPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        // Attached at the ListBox (see the constructor), not the row itself — see the matching
+        // comment on OnLocalRowPointerPressed.
+        var row = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>(includeSelf: true);
+        if (row?.DataContext is not DriveNodeViewModel node || !e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        // Ctrl/Shift+Click (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) — see the matching comment on
+        // OnLocalRowPointerPressed.
+        if (DataContext is MainWindowViewModel viewModel && HandleMultiSelectGesture(e, () => viewModel.ToggleSelection(node), () => viewModel.SelectRange(node)))
+        {
+            return;
+        }
+
+        _cloudDragStartPoint = e.GetPosition(null);
+        _cloudDragCandidate = node;
+        _cloudDragPressedArgs = e;
+    }
+
+    /// <summary>
+    /// Both files and folders can be dragged — `filesystem download` is recursive for folders
+    /// (verified in docs/PLAN-LOCAL-SYNC.md), unlike the row's own manual `DownloadCommand`, which
+    /// is folder-restricted for an unrelated, app-level reason (docs/ARCHITECTURE.md §9 item 11).
+    /// </summary>
+    private async void OnCloudRowPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_cloudDragStartPoint is not { } start || _cloudDragCandidate is not { } node || _cloudDragPressedArgs is not { } pressedArgs)
+        {
+            return;
+        }
+
+        if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        {
+            _cloudDragStartPoint = null;
+            _cloudDragCandidate = null;
+            _cloudDragPressedArgs = null;
+            return;
+        }
+
+        var current = e.GetPosition(null);
+        var dx = current.X - start.X;
+        var dy = current.Y - start.Y;
+        if (Math.Sqrt(dx * dx + dy * dy) < DragStartThresholdPixels)
+        {
+            return;
+        }
+
+        _cloudDragStartPoint = null;
+        _cloudDragCandidate = null;
+        _cloudDragPressedArgs = null;
+
+        var transfer = new DataTransfer();
+        transfer.Add(DataTransferItem.Create(CloudItemsDataFormat, new[] { node.Item }));
+        try
+        {
+            await DragDrop.DoDragDropAsync(pressedArgs, transfer, DragDropEffects.Copy);
+        }
+        catch (Exception ex)
+        {
+            // This is async void — an exception escaping here would otherwise crash the process.
+            if (DataContext is MainWindowViewModel vm)
+            {
+                vm.StatusMessage = $"Error al iniciar el arrastre: {ex.Message}";
+            }
+        }
+    }
+
+    private ListBoxItem? _localHighlightedDropRow;
+
+    /// <summary>Mirrors <see cref="OnCloudListingDragOver"/> for the opposite direction — see its doc comment.</summary>
+    private void OnLocalListingDragOver(object? sender, DragEventArgs e)
+    {
+        var listBox = sender as ListBox;
+        var hasFormat = e.DataTransfer.Contains(CloudItemsDataFormat);
+        if (!hasFormat || DataContext is not MainWindowViewModel viewModel)
+        {
+            e.DragEffects = DragDropEffects.None;
+            ClearLocalDropHighlight(listBox);
+            return;
+        }
+
+        e.DragEffects = DragDropEffects.Copy;
+        listBox?.Classes.Add("dropTarget");
+
+        var hoveredRow = e.Source is Visual visual ? visual.FindAncestorOfType<ListBoxItem>(includeSelf: true) : null;
+        var targetsAFolderRow = hoveredRow?.DataContext is LocalNodeViewModel { IsFolder: true };
+        if (!ReferenceEquals(hoveredRow, _localHighlightedDropRow) || !targetsAFolderRow)
+        {
+            _localHighlightedDropRow?.Classes.Remove("dropTarget");
+            _localHighlightedDropRow = targetsAFolderRow ? hoveredRow : null;
+            _localHighlightedDropRow?.Classes.Add("dropTarget");
+        }
+
+        var targetPath = ResolveLocalDropTargetPath(e, viewModel);
+        LocalDropOverlayText.Text = $"↓ Descargar a {DisplayNameForDropTarget(targetPath, viewModel.LocalExplorer.CurrentPath)}";
+        LocalDropOverlay.IsVisible = true;
+    }
+
+    private void OnLocalListingDragLeave(object? sender, DragEventArgs e) => ClearLocalDropHighlight(sender as ListBox);
+
+    private void ClearLocalDropHighlight(ListBox? listBox)
+    {
+        listBox?.Classes.Remove("dropTarget");
+        _localHighlightedDropRow?.Classes.Remove("dropTarget");
+        _localHighlightedDropRow = null;
+        LocalDropOverlay.IsVisible = false;
+    }
+
+    private async void OnLocalListingDrop(object? sender, DragEventArgs e)
+    {
+        ClearLocalDropHighlight(sender as ListBox);
+
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var items = e.DataTransfer.TryGetValue(CloudItemsDataFormat);
+        if (items is not { Length: > 0 })
+        {
+            return;
+        }
+
+        var targetPath = ResolveLocalDropTargetPath(e, viewModel);
+        await viewModel.HandleCloudItemsDroppedAsync(items, targetPath);
+    }
+
+    /// <summary>The local folder row under the drop point, if any — otherwise the currently browsed local folder.</summary>
+    private static string ResolveLocalDropTargetPath(DragEventArgs e, MainWindowViewModel viewModel)
+    {
+        if (e.Source is Visual visual)
+        {
+            var listBoxItem = visual.FindAncestorOfType<ListBoxItem>(includeSelf: true);
+            if (listBoxItem?.DataContext is LocalNodeViewModel { IsFolder: true } node)
+            {
+                return node.Item.Path;
+            }
+        }
+
+        return viewModel.LocalExplorer.CurrentPath;
     }
 
     private async void BrowseCliPath(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -77,6 +507,27 @@ public partial class MainWindow : Window
         viewModel.CliPath = files[0].Path.LocalPath;
     }
 
+    private async void BrowseDefaultSyncFolder(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select default sync folder",
+            AllowMultiple = false
+        });
+
+        if (folders.Count == 0)
+        {
+            return;
+        }
+
+        viewModel.DefaultSyncFolder = folders[0].Path.LocalPath;
+    }
+
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
         if (DataContext is not MainWindowViewModel viewModel)
@@ -91,11 +542,26 @@ public partial class MainWindow : Window
         viewModel.RequestCreateFolderAsync = PromptForNewFolderNameAsync;
         viewModel.RequestDownloadFolderAsync = PickDownloadFolderAsync;
         viewModel.RequestSaveActivityAsync = PickSaveActivityAsync;
+        viewModel.RequestConfirmationAsync = AskAsync;
+        viewModel.RequestCopyToClipboardAsync = CopyToClipboardAsync;
+        viewModel.RequestShowPropertiesAsync = ShowPropertiesAsync;
+
+        viewModel.LocalExplorer.RequestConfirmationAsync = AskAsync;
+        viewModel.LocalExplorer.RequestRenameAsync = PromptForRenameAsync;
+        viewModel.LocalExplorer.RequestCopyToClipboardAsync = CopyToClipboardAsync;
+        viewModel.LocalExplorer.RequestShowPropertiesAsync = ShowPropertiesAsync;
 
         viewModel.BreadcrumbItems.CollectionChanged -= ScrollBreadcrumbToEnd;
         viewModel.BreadcrumbItems.CollectionChanged += ScrollBreadcrumbToEnd;
 
-        viewModel.SyncPanel.RequestNewPairAsync = () => PromptForNewPairAsync(viewModel.SyncPanel, viewModel.RootPath);
+        // ExplorerColumnsGrid.ColumnDefinitions[2] is star-sized so the splitter can resize it —
+        // which also means it doesn't shrink to 0 on its own just because IsVisible on its content
+        // goes false, the way an Auto column (the Status sidebar's) does. Kept in sync here instead.
+        viewModel.PropertyChanged -= OnMainWindowViewModelPropertyChanged;
+        viewModel.PropertyChanged += OnMainWindowViewModelPropertyChanged;
+        ApplyLocalExplorerPanelColumnWidth(viewModel.IsLocalExplorerPanelVisible);
+
+        viewModel.SyncPanel.RequestNewPairAsync = prefill => PromptForNewPairAsync(viewModel.SyncPanel, viewModel.RootPath, prefill);
         viewModel.SyncPanel.RequestPreviewConfirmationAsync = ShowPreviewAsync;
         viewModel.SyncPanel.RequestConflictResolutionsAsync = ShowConflictsAsync;
         viewModel.SyncPanel.RequestConfirmationAsync = AskAsync;
@@ -394,11 +860,11 @@ public partial class MainWindow : Window
     /// "Add sync pair", with the remote folder browser as a second face of the same dialog
     /// (swapping its Content) instead of a window stacked on top of it — one modal, not two.
     /// </summary>
-    private async Task<NewSyncPairRequest?> PromptForNewPairAsync(SyncPanelViewModel syncPanel, string remoteRootPath)
+    private async Task<NewSyncPairRequest?> PromptForNewPairAsync(SyncPanelViewModel syncPanel, string remoteRootPath, SyncPairPrefill? prefill = null)
     {
-        var remoteBox = new TextBox { PlaceholderText = "/my-files/Documents", Width = 280 };
+        var remoteBox = new TextBox { PlaceholderText = "/my-files/Documents", Width = 280, Text = prefill?.RemotePath };
         var remoteBrowseButton = new Button { Content = "Browse", IsVisible = syncPanel.GetRemoteFolderChildren is not null };
-        var localBox = new TextBox { Width = 280, IsReadOnly = true, PlaceholderText = "Choose a local folder..." };
+        var localBox = new TextBox { Width = 280, IsReadOnly = true, PlaceholderText = "Choose a local folder...", Text = prefill?.LocalPath };
         var browseButton = new Button { Content = "Browse" };
 
         // RemoteToLocal stays first, and therefore the default: it's the only direction that
@@ -430,14 +896,22 @@ public partial class MainWindow : Window
 
         var policyLabel = new TextBlock { Text = "When both sides changed:", FontWeight = Avalonia.Media.FontWeight.Bold };
 
+        // Only meaningful for a one-way pair (SyncPair.MirrorDeletes) — a two-way pair already
+        // tracks deletions through its baseline, so there is no "extra file at the destination"
+        // for this to opt out of. Checked by default: today's only behavior before this existed
+        // was a strict mirror, and every new pair should keep that unless asked otherwise.
+        var mirrorDeletesCheckBox = new CheckBox { Content = "Delete files at the destination that no longer exist at the source", IsChecked = true };
+
         // The conflict policy is only ever consulted in two-way mode — a one-way mirror's source
         // side wins by definition, so showing the choice there would imply a decision that
-        // doesn't exist.
+        // doesn't exist. "Delete extra files" is the opposite: it only means something for a
+        // one-way pair, so it's hidden exactly when the policy picker is shown.
         void SyncPolicyVisibility()
         {
             var isTwoWay = directionBox.SelectedIndex == 2;
             policyBox.IsVisible = isTwoWay;
             policyLabel.IsVisible = isTwoWay;
+            mirrorDeletesCheckBox.IsVisible = !isTwoWay;
         }
 
         directionBox.SelectionChanged += (_, _) => SyncPolicyVisibility();
@@ -484,6 +958,7 @@ public partial class MainWindow : Window
                 directionBox,
                 policyLabel,
                 policyBox,
+                mirrorDeletesCheckBox,
                 new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
@@ -498,7 +973,7 @@ public partial class MainWindow : Window
         {
             Title = "Add sync pair",
             Width = 480,
-            Height = 520,
+            Height = 560,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Content = formPanel,
         };
@@ -530,7 +1005,7 @@ public partial class MainWindow : Window
                     _ => ConflictPolicy.Ask,
                 };
 
-                result = new NewSyncPairRequest(remoteBox.Text.Trim(), localBox.Text.Trim(), direction, policy);
+                result = new NewSyncPairRequest(remoteBox.Text.Trim(), localBox.Text.Trim(), direction, policy, mirrorDeletesCheckBox.IsChecked ?? true);
             }
 
             dialog.Close();
@@ -587,11 +1062,14 @@ public partial class MainWindow : Window
 
         var policyLabel = new TextBlock { Text = "When both sides changed:", FontWeight = Avalonia.Media.FontWeight.Bold };
 
+        var mirrorDeletesCheckBox = new CheckBox { Content = "Delete files at the destination that no longer exist at the source", IsChecked = pair.MirrorDeletes };
+
         void SyncPolicyVisibility()
         {
             var isTwoWay = directionBox.SelectedIndex == 2;
             policyBox.IsVisible = isTwoWay;
             policyLabel.IsVisible = isTwoWay;
+            mirrorDeletesCheckBox.IsVisible = !isTwoWay;
         }
 
         directionBox.SelectionChanged += (_, _) => SyncPolicyVisibility();
@@ -604,7 +1082,7 @@ public partial class MainWindow : Window
         {
             Title = "Edit sync pair",
             Width = 440,
-            Height = 320,
+            Height = 360,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Content = new StackPanel
             {
@@ -618,6 +1096,7 @@ public partial class MainWindow : Window
                     directionBox,
                     policyLabel,
                     policyBox,
+                    mirrorDeletesCheckBox,
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -648,7 +1127,7 @@ public partial class MainWindow : Window
                 _ => ConflictPolicy.Ask,
             };
 
-            result = new EditSyncPairRequest(direction, policy);
+            result = new EditSyncPairRequest(direction, policy, mirrorDeletesCheckBox.IsChecked ?? true);
             dialog.Close();
         };
 
@@ -959,6 +1438,54 @@ public partial class MainWindow : Window
 
         await dialog.ShowDialog(this);
         return apply ? chosen : new Dictionary<long, ConflictResolution>();
+    }
+
+    /// <summary>Puts text on the system clipboard — "Copiar ruta" (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6). Silently a no-op if the platform offers no clipboard (e.g. a headless test host).</summary>
+    private async Task CopyToClipboardAsync(string text)
+    {
+        var clipboard = Clipboard;
+        if (clipboard is not null)
+        {
+            await clipboard.SetTextAsync(text);
+        }
+    }
+
+    /// <summary>A read-only "Properties" info panel — "Propiedades" (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6).</summary>
+    private async Task ShowPropertiesAsync(string title, IReadOnlyList<PropertyField> fields)
+    {
+        var children = new List<Control>
+        {
+            new TextBlock { Text = title, FontWeight = Avalonia.Media.FontWeight.Bold, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+        };
+
+        children.AddRange(fields.Select(field => new TextBlock
+        {
+            Text = $"{field.Label}: {field.Value}",
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+        }));
+
+        var okButton = new Button { Content = "OK", IsDefault = true, IsCancel = true, Width = 80 };
+        children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { okButton },
+        });
+
+        var contentPanel = new StackPanel { Spacing = 10, Margin = new Avalonia.Thickness(20) };
+        contentPanel.Children.AddRange(children);
+
+        var dialog = new Window
+        {
+            Title = "Properties",
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = contentPanel,
+        };
+
+        okButton.Click += (_, _) => dialog.Close();
+        await dialog.ShowDialog(this);
     }
 
     /// <summary>

@@ -71,7 +71,7 @@ public class MainWindowProviderTests : IDisposable
     {
         var sut = Build();
 
-        Assert.Equal([ProviderId.Proton, ProviderId.OneDrive], sut.AvailableProviders.Select(descriptor => descriptor.Id));
+        Assert.Equal([ProviderId.Proton, ProviderId.OneDrive, ProviderId.GoogleDrive, ProviderId.Nextcloud, ProviderId.S3], sut.AvailableProviders.Select(descriptor => descriptor.Id));
     }
 
     [Fact]

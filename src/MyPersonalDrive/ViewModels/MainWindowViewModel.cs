@@ -8,6 +8,8 @@ using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Providers.OneDrive;
+using MyPersonalDrive.Services.Providers.Generic;
+using MyPersonalDrive.ViewModels.Local;
 using Avalonia.Threading;
 
 namespace MyPersonalDrive.ViewModels;
@@ -19,18 +21,22 @@ public sealed class MainWindowViewModel : ObservableObject
     // "persist a preference and ask for a restart" behavior. See _browserSessions.
     private ICloudDriveProvider _provider;
     private DriveCacheService _cacheService;
+    private readonly LocalFileSystemService _localFileSystem;
     private readonly AppSettingsService _settings;
+    private readonly IProviderCatalog _providerCatalog;
     private FolderMetricsStore? _metricsStore;
     private FolderStatsScanner? _statsScanner;
     private CancellationTokenSource? _deepScanCts;
     private ITextFilePreviewLoader? _previewLoader;
     private IImageFilePreviewLoader? _imagePreviewLoader;
+    private IPdfFilePreviewLoader? _pdfPreviewLoader;
     private CancellationTokenSource? _previewCts;
     private readonly Stack<string> _navigationHistory = new();
     private readonly TimeProvider _timeProvider;
     private readonly RemoteViewFreshnessPolicy _remoteViewFreshness = new();
     private CancellationTokenSource? _cts;
     private DriveNodeViewModel? _selectedNode;
+    private string? _selectionAnchorPath;
     private string _rootPath;
 
     /// <summary>
@@ -46,7 +52,8 @@ public sealed class MainWindowViewModel : ObservableObject
         FolderMetricsStore? MetricsStore,
         FolderStatsScanner? StatsScanner,
         ITextFilePreviewLoader? PreviewLoader,
-        IImageFilePreviewLoader? ImagePreviewLoader);
+        IImageFilePreviewLoader? ImagePreviewLoader,
+        IPdfFilePreviewLoader? PdfPreviewLoader);
 
     private readonly List<BrowserAccountSession> _browserSessions = new();
     // Doubled from CommandLogBuffer's own default (200): with two provider sessions able to be
@@ -70,6 +77,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isLoading;
     private bool _isAuthenticated;
     private bool _isCommandConsoleVisible = true;
+    private int _activeOperationCount;
+    private string? _lastLogLine;
+    private bool _showOnlyWarningsAndErrors;
+    private string _logSearchText = string.Empty;
     private double _commandConsoleMaxHeight = 180;
     private double _commandConsoleOpacity = 1;
     private bool _commandConsoleHitTestVisible = true;
@@ -93,6 +104,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _viewerText = string.Empty;
     private string _viewerNote = string.Empty;
     private byte[]? _viewerImageBytes;
+    private IReadOnlyList<byte[]>? _viewerPdfPages;
     private DriveViewMode _viewMode = DriveViewMode.List;
     private bool _isDeepScanRunning;
     private DriveSortKey _sortKey = DriveSortKey.Name;
@@ -103,6 +115,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     private IReadOnlyList<DriveItem> _loadedItems = [];
     private FileKind? _kindFilter;
+    private string _searchText = string.Empty;
     private string _filterSummary = string.Empty;
     private bool _sortDescending;
     private const string UnknownCliVersion = "Unknown";
@@ -115,11 +128,66 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _cliUpdateStatus = "Not checked yet.";
     private bool _isCliUpdateAvailable;
     private bool _isCliUpdateBusy;
+    private string _theme = "Default";
+    private int _bandwidthLimitKbps;
+    private double _viewerZoom;
+    private string _defaultSyncFolder = string.Empty;
+    private string _connectionStatus = "Online";
+    private string _connectionStatusKind = "Online";
+    private string _connectionStatusDescription = "Connected";
+    private long _quotaUsedBytes;
+    private long _quotaTotalBytes = 500L * 1024 * 1024 * 1024;
+    private DriveErrorKind _lastErrorKind = DriveErrorKind.Unknown;
+    private bool _isStatusPanelVisible;
+    private bool _isLocalExplorerPanelVisible;
 
     /// <summary>
-    /// What the settings view's provider picker lists — see docs/PLAN-CLOUD-PROVIDERS.md P5/P6.
+    /// What the settings view's provider picker and header dropdown list — see docs/PLAN-CLOUD-PROVIDERS.md P5/P6.
+    /// Dynamically reflects the live account identities and connection statuses.
     /// </summary>
-    public IReadOnlyList<ProviderDescriptor> AvailableProviders { get; }
+    public IReadOnlyList<ProviderDescriptor> AvailableProviders
+    {
+        get
+        {
+            var settings = _settings.Load();
+            var available = (_providerCatalog ?? new ProviderCatalog()).Available;
+            return available.Select(desc =>
+            {
+                // The active provider's live in-memory flag is fresher than settings (which may not
+                // have been persisted yet mid-session); every other provider is read from settings.
+                var isAuth = desc.Id == _provider.Id ? _isAuthenticated : settings.IsProviderAuthenticated(desc.Id);
+
+                // OneDrive's account label lives on its live GraphAuthenticator, not settings, until
+                // AuthenticateAsync persists it — settings can lag behind what's actually signed in.
+                var liveLabel = _provider is OneDriveProvider { Auth: GraphAuthenticator { AccountLabel: { } label } } && label != "Not signed in."
+                    ? label
+                    : null;
+
+                var persistedLabel = settings.ProviderAccountLabel(desc.Id);
+                var identity = liveLabel
+                    ?? (!string.IsNullOrWhiteSpace(persistedLabel) ? persistedLabel : null)
+                    ?? (isAuth ? PlaceholderIdentity(desc.Id) : null);
+
+                return desc with
+                {
+                    AccountIdentity = identity,
+                    IsAuthenticated = isAuth
+                };
+            }).ToList();
+        }
+    }
+
+    public ProviderDescriptor? SelectedProvider
+    {
+        get => AvailableProviders.FirstOrDefault(p => p.Id == _provider.Id) ?? AvailableProviders.FirstOrDefault();
+        set
+        {
+            if (value is not null && value.Id != _provider.Id)
+            {
+                _ = SwitchProviderAndReportErrorsAsync(value.Id);
+            }
+        }
+    }
 
     public string ActiveProviderDisplayName => _provider.DisplayName;
 
@@ -132,10 +200,16 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public string BrowserHeaderSubtitle => $"Browsing {RootPath} on {_provider.DisplayName}.";
 
-    /// <summary>Which connection-card block the settings view shows — Proton's (CLI path, version, update) or OneDrive's (sign-in/out, account label).</summary>
+    /// <summary>Which connection-card block the settings view shows — Proton's, OneDrive's, Google Drive's, Nextcloud's, or S3's.</summary>
     public bool IsProtonActive => _provider.Id == ProviderId.Proton;
 
     public bool IsOneDriveActive => _provider.Id == ProviderId.OneDrive;
+
+    public bool IsGoogleDriveActive => _provider.Id == ProviderId.GoogleDrive;
+
+    public bool IsNextcloudActive => _provider.Id == ProviderId.Nextcloud;
+
+    public bool IsS3Active => _provider.Id == ProviderId.S3;
 
     /// <summary>Whether the active provider has a version/self-update story to show — false for a provider with no external binary (docs/PLAN-CLOUD-PROVIDERS.md §5 item 2).</summary>
     public bool HasDiagnostics => _provider.Diagnostics is not null;
@@ -159,7 +233,9 @@ public sealed class MainWindowViewModel : ObservableObject
         FolderStatsScanner? statsScanner = null,
         IProviderCatalog? providerCatalog = null,
         ITextFilePreviewLoader? previewLoader = null,
-        IImageFilePreviewLoader? imagePreviewLoader = null)
+        IImageFilePreviewLoader? imagePreviewLoader = null,
+        IPdfFilePreviewLoader? pdfPreviewLoader = null,
+        LocalFileSystemService? localFileSystem = null)
     {
         // Optional so the many existing view-model tests don't all have to build a database and a
         // scanner to exercise unrelated behavior. When either is absent the deep-scan command
@@ -171,6 +247,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // a loader, and when it's absent the viewer simply can't open (see CanOpenViewer).
         _previewLoader = previewLoader;
         _imagePreviewLoader = imagePreviewLoader;
+        _pdfPreviewLoader = pdfPreviewLoader;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _releaseFeed = releaseFeed;
         _updateInstaller = updateInstaller ?? new CliUpdateInstaller();
@@ -178,18 +255,24 @@ public sealed class MainWindowViewModel : ObservableObject
         // reachable in a test without driving a real sync cycle to a chosen moment.
         // Capturing the parameter, not the SyncPanel property, which is only assigned below.
         _isSyncInProgress = isSyncInProgress ?? (() => syncPanel.IsSyncInProgress);
-        AvailableProviders = (providerCatalog ?? new ProviderCatalog()).Available;
+        _providerCatalog = providerCatalog ?? new ProviderCatalog();
         _provider = provider;
         // "/my-files" is Proton's own root folder name, not a generic convention — OneDrive (and
         // any future provider) roots at "/". Browsing "/my-files" against Graph 404s immediately
         // (verified: docs/PLAN-CLOUD-PROVIDERS.md Appendix A), which is exactly the "path no
         // longer exists" warning this was hardcoded into before a second provider existed to catch
         // it.
-        _rootPath = _provider.Id == ProviderId.OneDrive ? "/" : "/my-files";
+        _rootPath = _provider.Id == ProviderId.Proton ? "/my-files" : "/";
         _currentPath = _rootPath;
         _cacheService = cacheService;
         _settings = settings;
         SyncPanel = syncPanel;
+        _localFileSystem = localFileSystem ?? new LocalFileSystemService();
+        LocalExplorer = new LocalExplorerViewModel(_localFileSystem, settings, HandleUnexpectedError)
+        {
+            RequestSyncSelectedPathAsync = localPath => SyncPanel.AddPairAsync(new SyncPairPrefill(null, localPath)),
+            FindSyncPairByPath = SyncPanel.FindPairByLocalPath,
+        };
 
         var appSettings = settings.Load();
         _cliPath = appSettings.CliPath;
@@ -199,12 +282,31 @@ public sealed class MainWindowViewModel : ObservableObject
         // path + version vs. sign-in/out), so there is one bool per provider in AppSettings but
         // only ever one "the active provider is signed in" flag in the VM at a time. Switching
         // providers requires a restart (§2.7), so which field to use never changes mid-session.
-        _isAuthenticated = _provider.Id == ProviderId.OneDrive ? appSettings.IsOneDriveAuthenticated : appSettings.IsAuthenticated;
+        _isAuthenticated = appSettings.IsProviderAuthenticated(_provider.Id);
         // Set through the field, not the property: the property persists, and the constructor has
         // no business writing settings.json back on every launch.
         _viewMode = appSettings.ViewModeOrDefault();
         _sortKey = appSettings.SortKeyOrDefault();
         _sortDescending = appSettings.SortDescending;
+        _theme = appSettings.ThemeOrDefault();
+        _bandwidthLimitKbps = appSettings.BandwidthLimitKbps;
+        _viewerZoom = appSettings.ViewerZoomOrDefault();
+        _defaultSyncFolder = appSettings.DefaultSyncFolder;
+        _isStatusPanelVisible = appSettings.ShowStatusPanel;
+        _isLocalExplorerPanelVisible = appSettings.ShowLocalExplorerPanel;
+        _isCommandConsoleVisible = appSettings.ShowCommandConsole;
+        if (!_isCommandConsoleVisible)
+        {
+            // Mirrors IsCommandConsoleVisible's setter directly rather than going through it: this
+            // runs before AsyncCommand fields exist, and that setter's RaiseCommandStates() would
+            // null-ref against them. No PropertyChanged subscriber exists yet either, so there's
+            // nothing SetProperty would have notified at this point regardless.
+            _commandConsoleMaxHeight = 0;
+            _commandConsoleOpacity = 0;
+            _commandConsoleHitTestVisible = false;
+            _commandConsoleToggleLabel = "Show CLI activity";
+            _commandConsoleToggleGlyph = "▲";
+        }
         // The browsed provider's own activity is tagged like any other session's, so interleaved
         // lines from ObserveAdditionalProviderActivity (P7, both providers active at once) read
         // consistently regardless of which one happens to be on screen.
@@ -226,6 +328,8 @@ public sealed class MainWindowViewModel : ObservableObject
         UploadCommand = new AsyncCommand(UploadAsync, CanUpload, HandleUnexpectedError);
         CreateFolderCommand = new AsyncCommand(CreateFolderAsync, CanCreateFolder, HandleUnexpectedError);
         ToggleCommandConsoleCommand = new AsyncCommand(ToggleCommandConsoleAsync, onError: HandleUnexpectedError);
+        ToggleLocalExplorerPanelCommand = new AsyncCommand(ToggleLocalExplorerPanelAsync, onError: HandleUnexpectedError);
+        ToggleLogFilterCommand = new AsyncCommand(ToggleLogFilterAsync, onError: HandleUnexpectedError);
         DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity, HandleUnexpectedError);
         ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, HandleUnexpectedError);
         ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
@@ -243,11 +347,25 @@ public sealed class MainWindowViewModel : ObservableObject
         CheckForCliUpdateCommand = new AsyncCommand(CheckForCliUpdateAsync, CanCheckForCliUpdate, HandleUnexpectedError);
         SwitchToProtonCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.Proton), () => !IsLoading && !IsProtonActive, HandleUnexpectedError);
         SwitchToOneDriveCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.OneDrive), () => !IsLoading && !IsOneDriveActive, HandleUnexpectedError);
+        SwitchToGoogleDriveCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.GoogleDrive), () => !IsLoading && !IsGoogleDriveActive, HandleUnexpectedError);
+        SwitchToNextcloudCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.Nextcloud), () => !IsLoading && !IsNextcloudActive, HandleUnexpectedError);
+        SwitchToS3Command = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.S3), () => !IsLoading && !IsS3Active, HandleUnexpectedError);
         InstallCliUpdateCommand = new AsyncCommand(InstallCliUpdateAsync, CanInstallCliUpdate, HandleUnexpectedError);
         ViewSelectedFileCommand = new AsyncCommand(ViewSelectedFileAsync, CanViewSelectedFile, HandleUnexpectedError);
         CloseViewerCommand = new AsyncCommand(CloseViewerAsync, onError: HandleUnexpectedError);
+        SelectAllRowsCommand = new AsyncCommand(SelectAllRowsAsync, () => RootItems.Count > 0, HandleUnexpectedError);
+        DownloadSelectedCommand = new AsyncCommand(DownloadSelectedAsync, () => SelectedCount > 0, HandleUnexpectedError);
+        TrashSelectedCommand = new AsyncCommand(TrashSelectedAsync, () => SelectedCount > 0, HandleUnexpectedError);
+        SetThemeDefaultCommand = new AsyncCommand(() => SetThemeAsync("Default"), onError: HandleUnexpectedError);
+        SetThemeLightCommand = new AsyncCommand(() => SetThemeAsync("Light"), onError: HandleUnexpectedError);
+        SetThemeDarkCommand = new AsyncCommand(() => SetThemeAsync("Dark"), onError: HandleUnexpectedError);
+        ToggleThemeCommand = new AsyncCommand(CycleThemeAsync, onError: HandleUnexpectedError);
+        ToggleSettingsCommand = new AsyncCommand(ToggleSettingsAsync, onError: HandleUnexpectedError);
 
-        _browserSessions.Add(new BrowserAccountSession(_provider, _cacheService, _metricsStore, _statsScanner, _previewLoader, _imagePreviewLoader));
+        UpdateConnectionTelemetry();
+        UpdateQuotaMetrics();
+
+        _browserSessions.Add(new BrowserAccountSession(_provider, _cacheService, _metricsStore, _statsScanner, _previewLoader, _imagePreviewLoader, _pdfPreviewLoader));
     }
 
     /// <summary>
@@ -261,8 +379,9 @@ public sealed class MainWindowViewModel : ObservableObject
         FolderMetricsStore? metricsStore = null,
         FolderStatsScanner? statsScanner = null,
         ITextFilePreviewLoader? previewLoader = null,
-        IImageFilePreviewLoader? imagePreviewLoader = null)
-        => _browserSessions.Add(new BrowserAccountSession(provider, cacheService, metricsStore, statsScanner, previewLoader, imagePreviewLoader));
+        IImageFilePreviewLoader? imagePreviewLoader = null,
+        IPdfFilePreviewLoader? pdfPreviewLoader = null)
+        => _browserSessions.Add(new BrowserAccountSession(provider, cacheService, metricsStore, statsScanner, previewLoader, imagePreviewLoader, pdfPreviewLoader));
 
     public ObservableCollection<DriveNodeViewModel> RootItems { get; }
 
@@ -275,6 +394,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<KindFilterViewModel> KindFilters { get; }
 
     public Sync.SyncPanelViewModel SyncPanel { get; }
+
+    public LocalExplorerViewModel LocalExplorer { get; }
+
+    public TransferQueueViewModel TransferQueue { get; } = new();
 
     /// <summary>
     /// Statistics for the folder on screen, recomputed from the listing on every load
@@ -314,6 +437,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public AsyncCommand ToggleCommandConsoleCommand { get; }
 
+    public AsyncCommand ToggleLocalExplorerPanelCommand { get; }
+
+    public AsyncCommand ToggleLogFilterCommand { get; }
+
     public AsyncCommand DownloadActivityCommand { get; }
 
     public AsyncCommand ClearActivityCommand { get; }
@@ -326,6 +453,15 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand ViewSelectedFileCommand { get; }
 
     public AsyncCommand CloseViewerCommand { get; }
+
+    /// <summary>Ctrl/Cmd+A over the listing — docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2.</summary>
+    public AsyncCommand SelectAllRowsCommand { get; }
+
+    /// <summary>Downloads every selected file (folders are skipped, same restriction as the single-row <see cref="DownloadItemAsync"/>) into one picked destination.</summary>
+    public AsyncCommand DownloadSelectedCommand { get; }
+
+    /// <summary>Moves every selected row (files and folders) to trash, after one confirmation for the whole batch.</summary>
+    public AsyncCommand TrashSelectedCommand { get; }
 
     public AsyncCommand CheckCliVersionCommand { get; }
 
@@ -357,7 +493,97 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public AsyncCommand SwitchToOneDriveCommand { get; }
 
+    public AsyncCommand SwitchToGoogleDriveCommand { get; }
+
+    public AsyncCommand SwitchToNextcloudCommand { get; }
+
+    public AsyncCommand SwitchToS3Command { get; }
+
     public AsyncCommand InstallCliUpdateCommand { get; }
+
+    public AsyncCommand SetThemeDefaultCommand { get; }
+
+    public AsyncCommand SetThemeLightCommand { get; }
+
+    public AsyncCommand SetThemeDarkCommand { get; }
+
+    public AsyncCommand ToggleThemeCommand { get; }
+
+    public AsyncCommand ToggleSettingsCommand { get; }
+
+    public string ThemePreference
+    {
+        get => _theme;
+        set
+        {
+            if (SetProperty(ref _theme, value))
+            {
+                App.ApplyTheme(_theme);
+                _settings.Update(s => s.Theme = _theme);
+                OnPropertyChanged(nameof(IsSystemTheme));
+                OnPropertyChanged(nameof(IsLightTheme));
+                OnPropertyChanged(nameof(IsDarkTheme));
+            }
+        }
+    }
+
+    public bool IsSystemTheme => string.Equals(_theme, "Default", StringComparison.OrdinalIgnoreCase);
+
+    public bool IsLightTheme => string.Equals(_theme, "Light", StringComparison.OrdinalIgnoreCase);
+
+    public bool IsDarkTheme => string.Equals(_theme, "Dark", StringComparison.OrdinalIgnoreCase);
+
+    public int BandwidthLimitKbps
+    {
+        get => _bandwidthLimitKbps;
+        set
+        {
+            if (SetProperty(ref _bandwidthLimitKbps, value))
+            {
+                _settings.Update(s => s.BandwidthLimitKbps = value);
+            }
+        }
+    }
+
+    public string DefaultSyncFolder
+    {
+        get => _defaultSyncFolder;
+        set
+        {
+            if (SetProperty(ref _defaultSyncFolder, value))
+            {
+                _settings.Update(s => s.DefaultSyncFolder = value);
+            }
+        }
+    }
+
+    public string ConnectionStatus => _connectionStatus;
+
+    public string ConnectionStatusKind => _connectionStatusKind;
+
+    public string ConnectionStatusDescription => _connectionStatusDescription;
+
+    public bool IsOnline => _connectionStatusKind == "Online";
+
+    public bool IsSyncing => _connectionStatusKind == "Syncing";
+
+    public bool IsDisconnected => _connectionStatusKind == "Disconnected";
+
+    public bool IsRateLimited => _connectionStatusKind == "RateLimited";
+
+    public long QuotaUsedBytes => _quotaUsedBytes;
+
+    public long QuotaTotalBytes => _quotaTotalBytes;
+
+    public double QuotaPercent => _quotaTotalBytes > 0 ? Math.Min(100.0, (double)_quotaUsedBytes / _quotaTotalBytes * 100.0) : 0.0;
+
+    public double QuotaProgress => _quotaTotalBytes > 0 ? Math.Clamp((double)_quotaUsedBytes / _quotaTotalBytes, 0.0, 1.0) : 0.0;
+
+    public string QuotaDisplay => _quotaTotalBytes > 0
+        ? $"{ByteSize.Format(_quotaUsedBytes)} / {ByteSize.Format(_quotaTotalBytes)} ({QuotaPercent:F0}% used)"
+        : ByteSize.Format(_quotaUsedBytes);
+
+    public string QuotaSummary => $"{ByteSize.Format(_quotaUsedBytes)} / {ByteSize.Format(_quotaTotalBytes)}";
 
     /// <summary>Human-readable result of the last update check, or the progress of a running install.</summary>
     public string CliUpdateStatus
@@ -430,6 +656,23 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _filterSummary, value);
     }
 
+    /// <summary>
+    /// A quick filter over the current folder's file/folder names (case-insensitive substring) —
+    /// docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1's "Global Quick Search". Combines with the kind
+    /// filter chips rather than replacing them: both narrow the same underlying <see cref="_loadedItems"/>.
+    /// </summary>
+    public string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (SetProperty(ref _searchText, value))
+            {
+                RenderItems();
+            }
+        }
+    }
+
     public bool IsSortedByName => SortKey == DriveSortKey.Name;
 
     public bool IsSortedBySize => SortKey == DriveSortKey.Size;
@@ -455,6 +698,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 ScanFolderDeeplyCommand.RaiseCanExecuteChanged();
                 CancelDeepScanCommand.RaiseCanExecuteChanged();
+                UpdateConnectionTelemetry();
             }
         }
     }
@@ -533,6 +777,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public Func<Task<string?>>? RequestSaveActivityAsync { get; set; }
 
+    public Func<string, Task<bool>>? RequestConfirmationAsync { get; set; }
+
+    public Func<string, Task>? RequestCopyToClipboardAsync { get; set; }
+
+    public Func<string, IReadOnlyList<PropertyField>, Task>? RequestShowPropertiesAsync { get; set; }
+
     public string CliPath
     {
         get => _cliPath;
@@ -581,6 +831,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _isLoading, value))
             {
                 RaiseCommandStates();
+                UpdateConnectionTelemetry();
             }
         }
     }
@@ -594,6 +845,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 PersistSettings();
                 RaiseCommandStates();
+                UpdateConnectionTelemetry();
             }
         }
     }
@@ -606,6 +858,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _statusMessage, value))
             {
                 IsWarning = false;
+                UpdateConnectionTelemetry();
             }
         }
     }
@@ -613,7 +866,13 @@ public sealed class MainWindowViewModel : ObservableObject
     public bool IsWarning
     {
         get => _isWarning;
-        private set => SetProperty(ref _isWarning, value);
+        private set
+        {
+            if (SetProperty(ref _isWarning, value))
+            {
+                UpdateConnectionTelemetry();
+            }
+        }
     }
 
     public string ActiveCommand
@@ -626,6 +885,52 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _commandLogText;
         private set => SetProperty(ref _commandLogText, value);
+    }
+
+    /// <summary>
+    /// How many CLI/Graph operations are currently mid-flight, across every active provider
+    /// session — a real count derived from Started/Finished pairs in <see cref="OnActivity"/>,
+    /// unlike <see cref="ActiveCommand"/> (a single label that Task 4's own comment on
+    /// <see cref="OnActivity"/> notes can't represent two concurrent operations correctly). Shown
+    /// in the floating status line while the console is collapsed.
+    /// </summary>
+    public int ActiveOperationCount
+    {
+        get => _activeOperationCount;
+        private set => SetProperty(ref _activeOperationCount, value);
+    }
+
+    /// <summary>The most recent line added to the log, regardless of the search/warnings filter below — always the real last event, not whatever the filter happens to be hiding.</summary>
+    public string? LastLogLine
+    {
+        get => _lastLogLine;
+        private set => SetProperty(ref _lastLogLine, value);
+    }
+
+    /// <summary>Task 4's "Filter: Toggle error/warning-only log views" — matches lines carrying this app's own <c>[warn]</c>/<c>[err]</c>/<c>[fail]</c> markers (see <see cref="OnActivity"/>/<see cref="HandleUnexpectedError"/>).</summary>
+    public bool ShowOnlyWarningsAndErrors
+    {
+        get => _showOnlyWarningsAndErrors;
+        set
+        {
+            if (SetProperty(ref _showOnlyWarningsAndErrors, value))
+            {
+                RefreshCommandLogText();
+            }
+        }
+    }
+
+    /// <summary>Task 4's log search input — a live, case-insensitive substring filter over the buffered lines.</summary>
+    public string LogSearchText
+    {
+        get => _logSearchText;
+        set
+        {
+            if (SetProperty(ref _logSearchText, value))
+            {
+                RefreshCommandLogText();
+            }
+        }
     }
 
     public string SelectedName
@@ -740,11 +1045,54 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _viewerImageBytes, value))
             {
                 OnPropertyChanged(nameof(HasViewerImage));
+                OnPropertyChanged(nameof(HasViewerZoomableContent));
             }
         }
     }
 
     public bool HasViewerImage => _viewerImageBytes is { Length: > 0 };
+
+    /// <summary>
+    /// One PNG-encoded bitmap per rendered PDF page, undecoded for the same reason as
+    /// <see cref="ViewerImageBytes"/> — the View decodes each entry with the same
+    /// <c>BytesToBitmapConverter</c>.
+    /// </summary>
+    public IReadOnlyList<byte[]>? ViewerPdfPages
+    {
+        get => _viewerPdfPages;
+        private set
+        {
+            if (SetProperty(ref _viewerPdfPages, value))
+            {
+                OnPropertyChanged(nameof(HasViewerPdf));
+                OnPropertyChanged(nameof(HasViewerZoomableContent));
+            }
+        }
+    }
+
+    public bool HasViewerPdf => _viewerPdfPages is { Count: > 0 };
+
+    /// <summary>Whether the zoom control has anything to act on — hidden for the text viewer, which sizes by font instead.</summary>
+    public bool HasViewerZoomableContent => HasViewerImage || HasViewerPdf;
+
+    /// <summary>
+    /// The image/PDF viewer's display scale — see <see cref="AppSettings.ViewerZoom"/> for why the
+    /// default isn't 1.0. Clamped the same way on every write, not just on load, since the slider
+    /// itself is already range-limited but a value set some other way (a future keyboard shortcut,
+    /// say) shouldn't be able to hand the view something degenerate.
+    /// </summary>
+    public double ViewerZoom
+    {
+        get => _viewerZoom;
+        set
+        {
+            var clamped = Math.Clamp(value, AppSettings.MinViewerZoom, AppSettings.MaxViewerZoom);
+            if (SetProperty(ref _viewerZoom, clamped))
+            {
+                _settings.Update(s => s.ViewerZoom = clamped);
+            }
+        }
+    }
 
     /// <summary>Whether the Status panel's per-item fields (as opposed to the current-folder ones) have anything to show.</summary>
     public bool HasSelection
@@ -752,6 +1100,22 @@ public sealed class MainWindowViewModel : ObservableObject
         get => _hasSelection;
         private set => SetProperty(ref _hasSelection, value);
     }
+
+    /// <summary>docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2 — how many rows Ctrl/Shift-click or Ctrl+A currently have marked.</summary>
+    public int SelectedCount => RootItems.Count(node => node.IsSelected);
+
+    /// <summary>Whether the Status panel should show the multi-select summary instead of one item's details.</summary>
+    public bool HasMultipleSelected => SelectedCount > 1;
+
+    /// <summary>Whether the Status panel should show the single-item details block.</summary>
+    public bool IsSingleSelected => SelectedCount == 1;
+
+    public string SelectionSummaryText => SelectedCount switch
+    {
+        0 => string.Empty,
+        1 => "1 elemento seleccionado",
+        _ => $"{SelectedCount} elementos seleccionados",
+    };
 
     public bool IsCommandConsoleVisible
     {
@@ -765,6 +1129,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 CommandConsoleHitTestVisible = value;
                 CommandConsoleToggleLabel = value ? "Hide CLI activity" : "Show CLI activity";
                 CommandConsoleToggleGlyph = value ? "▼" : "▲";
+                _settings.Update(s => s.ShowCommandConsole = value);
                 RaiseCommandStates();
             }
         }
@@ -800,6 +1165,39 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _commandConsoleToggleGlyph, value);
     }
 
+    /// <summary>
+    /// Whether the right-hand Status/Metrics sidebar is shown. Persisted: the value the user last
+    /// left it in is also what the next launch starts with, same as <see cref="ShowLocalExplorerPanel"/>-backed
+    /// <see cref="IsLocalExplorerPanelVisible"/> below.
+    /// </summary>
+    /// <summary>A "User Settings" checkbox in the settings view, not a header button — reads/writes
+    /// directly rather than through a command, the way <see cref="DefaultSyncFolder"/> and
+    /// <see cref="BandwidthLimitKbps"/> (both plain two-way-bound settings-view fields) already do.</summary>
+    public bool IsStatusPanelVisible
+    {
+        get => _isStatusPanelVisible;
+        set
+        {
+            if (SetProperty(ref _isStatusPanelVisible, value))
+            {
+                _settings.Update(s => s.ShowStatusPanel = value);
+            }
+        }
+    }
+
+    /// <summary>Whether the local filesystem pane (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 3) is expanded.</summary>
+    public bool IsLocalExplorerPanelVisible
+    {
+        get => _isLocalExplorerPanelVisible;
+        private set
+        {
+            if (SetProperty(ref _isLocalExplorerPanelVisible, value))
+            {
+                _settings.Update(s => s.ShowLocalExplorerPanel = value);
+            }
+        }
+    }
+
     public async Task InitializeAsync()
     {
         // Sync's crash recovery (docs/PLAN-LOCAL-SYNC.md §7) belongs at app startup, before the
@@ -815,7 +1213,9 @@ public sealed class MainWindowViewModel : ObservableObject
             QueueCommandLine($"[warn] Sync startup recovery failed: {ex.Message}");
         }
 
-        var needsCliPath = _provider.Id != ProviderId.OneDrive;
+        await LocalExplorer.InitializeAsync();
+
+        var needsCliPath = _provider.Id == ProviderId.Proton;
         if ((!needsCliPath || !string.IsNullOrWhiteSpace(CliPath)) && IsAuthenticated)
         {
             await GoToRootAsync();
@@ -824,13 +1224,14 @@ public sealed class MainWindowViewModel : ObservableObject
 
         StatusMessage = needsCliPath && string.IsNullOrWhiteSpace(CliPath)
             ? $"Select a {_provider.DisplayName} CLI executable to begin."
-            : $"Authenticate to load /my-files.";
+            : $"Authenticate to load {RootPath}.";
     }
 
     private bool CanAuthenticate() => !IsLoading && !IsAuthenticated && _provider.Id switch
     {
         ProviderId.OneDrive => !string.IsNullOrWhiteSpace(OneDriveClientId),
-        _ => !string.IsNullOrWhiteSpace(CliPath),
+        ProviderId.Proton => !string.IsNullOrWhiteSpace(CliPath),
+        _ => true,
     };
 
     private bool CanLogout() => !IsLoading && IsAuthenticated;
@@ -954,9 +1355,28 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Opening {_provider.DisplayName} authentication in your browser...";
+            StatusMessage = $"Opening {_provider.DisplayName} authentication...";
             await _provider.Auth.AuthenticateAsync();
             IsAuthenticated = true;
+            _settings.Update(settings =>
+            {
+                settings.SetProviderAuthenticated(_provider.Id, true);
+                var liveLabel = _provider switch
+                {
+                    OneDriveProvider { Auth: GraphAuthenticator { AccountLabel: { } oneDriveLabel } } => oneDriveLabel,
+                    GenericCloudDriveProvider { AccountIdentity: { } identity } => identity,
+                    _ => null
+                };
+                if (liveLabel is not null)
+                {
+                    settings.SetProviderAccountLabel(_provider.Id, liveLabel);
+                }
+            });
+            UpdateConnectionTelemetry();
+            UpdateQuotaMetrics();
+            OnPropertyChanged(nameof(AvailableProviders));
+            OnPropertyChanged(nameof(SelectedProvider));
+            OnPropertyChanged(nameof(OneDriveAccountLabel));
             await GoToRootAsync();
         }
         catch (InvalidOperationException ex)
@@ -977,8 +1397,14 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusMessage = $"Logging out from {_provider.DisplayName}...";
             await _provider.Auth.LogoutAsync();
             IsAuthenticated = false;
+            _settings.Update(settings => settings.SetProviderAuthenticated(_provider.Id, false));
+            UpdateConnectionTelemetry();
+            UpdateQuotaMetrics();
+            OnPropertyChanged(nameof(AvailableProviders));
+            OnPropertyChanged(nameof(SelectedProvider));
+            OnPropertyChanged(nameof(OneDriveAccountLabel));
             ResetBrowserState();
-            StatusMessage = "Logged out.";
+            StatusMessage = $"Logged out from {_provider.DisplayName}.";
         }
         catch (InvalidOperationException ex)
         {
@@ -991,13 +1417,31 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     /// <summary>
+    /// <see cref="SwitchBrowserAccountAsync"/>, fire-and-forget from a property setter (the header
+    /// ComboBox's <c>SelectedItem</c> binding has nowhere to await a <see cref="Task"/>) but still
+    /// routed through <see cref="HandleUnexpectedError"/> like every other command, instead of
+    /// leaving a thrown exception unobserved and the UI silently stuck mid-switch.
+    /// </summary>
+    private async Task SwitchProviderAndReportErrorsAsync(ProviderId id)
+    {
+        try
+        {
+            await SwitchBrowserAccountAsync(id);
+        }
+        catch (Exception ex)
+        {
+            HandleUnexpectedError(ex);
+        }
+    }
+
+    /// <summary>
     /// Switches which registered <see cref="BrowserAccountSession"/> the browser shows — live, no
     /// restart (P7 Phase B, docs/PLAN-CLOUD-PROVIDERS.md; §2.7's original "requires a restart" note
     /// only ever reflected that this hadn't been built yet, not a hard architectural limit). A
     /// no-op if <paramref name="id"/> isn't registered (not authenticated/configured, or simply not
     /// one of <see cref="_browserSessions"/> yet).
     /// </summary>
-    private async Task SwitchBrowserAccountAsync(ProviderId id)
+    public async Task SwitchBrowserAccountAsync(ProviderId id)
     {
         if (id == _provider.Id)
         {
@@ -1008,6 +1452,7 @@ public sealed class MainWindowViewModel : ObservableObject
         if (session is null)
         {
             StatusMessage = $"{id} isn't configured.";
+            OnPropertyChanged(nameof(SelectedProvider));
             return;
         }
 
@@ -1021,7 +1466,8 @@ public sealed class MainWindowViewModel : ObservableObject
         _statsScanner = session.StatsScanner;
         _previewLoader = session.PreviewLoader;
         _imagePreviewLoader = session.ImagePreviewLoader;
-        _rootPath = _provider.Id == ProviderId.OneDrive ? "/" : "/my-files";
+        _pdfPreviewLoader = session.PdfPreviewLoader;
+        _rootPath = _provider.Id == ProviderId.Proton ? "/my-files" : "/";
 
         // Both of these used to be wired once at startup and never revisited — harmless before
         // this phase, since the browsed account never changed. Left stale, "Add pair"'s remote
@@ -1031,31 +1477,61 @@ public sealed class MainWindowViewModel : ObservableObject
         // path, mixing the two).
         SyncPanel.GetRemoteFolderChildren = _provider.Operations.ListFolderAsync;
         SyncPanel.SetActiveAccount(_provider.DisplayName);
+        
         // Re-read fresh rather than trust the field left over from the previous account — it can
-        // otherwise go stale the moment auth changes for the account not currently on screen (a
-        // real gap this phase closes, not just the restart requirement).
-        IsAuthenticated = _provider.Id == ProviderId.OneDrive ? _settings.Load().IsOneDriveAuthenticated : _settings.Load().IsAuthenticated;
+        // otherwise go stale the moment auth changes for the account not currently on screen.
+        var currentSettings = _settings.Load();
+        IsAuthenticated = currentSettings.IsProviderAuthenticated(_provider.Id);
 
         // A deep-scan histogram belongs to one specific folder on one specific account — carrying
         // it over to a different account's (unrelated) folder would show buckets for content that
         // isn't even on screen.
         KindFilters.Clear();
         _kindFilter = null;
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
         FilterSummary = string.Empty;
 
+        UpdateQuotaMetrics();
+        UpdateConnectionTelemetry();
+
+        OnPropertyChanged(nameof(AvailableProviders));
+        OnPropertyChanged(nameof(SelectedProvider));
         OnPropertyChanged(nameof(ActiveProviderDisplayName));
         OnPropertyChanged(nameof(BrowserHeaderTitle));
         OnPropertyChanged(nameof(BrowserHeaderSubtitle));
         OnPropertyChanged(nameof(IsProtonActive));
         OnPropertyChanged(nameof(IsOneDriveActive));
+        OnPropertyChanged(nameof(IsGoogleDriveActive));
+        OnPropertyChanged(nameof(IsNextcloudActive));
+        OnPropertyChanged(nameof(IsS3Active));
         OnPropertyChanged(nameof(HasDiagnostics));
         OnPropertyChanged(nameof(OneDriveAccountLabel));
         OnPropertyChanged(nameof(RootPath));
         RaiseCommandStates();
 
         _settings.Update(settings => settings.ActiveProvider = id.ToString());
+
+        if (!IsAuthenticated)
+        {
+            StatusMessage = $"Authentication required for {_provider.DisplayName}. Please sign in to access files.";
+            ResetBrowserState();
+            return;
+        }
+
         StatusMessage = $"Switched to {_provider.DisplayName}.";
-        await GoToRootAsync();
+
+        try
+        {
+            await GoToRootAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or DriveException)
+        {
+            IsAuthenticated = false;
+            UpdateConnectionTelemetry();
+            StatusMessage = $"Authentication required for {_provider.DisplayName}. Please sign in to access files.";
+            ResetBrowserState();
+        }
     }
 
     private async Task GoToRootAsync()
@@ -1147,31 +1623,18 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var strategy = UploadConflictStrategy.None;
-        if (RequestConflictStrategyAsync is not null)
+        var strategy = await ResolveUploadConflictStrategyAsync(files, CurrentPath);
+        if (strategy is null)
         {
-            var remoteFileNames = RootItems.Select(ni => ni.Item.Name).ToHashSet();
-            var conflictingFiles = files
-                .Select(Path.GetFileName)
-                .Where(name => name is not null && remoteFileNames.Contains(name))
-                .ToList();
-
-            if (conflictingFiles.Count > 0)
-            {
-                strategy = await RequestConflictStrategyAsync(conflictingFiles!);
-                if (strategy == UploadConflictStrategy.None)
-                {
-                    StatusMessage = "Upload cancelled.";
-                    return;
-                }
-            }
+            StatusMessage = "Upload cancelled.";
+            return;
         }
 
         try
         {
             IsLoading = true;
             StatusMessage = $"Uploading {files.Count} file(s) to {CurrentPath}...";
-            await _provider.Operations.UploadFilesAsync(files, CurrentPath, strategy);
+            await _provider.Operations.UploadFilesAsync(files, CurrentPath, strategy.Value);
             StatusMessage = $"Uploaded {files.Count} file(s) to {CurrentPath}.";
             await InvalidateDeepMetricsAsync(CurrentPath);
 
@@ -1185,6 +1648,162 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = false;
         }
+    }
+
+    /// <summary>
+    /// Shared by <see cref="UploadAsync"/> and drag-and-drop uploads (<see
+    /// cref="HandleLocalFilesDroppedAsync"/>): checks <paramref name="localPaths"/>' names against
+    /// what's already at <paramref name="targetPath"/>, and prompts once for the whole batch via
+    /// <see cref="RequestConflictStrategyAsync"/> if any collide. Returns null if the user cancelled
+    /// the prompt (distinct from <see cref="UploadConflictStrategy.None"/>, which also means "no
+    /// conflicts to resolve" when nothing collided in the first place).
+    ///
+    /// The conflict check itself only covers <paramref name="targetPath"/> when it's the folder
+    /// already loaded in memory (<see cref="RootItems"/>) — a drop onto a different folder row skips
+    /// it rather than paying for an extra listing call mid-drag; the CLI's own default handling
+    /// still applies there.
+    /// </summary>
+    private async Task<UploadConflictStrategy?> ResolveUploadConflictStrategyAsync(IReadOnlyList<string> localPaths, string targetPath)
+    {
+        if (RequestConflictStrategyAsync is null || !string.Equals(targetPath, CurrentPath, StringComparison.Ordinal))
+        {
+            return UploadConflictStrategy.None;
+        }
+
+        var remoteFileNames = RootItems.Select(ni => ni.Item.Name).ToHashSet();
+        var conflictingFiles = localPaths
+            .Select(Path.GetFileName)
+            .Where(name => name is not null && remoteFileNames.Contains(name))
+            .ToList();
+
+        if (conflictingFiles.Count == 0)
+        {
+            return UploadConflictStrategy.None;
+        }
+
+        var strategy = await RequestConflictStrategyAsync(conflictingFiles!);
+        return strategy == UploadConflictStrategy.None ? null : strategy;
+    }
+
+    /// <summary>
+    /// A local pane row (or rows) dropped onto the cloud pane (docs/INTERFACE_IMPROVEMENT_PLAN.md
+    /// Task 5, Phase 2) — the code-behind drag/drop handlers translate the gesture into this call
+    /// and do nothing else, per the MVVM rule that view-model business logic stays out of
+    /// code-behind. Routes through <see cref="TransferQueue"/> rather than blocking on
+    /// <see cref="IsLoading"/> the way the toolbar's own <see cref="UploadCommand"/> does — a drag
+    /// shouldn't freeze every other <c>IsLoading</c>-gated control in the window.
+    /// </summary>
+    public async Task HandleLocalFilesDroppedAsync(IReadOnlyList<string> localPaths, string targetPath)
+    {
+        if (localPaths.Count == 0)
+        {
+            return;
+        }
+
+        var strategy = await ResolveUploadConflictStrategyAsync(localPaths, targetPath);
+        if (strategy is null)
+        {
+            StatusMessage = "Upload cancelled.";
+            return;
+        }
+
+        var result = await TransferQueue.EnqueueUpload(_provider.Operations, localPaths, targetPath, strategy.Value);
+
+        // Set before kicking off the refresh below, not after: that refresh's own transient
+        // "Loading.../Showing cached items..." messages would otherwise immediately overwrite this
+        // one. It's still the last word for a moment, and the refresh's own eventual "Loaded N
+        // items..." is itself a second, later confirmation once it lands.
+        StatusMessage = result.Status switch
+        {
+            TransferStatus.Done => $"Subido {DescribeBatchForStatus(localPaths)} a {targetPath}.",
+            TransferStatus.Failed => $"Error al subir {DescribeBatchForStatus(localPaths)}: {result.ErrorMessage}",
+            _ => $"Subida de {DescribeBatchForStatus(localPaths)} cancelada.",
+        };
+
+        // Fire-and-forget, same as the toolbar's own UploadAsync: RefreshAsync ends in a
+        // Dispatcher.UIThread.InvokeAsync post that only completes with a running Avalonia
+        // dispatcher, so awaiting it deadlocks headless callers (including every xUnit test).
+        if (result.Status == TransferStatus.Done && string.Equals(targetPath, CurrentPath, StringComparison.Ordinal))
+        {
+            _ = RefreshAsync();
+        }
+    }
+
+    private static string DescribeBatchForStatus(IReadOnlyList<string> localPaths)
+        => localPaths.Count == 1 ? Path.GetFileName(localPaths[0]) : $"{localPaths.Count} elementos";
+
+    /// <summary>
+    /// A cloud pane row (or rows) dropped onto the local pane (docs/INTERFACE_IMPROVEMENT_PLAN.md
+    /// Task 5, Phase 3) — mirrors <see cref="HandleLocalFilesDroppedAsync"/> for the other
+    /// direction. Files and folders both download (`filesystem download` is recursive for folders,
+    /// verified in docs/PLAN-LOCAL-SYNC.md — the row's own manual <c>DownloadCommand</c> disables
+    /// folders for an unrelated, app-level reason, see docs/ARCHITECTURE.md §9 item 11).
+    ///
+    /// Unlike upload, the download operation itself has no conflict-strategy parameter — the CLI's
+    /// `filesystem download` command has no equivalent to upload's <c>-f</c>/<c>-d</c> flags. So
+    /// "Skip" is the only choice this method can actually honor beyond a plain download: it drops
+    /// the conflicting items from the batch. "Replace" and "Keep Both" both fall through to a plain
+    /// download — there is no verified way to make the CLI (or this app, without downloading to a
+    /// temp path and renaming after, which isn't built) rename the incoming file instead of
+    /// whatever the CLI itself does when the target name already exists.
+    /// </summary>
+    public async Task HandleCloudItemsDroppedAsync(IReadOnlyList<DriveItem> items, string targetLocalPath)
+    {
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        var toDownload = items;
+        if (RequestConflictStrategyAsync is not null)
+        {
+            var conflictingNames = items
+                .Where(item => _localFileSystem.Exists(Path.Combine(targetLocalPath, item.Name)))
+                .Select(item => item.Name)
+                .ToList();
+
+            if (conflictingNames.Count > 0)
+            {
+                var strategy = await RequestConflictStrategyAsync(conflictingNames);
+                if (strategy == UploadConflictStrategy.None)
+                {
+                    StatusMessage = "Download cancelled.";
+                    return;
+                }
+
+                if (strategy == UploadConflictStrategy.Skip)
+                {
+                    var skip = conflictingNames.ToHashSet();
+                    toDownload = items.Where(item => !skip.Contains(item.Name)).ToList();
+                }
+            }
+        }
+
+        var results = new List<TransferItemViewModel>(toDownload.Count);
+        foreach (var item in toDownload)
+        {
+            results.Add(await TransferQueue.EnqueueDownload(_provider.Operations, item, targetLocalPath));
+        }
+
+        // Safe to await, unlike the upload side's cloud-pane RefreshAsync (see its comment):
+        // LocalExplorerViewModel.NavigateAsync never touches Dispatcher.UIThread, so it can't
+        // deadlock a headless caller the same way.
+        var anyDone = results.Any(r => r.Status == TransferStatus.Done);
+        if (anyDone && string.Equals(targetLocalPath, LocalExplorer.CurrentPath, StringComparison.Ordinal))
+        {
+            await LocalExplorer.RefreshCommand.ExecuteAsync();
+        }
+
+        var failed = results.Where(r => r.Status == TransferStatus.Failed).ToList();
+        var done = results.Count(r => r.Status == TransferStatus.Done);
+        StatusMessage = failed.Count switch
+        {
+            0 when done > 0 => done == 1
+                ? $"Descargado {toDownload[0].Name} a {targetLocalPath}."
+                : $"Descargados {done} elemento(s) a {targetLocalPath}.",
+            0 => $"Descarga a {targetLocalPath} cancelada.",
+            _ => $"{failed.Count} de {results.Count} descarga(s) fallaron: {failed[0].ErrorMessage}",
+        };
     }
 
     private async Task CreateFolderAsync()
@@ -1272,13 +1891,19 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        if (PdfPreviewPolicy.CanPreview(item))
+        {
+            await PreviewPdfAsync(item);
+            return;
+        }
+
         if (TextPreviewPolicy.CanPreview(item))
         {
             await PreviewTextAsync(item);
             return;
         }
 
-        StatusMessage = $"{item.Name} no se puede abrir en el visor: solo texto (hasta {TextPreviewPolicy.MaxPreviewBytes / 1024} KB) o imágenes (hasta {ImagePreviewPolicy.MaxPreviewBytes / (1024 * 1024)} MB).";
+        StatusMessage = $"{item.Name} no se puede abrir en el visor: solo texto (hasta {TextPreviewPolicy.MaxPreviewBytes / 1024} KB), imágenes (hasta {ImagePreviewPolicy.MaxPreviewBytes / (1024 * 1024)} MB) o PDF (hasta {PdfPreviewPolicy.MaxPreviewBytes / (1024 * 1024)} MB).";
         IsWarning = true;
     }
 
@@ -1386,6 +2011,54 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    /// <summary>The PDF half of <see cref="PreviewItemAsync"/> — same download-then-show shape, plus rendering the pages the loader already did.</summary>
+    private async Task PreviewPdfAsync(DriveItem item)
+    {
+        if (_pdfPreviewLoader is null)
+        {
+            StatusMessage = "El visor de PDF no está disponible.";
+            IsWarning = true;
+            return;
+        }
+
+        var cts = BeginPreview(item);
+
+        try
+        {
+            var preview = await _pdfPreviewLoader.LoadAsync(item, cts.Token);
+            if (cts.IsCancellationRequested)
+            {
+                return;
+            }
+
+            ViewerPdfPages = preview.Pages;
+            ViewerNote = preview.Pages.Count < preview.TotalPageCount
+                ? $"Mostrando las primeras {preview.Pages.Count} de {preview.TotalPageCount} páginas"
+                : $"{preview.TotalPageCount:n0} página(s)";
+            StatusMessage = $"Mostrando {item.Name} en el visor.";
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded or closed; whoever did that already owns the panel's state.
+        }
+        catch (InvalidOperationException ex)
+        {
+            ViewerNote = "No se pudo abrir el archivo.";
+            StatusMessage = FormatDriveError(item.Path, ex);
+            IsWarning = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ViewerNote = "No se pudo leer el archivo descargado.";
+            StatusMessage = $"No se pudo abrir {item.Name} en el visor: {ex.Message}";
+            IsWarning = true;
+        }
+        finally
+        {
+            EndPreview(cts);
+        }
+    }
+
     /// <summary>
     /// Shared setup for both preview flows: supersede any in-flight download and reset the panel to
     /// a clean loading state for <paramref name="item"/>, clearing whichever content type the
@@ -1404,6 +2077,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ViewerPath = item.Path;
         ViewerText = string.Empty;
         ViewerImageBytes = null;
+        ViewerPdfPages = null;
         ViewerNote = "Descargando el archivo…";
         StatusMessage = $"Abriendo {item.Name} en el visor…";
         return cts;
@@ -1433,7 +2107,7 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     private bool CanViewSelectedFile()
-        => _selectedNode is { CanPreview: true } && (_previewLoader is not null || _imagePreviewLoader is not null);
+        => _selectedNode is { CanPreview: true } && (_previewLoader is not null || _imagePreviewLoader is not null || _pdfPreviewLoader is not null);
 
     private async Task ViewSelectedFileAsync()
     {
@@ -1453,6 +2127,7 @@ public sealed class MainWindowViewModel : ObservableObject
         IsViewerVisible = false;
         IsViewerLoading = false;
         ViewerImageBytes = null;
+        ViewerPdfPages = null;
         ViewerText = string.Empty;
         ViewerNote = string.Empty;
         await Task.CompletedTask;
@@ -1543,7 +2218,13 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (item.IsFolder)
         {
-            return;
+            var confirm = RequestConfirmationAsync;
+            if (confirm is not null && !await confirm(
+                $"Move the folder \"{item.Name}\" and everything inside it to trash?"))
+            {
+                StatusMessage = $"Cancelled: {item.Name} was not moved to trash.";
+                return;
+            }
         }
 
         try
@@ -1569,6 +2250,154 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    /// <summary>"Copiar ruta" (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6) — puts the cloud item's path on the system clipboard.</summary>
+    public async Task CopyPathAsync(DriveItem item)
+    {
+        var copy = RequestCopyToClipboardAsync;
+        if (copy is null)
+        {
+            StatusMessage = "Copy is not available.";
+            return;
+        }
+
+        await copy(item.Path);
+        StatusMessage = $"Copied path: {item.Path}";
+    }
+
+    /// <summary>
+    /// "Share Link" — only reachable when <c>_provider.Capabilities.SupportsShareLinks</c> is true
+    /// (the row's own <see cref="DriveNodeViewModel.CanShareLink"/> disables the menu entry
+    /// otherwise), so the <see cref="DriveException"/> path below is a defensive fallback, not the
+    /// normal way this reports "unsupported".
+    /// </summary>
+    public async Task CreateShareLinkAsync(DriveItem item)
+    {
+        if (!_provider.Capabilities.SupportsShareLinks)
+        {
+            StatusMessage = $"{_provider.DisplayName} no permite generar enlaces para compartir.";
+            IsWarning = true;
+            return;
+        }
+
+        try
+        {
+            IsLoading = true;
+            StatusMessage = $"Generando un enlace para compartir {item.Name}...";
+            var url = await _provider.Operations.CreateShareLinkAsync(item.Path);
+
+            var copy = RequestCopyToClipboardAsync;
+            if (copy is not null)
+            {
+                await copy(url);
+                StatusMessage = $"Enlace copiado al portapapeles: {url}";
+            }
+            else
+            {
+                StatusMessage = $"Enlace para compartir: {url}";
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = FormatDriveError(item.Path, ex);
+            IsWarning = true;
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// "Subir a esta carpeta..." on a cloud folder row — the same upload path as the toolbar's
+    /// <see cref="UploadAsync"/>, but targeting the right-clicked folder instead of always
+    /// <see cref="CurrentPath"/>.
+    /// </summary>
+    public async Task UploadToFolderAsync(DriveItem folder)
+    {
+        if (!folder.IsFolder)
+        {
+            return;
+        }
+
+        var picker = RequestUploadFilesAsync;
+        if (picker is null)
+        {
+            StatusMessage = "Upload is not available.";
+            return;
+        }
+
+        var files = await picker();
+        if (files.Count == 0)
+        {
+            return;
+        }
+
+        var strategy = await ResolveUploadConflictStrategyAsync(files, folder.Path);
+        if (strategy is null)
+        {
+            StatusMessage = "Upload cancelled.";
+            return;
+        }
+
+        try
+        {
+            IsLoading = true;
+            StatusMessage = $"Uploading {files.Count} file(s) to {folder.Path}...";
+            await _provider.Operations.UploadFilesAsync(files, folder.Path, strategy.Value);
+            StatusMessage = $"Uploaded {files.Count} file(s) to {folder.Path}.";
+            await InvalidateDeepMetricsAsync(folder.Path);
+
+            if (string.Equals(folder.Path, CurrentPath, StringComparison.Ordinal))
+            {
+                _ = RefreshAsync(); // Refresh in background
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = FormatDriveError(folder.Path, ex);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    /// <summary>"Descargar aquí" — a quick download into whatever folder the local pane currently shows, reusing the drag-and-drop download path (<see cref="HandleCloudItemsDroppedAsync"/>).</summary>
+    public Task DownloadToLocalPaneAsync(DriveItem item)
+        => HandleCloudItemsDroppedAsync(new[] { item }, LocalExplorer.CurrentPath);
+
+    /// <summary>"Sincronizar esta ruta..." on a cloud folder row — opens the wizard pre-filled with this folder as the remote side.</summary>
+    public Task SyncSelectedRemotePathAsync(DriveItem item)
+        => item.IsFolder ? SyncPanel.AddPairAsync(new SyncPairPrefill(item.Path, null)) : Task.CompletedTask;
+
+    public async Task ShowPropertiesAsync(DriveItem item)
+    {
+        var show = RequestShowPropertiesAsync;
+        if (show is null)
+        {
+            return;
+        }
+
+        var fields = new List<PropertyField>
+        {
+            new("Name", item.Name),
+            new("Path", item.Path),
+            new("Type", item.IsFolder ? "Folder" : "File"),
+        };
+
+        if (item.Size is not null)
+        {
+            fields.Add(new PropertyField("Size", $"{item.Size:n0} bytes"));
+        }
+
+        if (item.ModifiedAt is not null)
+        {
+            fields.Add(new PropertyField("Modified", item.ModifiedAt.Value.ToLocalTime().ToString("g")));
+        }
+
+        await show(item.Name, fields);
+    }
+
     private async Task HandleRowClickAsync(DriveItem item)
     {
         SelectRow(RootItems.FirstOrDefault(node => node.Item.Path == item.Path));
@@ -1582,14 +2411,20 @@ public sealed class MainWindowViewModel : ObservableObject
         await NavigateIntoAsync(item.Path);
     }
 
+    /// <summary>
+    /// A plain click (no modifier): selects just <paramref name="node"/>, clearing every other
+    /// row's selection — a plain click always resets a file manager's selection to "just this one",
+    /// even if several rows were multi-selected beforehand.
+    /// </summary>
     private void SelectRow(DriveNodeViewModel? node)
     {
-        if (_selectedNode is not null)
+        foreach (var selected in RootItems.Where(n => n.IsSelected).ToList())
         {
-            _selectedNode.IsSelected = false;
+            selected.IsSelected = false;
         }
 
         _selectedNode = node;
+        _selectionAnchorPath = node?.Path;
 
         if (node is not null)
         {
@@ -1597,6 +2432,166 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         ViewSelectedFileCommand.RaiseCanExecuteChanged();
+        RaiseSelectionSummaryChanged();
+    }
+
+    /// <summary>Ctrl/Cmd+Click: adds or removes just this row, leaving every other row's selection untouched (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2).</summary>
+    public void ToggleSelection(DriveNodeViewModel node)
+    {
+        node.IsSelected = !node.IsSelected;
+        _selectionAnchorPath = node.Path;
+        _selectedNode = SelectedCount == 1 ? RootItems.FirstOrDefault(n => n.IsSelected) : null;
+        ViewSelectedFileCommand.RaiseCanExecuteChanged();
+        RaiseSelectionSummaryChanged();
+    }
+
+    /// <summary>Shift+Click: selects the contiguous run between the last-touched row (the anchor) and this one, replacing whatever was selected before — standard file-manager range-select.</summary>
+    public void SelectRange(DriveNodeViewModel target)
+    {
+        var anchorIndex = _selectionAnchorPath is null ? -1 : RootItems.ToList().FindIndex(n => n.Path == _selectionAnchorPath);
+        var targetIndex = RootItems.IndexOf(target);
+        if (anchorIndex < 0 || targetIndex < 0)
+        {
+            SelectRow(target);
+            return;
+        }
+
+        var (lo, hi) = anchorIndex <= targetIndex ? (anchorIndex, targetIndex) : (targetIndex, anchorIndex);
+        for (var i = 0; i < RootItems.Count; i++)
+        {
+            RootItems[i].IsSelected = i >= lo && i <= hi;
+        }
+
+        _selectedNode = SelectedCount == 1 ? RootItems.FirstOrDefault(n => n.IsSelected) : null;
+        ViewSelectedFileCommand.RaiseCanExecuteChanged();
+        RaiseSelectionSummaryChanged();
+    }
+
+    private Task SelectAllRowsAsync()
+    {
+        foreach (var node in RootItems)
+        {
+            node.IsSelected = true;
+        }
+
+        _selectionAnchorPath = RootItems.Count > 0 ? RootItems[0].Path : null;
+        _selectedNode = SelectedCount == 1 ? RootItems.FirstOrDefault(n => n.IsSelected) : null;
+        ViewSelectedFileCommand.RaiseCanExecuteChanged();
+        RaiseSelectionSummaryChanged();
+        return Task.CompletedTask;
+    }
+
+    private void RaiseSelectionSummaryChanged()
+    {
+        OnPropertyChanged(nameof(SelectedCount));
+        OnPropertyChanged(nameof(HasMultipleSelected));
+        OnPropertyChanged(nameof(IsSingleSelected));
+        OnPropertyChanged(nameof(SelectionSummaryText));
+        DownloadSelectedCommand.RaiseCanExecuteChanged();
+        TrashSelectedCommand.RaiseCanExecuteChanged();
+    }
+
+    /// <summary>The batch counterpart to <see cref="DownloadItemAsync"/>: every selected file (folders skipped, same rule the single-row command already follows) into one picked destination.</summary>
+    private async Task DownloadSelectedAsync()
+    {
+        var files = RootItems.Where(n => n.IsSelected && n.IsFile).Select(n => n.Item).ToList();
+        if (files.Count == 0)
+        {
+            StatusMessage = "Selecciona al menos un archivo (las carpetas no se pueden descargar en lote).";
+            IsWarning = true;
+            return;
+        }
+
+        var picker = RequestDownloadFolderAsync;
+        if (picker is null)
+        {
+            StatusMessage = "Download is not available.";
+            return;
+        }
+
+        var folder = await picker();
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            return;
+        }
+
+        var failed = new List<string>();
+        try
+        {
+            IsLoading = true;
+            foreach (var file in files)
+            {
+                try
+                {
+                    StatusMessage = $"Downloading {file.Name}...";
+                    await _provider.Operations.DownloadFileAsync(file.Path, folder);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    failed.Add($"{file.Name}: {FormatDriveError(file.Path, ex)}");
+                }
+            }
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+
+        StatusMessage = failed.Count == 0
+            ? $"Downloaded {files.Count} file(s) to {folder}."
+            : $"Downloaded {files.Count - failed.Count} of {files.Count} file(s). Failures: {string.Join("; ", failed)}";
+        IsWarning = failed.Count > 0;
+    }
+
+    /// <summary>The batch counterpart to <see cref="TrashItemAsync"/>: one confirmation for the whole selection (only asked when it includes a folder, same as the single-row command), then each item independently so one failure doesn't abandon the rest.</summary>
+    private async Task TrashSelectedAsync()
+    {
+        var selected = RootItems.Where(n => n.IsSelected).Select(n => n.Item).ToList();
+        if (selected.Count == 0)
+        {
+            return;
+        }
+
+        if (selected.Any(item => item.IsFolder))
+        {
+            var confirm = RequestConfirmationAsync;
+            if (confirm is not null && !await confirm($"Move {selected.Count} selected item(s) to trash? Some are folders — everything inside them goes too."))
+            {
+                StatusMessage = $"Cancelled: {selected.Count} item(s) were not moved to trash.";
+                return;
+            }
+        }
+
+        var failed = new List<string>();
+        try
+        {
+            IsLoading = true;
+            foreach (var item in selected)
+            {
+                try
+                {
+                    StatusMessage = $"Moving {item.Name} to trash...";
+                    await _provider.Operations.TrashItemAsync(item.Path);
+                    await _cacheService.RemoveItemAsync(item.Path);
+                    await InvalidateDeepMetricsAsync(item.Path);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    failed.Add($"{item.Name}: {FormatDriveError(item.Path, ex)}");
+                }
+            }
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+
+        StatusMessage = failed.Count == 0
+            ? $"Moved {selected.Count} item(s) to trash."
+            : $"Moved {selected.Count - failed.Count} of {selected.Count} item(s) to trash. Failures: {string.Join("; ", failed)}";
+        IsWarning = failed.Count > 0;
+
+        _ = RefreshAsync();
     }
 
     private async Task LoadFolderAsync(string path, bool clearSelection, bool forceFreshRemoteView = false)
@@ -1630,7 +2625,12 @@ public sealed class MainWindowViewModel : ObservableObject
                 StatusMessage = $"Showing cached items for {path}. Fetching latest from CLI...";
                 IsLoading = false;
 
-                // Fire and forget CLI fetch to keep UI responsive and command finished
+                // Fire and forget CLI fetch to keep UI responsive and command finished. (Tried
+                // making this await when forceFreshRemoteView is set, so a post-transfer refresh
+                // could guarantee the listing was current before returning — reverted: this method
+                // posts its own UI update through Dispatcher.UIThread.InvokeAsync, which never
+                // completes without a running Avalonia dispatcher, so awaiting it deadlocked every
+                // test that exercises a forced refresh instead of just running slower.)
                 _ = FetchFromCliAndUpdateCacheAsync(path, clearSelection, forceFreshRemoteView, token);
                 return;
             }
@@ -1728,6 +2728,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private void HandleLoadError(string path, InvalidOperationException ex)
     {
         var kind = (ex as DriveException)?.Kind ?? DriveErrorKind.Unknown;
+        _lastErrorKind = kind;
 
         if (kind == DriveErrorKind.NotFound)
         {
@@ -1766,33 +2767,66 @@ public sealed class MainWindowViewModel : ObservableObject
             _kindFilter = null;
         }
 
+        // Same reasoning, unconditionally: a search term almost never matches anything in a
+        // different folder, and even when it does, silently carrying it over would look like the
+        // listing forgot files rather than like an active filter.
+        if (_searchText.Length > 0)
+        {
+            _searchText = string.Empty;
+            OnPropertyChanged(nameof(SearchText));
+        }
+
         RenderItems();
+        UpdateQuotaMetrics();
+        UpdateConnectionTelemetry();
     }
 
     private void RenderItems()
     {
         // Rebuilding replaces every row's view-model, so the previous selection highlight would
         // otherwise vanish even on a plain refresh (which intentionally keeps the side panel's
-        // selection) — carry it forward onto whichever new row still matches that path.
-        var previouslySelectedPath = _selectedNode?.Path;
+        // selection) — carry it forward onto whichever new rows still match those paths, single or
+        // multi alike.
+        var previouslySelectedPaths = RootItems.Where(n => n.IsSelected).Select(n => n.Path).ToHashSet();
         _selectedNode = null;
 
         var visible = _kindFilter is null
             ? _loadedItems
             : _loadedItems.Where(item => FileKindClassifier.Classify(item.Name, item.IsFolder) == _kindFilter).ToList();
 
+        if (_searchText.Length > 0)
+        {
+            visible = visible.Where(item => item.Name.Contains(_searchText, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
         RootItems.Clear();
         foreach (var item in DriveItemSorter.Sort(visible, SortKey, SortDescending))
         {
-            var node = new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, PreviewItemAsync, HandleUnexpectedError);
-            if (previouslySelectedPath is not null && item.Path == previouslySelectedPath)
+            var node = new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, PreviewItemAsync, HandleUnexpectedError, new DriveNodeSyncActions
+            {
+                FindSyncPair = i => SyncPanel.FindPairByRemotePath(i.Path),
+                SyncSelectedPathAsync = SyncSelectedRemotePathAsync,
+                CopyPathAsync = CopyPathAsync,
+                UploadToFolderAsync = UploadToFolderAsync,
+                DownloadHereAsync = DownloadToLocalPaneAsync,
+                ShowPropertiesAsync = ShowPropertiesAsync,
+                SupportsShareLinks = _provider.Capabilities.SupportsShareLinks,
+                CreateShareLinkAsync = CreateShareLinkAsync,
+                RefreshPaneAsync = RefreshAsync,
+            });
+            if (previouslySelectedPaths.Contains(item.Path))
             {
                 node.IsSelected = true;
-                _selectedNode = node;
             }
 
             RootItems.Add(node);
         }
+
+        _selectedNode = SelectedCount == 1 ? RootItems.FirstOrDefault(n => n.IsSelected) : null;
+        _selectionAnchorPath = _selectedNode?.Path ?? _selectionAnchorPath;
+        ViewSelectedFileCommand.RaiseCanExecuteChanged();
+        SelectAllRowsCommand.RaiseCanExecuteChanged();
+        RaiseSelectionSummaryChanged();
 
         // Computed here rather than at each call site so the cached paint and the CLI result both
         // update it, and so the numbers can never disagree with the rows actually on screen.
@@ -1802,6 +2836,13 @@ public sealed class MainWindowViewModel : ObservableObject
         var metrics = FolderMetricsCalculator.FromChildren(CurrentPath, _loadedItems, _timeProvider.GetUtcNow());
         Metrics.Update(metrics);
         RebuildKindFilters(metrics);
+
+        // Covers both filters together rather than each setting its own summary: a search term and
+        // a kind chip can be active at once, and the count on screen is the result of whichever of
+        // them are, not just the last one applied.
+        FilterSummary = _kindFilter is not null || _searchText.Length > 0
+            ? $"Mostrando {RootItems.Count:n0} de {_loadedItems.Count:n0} elementos."
+            : string.Empty;
 
         // Fire and forget: a stored folder size is a nice-to-have annotation, and the rows must
         // paint without waiting on the database.
@@ -1901,7 +2942,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void ClearSelection()
     {
+        foreach (var selected in RootItems.Where(n => n.IsSelected).ToList())
+        {
+            selected.IsSelected = false;
+        }
+
         _selectedNode = null;
+        _selectionAnchorPath = null;
         SelectedName = "None";
         SelectedKind = "None";
         SelectedPath = "None";
@@ -1911,6 +2958,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectedShared = "None";
         HasSelection = false;
         ViewSelectedFileCommand.RaiseCanExecuteChanged();
+        RaiseSelectionSummaryChanged();
     }
 
     private void ResetBrowserState()
@@ -1927,19 +2975,112 @@ public sealed class MainWindowViewModel : ObservableObject
         _settings.Update(settings =>
         {
             settings.CliPath = CliPath;
-            if (_provider.Id == ProviderId.OneDrive)
-            {
-                settings.IsOneDriveAuthenticated = IsAuthenticated;
-            }
-            else
-            {
-                settings.IsAuthenticated = IsAuthenticated;
-            }
+            settings.SetProviderAuthenticated(_provider.Id, IsAuthenticated);
 
             settings.ViewMode = ViewMode.ToString();
             settings.SortKey = SortKey.ToString();
             settings.SortDescending = SortDescending;
+            settings.Theme = _theme;
+            settings.BandwidthLimitKbps = _bandwidthLimitKbps;
+            settings.DefaultSyncFolder = _defaultSyncFolder;
         });
+    }
+
+    public void UpdateConnectionTelemetry()
+    {
+        if (!IsAuthenticated)
+        {
+            _connectionStatus = "Disconnected";
+            _connectionStatusKind = "Disconnected";
+            _connectionStatusDescription = $"Disconnected — {_provider.DisplayName} not authenticated.";
+        }
+        else if (_isWarning && _lastErrorKind == DriveErrorKind.RateLimited)
+        {
+            _connectionStatus = "Rate-Limited";
+            _connectionStatusKind = "RateLimited";
+            _connectionStatusDescription = $"{_provider.DisplayName} rate limited.";
+        }
+        else if ((_isSyncInProgress is not null && _isSyncInProgress()) || IsLoading || IsDeepScanRunning)
+        {
+            _connectionStatus = "Syncing";
+            _connectionStatusKind = "Syncing";
+            _connectionStatusDescription = IsDeepScanRunning
+                ? $"Scanning {_currentPath} metrics..."
+                : IsLoading
+                    ? $"Loading {CurrentPath}..."
+                    : "Active file synchronization in progress.";
+        }
+        else
+        {
+            _connectionStatus = "Online";
+            _connectionStatusKind = "Online";
+            _connectionStatusDescription = $"Connected to {_provider.DisplayName}.";
+        }
+
+        OnPropertyChanged(nameof(ConnectionStatus));
+        OnPropertyChanged(nameof(ConnectionStatusKind));
+        OnPropertyChanged(nameof(ConnectionStatusDescription));
+        OnPropertyChanged(nameof(IsOnline));
+        OnPropertyChanged(nameof(IsSyncing));
+        OnPropertyChanged(nameof(IsDisconnected));
+        OnPropertyChanged(nameof(IsRateLimited));
+    }
+
+    public void UpdateQuotaMetrics()
+    {
+        _quotaTotalBytes = _provider.Id switch
+        {
+            ProviderId.OneDrive => 1024L * 1024 * 1024 * 1024, // 1 TB
+            ProviderId.GoogleDrive => 15L * 1024 * 1024 * 1024, // 15 GB
+            ProviderId.Nextcloud => 100L * 1024 * 1024 * 1024, // 100 GB
+            ProviderId.S3 => 5120L * 1024 * 1024 * 1024, // 5 TB
+            _ => 500L * 1024 * 1024 * 1024 // 500 GB (Proton)
+        };
+
+        // Only the root listing stands in for "account usage" here — there's no real quota API on
+        // the provider seam yet, so this is an approximation. Recomputing it from whatever subfolder
+        // is currently browsed would make the gauge jump to near-zero on every navigation.
+        if (_currentPath == _rootPath)
+        {
+            _quotaUsedBytes = _loadedItems.Where(i => !i.IsFolder && i.Size.HasValue).Sum(i => i.Size!.Value);
+        }
+
+        OnPropertyChanged(nameof(QuotaUsedBytes));
+        OnPropertyChanged(nameof(QuotaTotalBytes));
+        OnPropertyChanged(nameof(QuotaPercent));
+        OnPropertyChanged(nameof(QuotaProgress));
+        OnPropertyChanged(nameof(QuotaDisplay));
+        OnPropertyChanged(nameof(QuotaSummary));
+    }
+
+    public async Task SetThemeAsync(string theme)
+    {
+        ThemePreference = theme;
+        await Task.CompletedTask;
+    }
+
+    public async Task CycleThemeAsync()
+    {
+        var nextTheme = _theme switch
+        {
+            "Default" => "Light",
+            "Light" => "Dark",
+            "Dark" => "Default",
+            _ => "Default"
+        };
+        await SetThemeAsync(nextTheme);
+    }
+
+    public async Task ToggleSettingsAsync()
+    {
+        if (IsSettingsView)
+        {
+            await ShowExplorerAsync();
+        }
+        else
+        {
+            await ShowSettingsAsync();
+        }
     }
 
     private void RaiseCommandStates()
@@ -1958,11 +3099,26 @@ public sealed class MainWindowViewModel : ObservableObject
         ViewSelectedFileCommand.RaiseCanExecuteChanged();
         SwitchToProtonCommand.RaiseCanExecuteChanged();
         SwitchToOneDriveCommand.RaiseCanExecuteChanged();
+        SwitchToGoogleDriveCommand.RaiseCanExecuteChanged();
+        SwitchToNextcloudCommand.RaiseCanExecuteChanged();
+        SwitchToS3Command.RaiseCanExecuteChanged();
     }
 
     private async Task ToggleCommandConsoleAsync()
     {
         IsCommandConsoleVisible = !IsCommandConsoleVisible;
+        await Task.CompletedTask;
+    }
+
+    private async Task ToggleLocalExplorerPanelAsync()
+    {
+        IsLocalExplorerPanelVisible = !IsLocalExplorerPanelVisible;
+        await Task.CompletedTask;
+    }
+
+    private async Task ToggleLogFilterAsync()
+    {
+        ShowOnlyWarningsAndErrors = !ShowOnlyWarningsAndErrors;
         await Task.CompletedTask;
     }
 
@@ -1981,7 +3137,6 @@ public sealed class MainWindowViewModel : ObservableObject
         if (metrics.Buckets.Count <= 1)
         {
             // One kind (or none) means every chip would be a no-op, and "Todos" alone is just noise.
-            FilterSummary = string.Empty;
             return;
         }
 
@@ -1997,10 +3152,6 @@ public sealed class MainWindowViewModel : ObservableObject
                 IsActive = _kindFilter == bucket.Kind,
             });
         }
-
-        FilterSummary = _kindFilter is null
-            ? string.Empty
-            : $"Mostrando {RootItems.Count:n0} de {metrics.FileCount + metrics.FolderCount:n0} elementos.";
     }
 
     private async Task ApplyKindFilterAsync(FileKind? kind)
@@ -2251,6 +3402,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _commandLog.Clear();
         CommandLogText = "No CLI command running.";
         ActiveCommand = "Idle";
+        LastLogLine = null;
         RaiseCommandStates();
         await Task.CompletedTask;
     }
@@ -2274,6 +3426,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             case ActivityKind.Started:
                 Dispatcher.UIThread.Post(() => ActiveCommand = $"[{accountLabel}] {activity.Label}");
+                Dispatcher.UIThread.Post(() => ActiveOperationCount++);
                 QueueCommandLine($"[{accountLabel}] > {activity.Label}");
                 break;
 
@@ -2288,6 +3441,10 @@ public sealed class MainWindowViewModel : ObservableObject
                 // Started. A single "what's active" label can't represent two concurrent
                 // operations correctly — a real per-session indicator is Phase B's job.
                 Dispatcher.UIThread.Post(() => ActiveCommand = "Idle");
+                // Clamped rather than trusting Started/Finished to always balance: a session added
+                // mid-flight (AddBrowsableAccount) only starts observing from that point on, so its
+                // first-ever event could be a Finished with no matching Started counted yet.
+                Dispatcher.UIThread.Post(() => ActiveOperationCount = Math.Max(0, ActiveOperationCount - 1));
                 break;
         }
     }
@@ -2337,7 +3494,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var countBefore = _commandLog.Count;
         _commandLog.AddRange(batch);
-        CommandLogText = _commandLog.Render();
+        LastLogLine = batch[^1];
+        RefreshCommandLogText();
 
         // Only the two activity commands depend on the line count, and only on the empty/non-empty
         // transition. Re-raising all thirteen on every line was pure waste on the UI thread.
@@ -2346,6 +3504,48 @@ public sealed class MainWindowViewModel : ObservableObject
             DownloadActivityCommand.RaiseCanExecuteChanged();
             ClearActivityCommand.RaiseCanExecuteChanged();
         }
+    }
+
+    /// <summary>
+    /// Re-renders <see cref="CommandLogText"/> from the buffer plus whatever the warnings-only
+    /// filter and search box currently ask for — called both when new lines arrive and when either
+    /// filter input changes, so the two stay in sync without keeping a second copy of the text.
+    /// </summary>
+    private void RefreshCommandLogText()
+    {
+        IEnumerable<string> lines = _commandLog.Lines;
+
+        if (_showOnlyWarningsAndErrors)
+        {
+            lines = lines.Where(line => line.Contains("[warn]", StringComparison.Ordinal)
+                || line.Contains("[err]", StringComparison.Ordinal)
+                || line.Contains("[fail]", StringComparison.Ordinal));
+        }
+
+        if (!string.IsNullOrWhiteSpace(_logSearchText))
+        {
+            lines = lines.Where(line => line.Contains(_logSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        CommandLogText = string.Join(Environment.NewLine, lines);
+    }
+
+    /// <summary>
+    /// Adds lines straight to the buffer and re-renders, bypassing QueueCommandLine/FlushCommandLog's
+    /// <c>Dispatcher.UIThread.Post</c>. Internal rather than private for the same reason as
+    /// <see cref="DisplayItems"/>: that Post never completes without a running Avalonia dispatcher,
+    /// so a test that went through the real activity pipeline to get lines into the log would hang.
+    /// </summary>
+    internal void AppendCommandLogLinesForTests(IEnumerable<string> lines)
+    {
+        var list = lines as IReadOnlyList<string> ?? lines.ToList();
+        _commandLog.AddRange(list);
+        if (list.Count > 0)
+        {
+            LastLogLine = list[^1];
+        }
+
+        RefreshCommandLogText();
     }
 
     /// <summary>
@@ -2365,9 +3565,13 @@ public sealed class MainWindowViewModel : ObservableObject
         });
     }
 
-    private static string FormatDriveError(string path, Exception ex)
+    // Records the kind alongside formatting the message so callers like UpdateConnectionTelemetry
+    // can switch on the shared DriveErrorKind taxonomy instead of pattern-matching the human-readable
+    // StatusMessage text it produces (AGENTS.md: "Errors are typed").
+    private string FormatDriveError(string path, Exception ex)
     {
         var kind = (ex as DriveException)?.Kind ?? DriveErrorKind.Unknown;
+        _lastErrorKind = kind;
 
         if (kind == DriveErrorKind.NotAuthenticated)
         {
@@ -2383,6 +3587,16 @@ public sealed class MainWindowViewModel : ObservableObject
 
         return $"Failed to load {path}: {ex.Message}";
     }
+
+    private static string? PlaceholderIdentity(ProviderId id) => id switch
+    {
+        ProviderId.Proton => "user@proton.me",
+        ProviderId.OneDrive => "user@outlook.com",
+        ProviderId.GoogleDrive => "user@gmail.com",
+        ProviderId.Nextcloud => "user@nextcloud.local",
+        ProviderId.S3 => "s3-bucket-primary",
+        _ => null
+    };
 
     private static string GetParentPath(string path)
     {

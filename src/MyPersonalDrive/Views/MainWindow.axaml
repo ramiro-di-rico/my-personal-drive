@@ -2,12 +2,20 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:MyPersonalDrive.ViewModels"
         xmlns:syncVm="clr-namespace:MyPersonalDrive.ViewModels.Sync"
+        xmlns:local="clr-namespace:MyPersonalDrive.ViewModels.Local"
         xmlns:conv="clr-namespace:MyPersonalDrive.Views.Converters"
+        xmlns:providers="clr-namespace:MyPersonalDrive.Services.Providers"
         x:Class="MyPersonalDrive.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="MyPersonalDrive"
         Width="1280"
         Height="800">
+  <Window.KeyBindings>
+    <KeyBinding Gesture="Ctrl+OemComma" Command="{Binding ToggleSettingsCommand}" />
+    <KeyBinding Gesture="Cmd+OemComma" Command="{Binding ToggleSettingsCommand}" />
+    <KeyBinding Gesture="Ctrl+OemTilde" Command="{Binding ToggleCommandConsoleCommand}" />
+    <KeyBinding Gesture="Cmd+OemTilde" Command="{Binding ToggleCommandConsoleCommand}" />
+  </Window.KeyBindings>
   <Window.Styles>
     <!--
       Per-row icon-only actions (copy/rename/download/trash on a folder row, preview/sync-now/
@@ -47,6 +55,14 @@
       <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
     </Style>
 
+    <!-- The local pane's row root is a Button rather than a Grid (docs/INTERFACE_IMPROVEMENT_PLAN.md
+         §2.2's multi-select needed a highlight there too, which it never had before). Button
+         already supplies its own hover/pressed states from the theme, so only .selected needs its
+         own rule here. -->
+    <Style Selector="Button.hoverGroup.selected">
+      <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+    </Style>
+
     <!--
       The listing is hosted in a ListBox for its panel and keyboard focus handling, but the row
       chrome is entirely ours (.hoverGroup / .selected above, driven by the view model's own
@@ -68,6 +84,20 @@
       <Setter Property="Background" Value="Transparent" />
     </Style>
 
+    <!-- Drop-target highlighting (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4): the whole
+         pane while a valid drag is over it anywhere, and additionally the specific folder row
+         when the drop would land inside that folder rather than the pane's current path. Classes
+         toggled imperatively from code-behind's DragOver/DragLeave handlers — this is transient
+         gesture feedback, not state the view model has any reason to know about. -->
+    <Style Selector="ListBox.driveListing.dropTarget">
+      <Setter Property="BorderThickness" Value="2" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+    </Style>
+    <Style Selector="ListBox.driveListing ListBoxItem.dropTarget">
+      <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+    </Style>
+
     <!-- Tile chrome, shared by the icons and gallery modes. -->
     <Style Selector="Border.tile">
       <Setter Property="Background" Value="Transparent" />
@@ -83,14 +113,146 @@
     </Style>
   </Window.Styles>
   <Grid RowDefinitions="Auto,Auto,*">
-    <Border Grid.Row="0" Padding="16" Background="{DynamicResource PanelBackgroundBrush}">
-      <StackPanel Spacing="8">
-        <TextBlock FontSize="20" Text="{Binding BrowserHeaderTitle}" />
-        <TextBlock Opacity="0.8" Text="{Binding BrowserHeaderSubtitle}" />
-      </StackPanel>
+    <!-- Top Header Bar with Telemetry, Quota & Theme Switcher -->
+    <Border Grid.Row="0" Padding="16,12" Background="{DynamicResource PanelBackgroundBrush}" BorderBrush="{DynamicResource CardBackgroundBrush}" BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
+        <!-- Brand & Active Storage Provider Context -->
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <Path Classes="icon" Data="{StaticResource IconCloud}" Width="22" Height="22" Stroke="{DynamicResource AccentBrush}" VerticalAlignment="Center" />
+            <TextBlock Text="DRIVE" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" />
+          </StackPanel>
+
+          <!-- Provider Context Switcher ComboBox -->
+          <ComboBox ItemsSource="{Binding AvailableProviders}"
+                    SelectedItem="{Binding SelectedProvider}"
+                    VerticalAlignment="Center"
+                    CornerRadius="6"
+                    Padding="10,4"
+                    MinWidth="180"
+                    ToolTip.Tip="Seleccionar proveedor de almacenamiento">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="providers:ProviderDescriptor">
+                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" VerticalAlignment="Center" Margin="2,2">
+                  <Path Grid.Column="0" Classes="icon" Data="{StaticResource IconCloud}" Width="16" Height="16" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                    <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding AccountSummary}" VerticalAlignment="Center" FontSize="10" Opacity="0.6" />
+                  </StackPanel>
+                  <Ellipse Grid.Column="2" Width="7" Height="7" VerticalAlignment="Center">
+                    <Ellipse.Styles>
+                      <Style Selector="Ellipse.auth">
+                        <Setter Property="Fill" Value="#28A745" />
+                      </Style>
+                      <Style Selector="Ellipse.unauth">
+                        <Setter Property="Fill" Value="#6C757D" />
+                      </Style>
+                    </Ellipse.Styles>
+                    <Classes.auth>
+                      <Binding Path="IsAuthenticated" />
+                    </Classes.auth>
+                    <Classes.unauth>
+                      <Binding Path="!IsAuthenticated" />
+                    </Classes.unauth>
+                  </Ellipse>
+                </Grid>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </StackPanel>
+
+        <!-- Center / Right Telemetry, Quota & Theme Switcher -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <!-- Connection Status Telemetry Badge -->
+          <Border Background="{DynamicResource CardBackgroundBrush}"
+                  CornerRadius="6"
+                  Padding="8,4"
+                  ToolTip.Tip="{Binding ConnectionStatusDescription}">
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <Ellipse Width="8" Height="8" VerticalAlignment="Center">
+                <Ellipse.Styles>
+                  <Style Selector="Ellipse.online">
+                    <Setter Property="Fill" Value="#28A745" />
+                  </Style>
+                  <Style Selector="Ellipse.syncing">
+                    <Setter Property="Fill" Value="#007ACC" />
+                  </Style>
+                  <Style Selector="Ellipse.ratelimited">
+                    <Setter Property="Fill" Value="#FFC107" />
+                  </Style>
+                  <Style Selector="Ellipse.disconnected">
+                    <Setter Property="Fill" Value="#DC3545" />
+                  </Style>
+                </Ellipse.Styles>
+                <Classes.online>
+                  <Binding Path="IsOnline" />
+                </Classes.online>
+                <Classes.syncing>
+                  <Binding Path="IsSyncing" />
+                </Classes.syncing>
+                <Classes.ratelimited>
+                  <Binding Path="IsRateLimited" />
+                </Classes.ratelimited>
+                <Classes.disconnected>
+                  <Binding Path="IsDisconnected" />
+                </Classes.disconnected>
+              </Ellipse>
+              <TextBlock Text="{Binding ConnectionStatus}" FontSize="12" FontWeight="Medium" VerticalAlignment="Center" />
+            </StackPanel>
+          </Border>
+
+          <!-- Storage Quota Gauge -->
+          <Border Background="{DynamicResource CardBackgroundBrush}"
+                  CornerRadius="6"
+                  Padding="8,4"
+                  ToolTip.Tip="{Binding QuotaDisplay}">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+              <Path Classes="icon" Data="{StaticResource IconDatabase}" Width="14" Height="14" VerticalAlignment="Center" Opacity="0.7" />
+              <StackPanel Spacing="2" VerticalAlignment="Center">
+                <TextBlock Text="{Binding QuotaDisplay}" FontSize="11" FontWeight="Medium" />
+                <ProgressBar Value="{Binding QuotaPercent}" Minimum="0" Maximum="100" Height="4" Width="90" CornerRadius="2" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- Theme Switcher (System / Light / Dark) -->
+          <Border Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6" Padding="2">
+            <StackPanel Orientation="Horizontal" Spacing="2">
+              <Button Command="{Binding SetThemeDefaultCommand}"
+                      Classes.active="{Binding IsSystemTheme}"
+                      ToolTip.Tip="Tema del sistema (predeterminado)"
+                      Padding="6,4">
+                <Path Classes="icon" Data="{StaticResource IconMonitor}" Width="14" Height="14" />
+              </Button>
+              <Button Command="{Binding SetThemeLightCommand}"
+                      Classes.active="{Binding IsLightTheme}"
+                      ToolTip.Tip="Tema claro"
+                      Padding="6,4">
+                <Path Classes="icon" Data="{StaticResource IconSun}" Width="14" Height="14" />
+              </Button>
+              <Button Command="{Binding SetThemeDarkCommand}"
+                      Classes.active="{Binding IsDarkTheme}"
+                      ToolTip.Tip="Tema oscuro"
+                      Padding="6,4">
+                <Path Classes="icon" Data="{StaticResource IconMoon}" Width="14" Height="14" />
+              </Button>
+            </StackPanel>
+          </Border>
+
+          <!-- Global Settings Shortcut Button -->
+          <Button Command="{Binding ToggleSettingsCommand}"
+                  Classes.active="{Binding IsSettingsView}"
+                  ToolTip.Tip="Configuración global (Ctrl+,)">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Path Classes="icon" Data="{StaticResource IconSettings}" Width="14" Height="14" />
+              <TextBlock Text="Configuración" FontSize="12" />
+            </StackPanel>
+          </Button>
+        </StackPanel>
+      </Grid>
     </Border>
 
-    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="16,16,16,0">
+    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="16,12,16,0">
       <StackPanel.Styles>
         <Style Selector="Button.active">
           <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
@@ -117,18 +279,11 @@
           <TextBlock Text="Visor" />
         </StackPanel>
       </Button>
-      <Button Command="{Binding ShowSettingsCommand}"
-              Classes.active="{Binding IsSettingsView}">
-        <StackPanel Orientation="Horizontal" Spacing="8">
-          <Path Classes="icon" Data="{StaticResource IconSettings}" />
-          <TextBlock Text="Configuración" />
-        </StackPanel>
-      </Button>
     </StackPanel>
 
     <!-- Explorer view: breadcrumbs, folder browser, status panel and CLI activity log. -->
     <Grid Grid.Row="2" RowDefinitions="Auto,*,Auto" IsVisible="{Binding !IsSettingsView}">
-      <Grid Grid.Row="0" Margin="16" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+      <Grid Grid.Row="0" Margin="16" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
         <Grid.Styles>
           <Style Selector="Button.viewMode.active">
             <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
@@ -136,6 +291,13 @@
           </Style>
         </Grid.Styles>
         <Border Grid.Column="0" Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
+          <StackPanel Spacing="4">
+            <!-- Which pane this is, for a first-time user: the provider dropdown up in the header
+                 is easy to miss as "this is what the left pane shows." -->
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Path Classes="icon" Data="{StaticResource IconCloud}" Width="12" Height="12" Opacity="0.7" />
+              <TextBlock Text="{Binding ActiveProviderDisplayName}" FontSize="11" FontWeight="Bold" Opacity="0.7" />
+            </StackPanel>
           <ScrollViewer x:Name="BreadcrumbScroll"
                         HorizontalScrollBarVisibility="Auto"
                         VerticalScrollBarVisibility="Disabled">
@@ -155,6 +317,7 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
           </ScrollViewer>
+          </StackPanel>
         </Border>
 
         <Button Grid.Column="1" ToolTip.Tip="Go back" Command="{Binding BackCommand}">
@@ -190,10 +353,21 @@
                 Command="{Binding ShowGalleryViewCommand}">
           <Path Classes="icon" Data="{StaticResource IconViewGallery}" />
         </Button>
+
+        <!-- Persisted (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 3): the state the user leaves it in
+             is also next launch's default. The Status sidebar has the equivalent checkbox under
+             "User Settings" instead of a header button. -->
+        <Button Grid.Column="7"
+                Classes="viewMode"
+                Classes.active="{Binding IsLocalExplorerPanelVisible}"
+                ToolTip.Tip="Mostrar/ocultar el explorador local"
+                Command="{Binding ToggleLocalExplorerPanelCommand}">
+          <Path Classes="icon" Data="{StaticResource IconPanelRight}" />
+        </Button>
       </Grid>
 
-      <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
-        <Grid Grid.Column="0" Margin="16,0,16,16" RowDefinitions="Auto,Auto,*">
+      <Grid x:Name="ExplorerColumnsGrid" Grid.Row="1" ColumnDefinitions="*,Auto,*,Auto">
+        <Grid Grid.Column="0" Margin="16,0,16,16" RowDefinitions="Auto,Auto,Auto,*">
           <!-- One sort control for all three modes rather than column headers in list mode plus a
                separate control for the tiles: the state is the same either way, and two ways to set
                it means two places to keep in step (docs/PLAN-BROWSER-VIEWS.md V4). Sorting is done
@@ -211,6 +385,13 @@
                 <Setter Property="FontWeight" Value="Bold" />
               </Style>
             </StackPanel.Styles>
+            <!-- Quick filter over the folder's names (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1's
+                 "Global Quick Search") — narrows what's already loaded, no CLI call, combines with
+                 the kind chips below rather than replacing them. -->
+            <TextBox Width="200"
+                     PlaceholderText="Buscar en esta carpeta…"
+                     Text="{Binding SearchText, Mode=TwoWay}"
+                     Margin="0,0,8,0" />
             <TextBlock Text="Ordenar por:" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
             <Button Classes="sortKey" Classes.active="{Binding IsSortedByName}" Command="{Binding SortByNameCommand}">
               <StackPanel Orientation="Horizontal" Spacing="4">
@@ -245,11 +426,27 @@
                        IsVisible="{Binding FilterSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           </StackPanel>
 
+          <!-- Batch action bar (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) — only worth showing once
+               Ctrl/Shift+Click or Ctrl+A has actually marked more than one row; a single selection
+               already has its own row-level actions (inline buttons, context menu). -->
+          <Border Grid.Row="1"
+                  Padding="10,8"
+                  Margin="0,0,0,8"
+                  CornerRadius="6"
+                  Background="{DynamicResource AccentMutedBrush}"
+                  IsVisible="{Binding HasMultipleSelected}">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <TextBlock VerticalAlignment="Center" FontWeight="Bold" Text="{Binding SelectionSummaryText}" />
+              <Button Content="Descargar seleccionados" Command="{Binding DownloadSelectedCommand}" />
+              <Button Content="Mover a la papelera" Command="{Binding TrashSelectedCommand}" />
+            </StackPanel>
+          </Border>
+
           <!-- Filter by type. The chips come from the metrics histogram, so they only ever offer
                kinds the folder actually contains (docs/PLAN-BROWSER-VIEWS.md M6). Filtering is a
                view of what was already loaded - it makes no CLI call, and it does not change the
                metrics panel, which keeps describing the whole folder. -->
-          <ItemsControl Grid.Row="1" ItemsSource="{Binding KindFilters}" Margin="0,0,0,8">
+          <ItemsControl Grid.Row="2" ItemsSource="{Binding KindFilters}" Margin="0,0,0,8">
             <ItemsControl.Styles>
               <Style Selector="Button.kindChip">
                 <Setter Property="Padding" Value="8,3" />
@@ -278,19 +475,61 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
 
-          <Grid Grid.Row="2">
+          <Grid Grid.Row="3">
+          <!-- Unauthenticated / Expired Session Fallback Card -->
+          <Border IsVisible="{Binding !IsAuthenticated}"
+                  Background="{DynamicResource CardBackgroundBrush}"
+                  CornerRadius="8"
+                  Padding="28"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  MaxWidth="480">
+            <StackPanel Spacing="14" HorizontalAlignment="Center">
+              <Path Classes="icon" Data="{StaticResource IconKey}" Width="36" Height="36" Stroke="{DynamicResource AccentBrush}" HorizontalAlignment="Center" />
+              <TextBlock Text="Autenticación Requerida" FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" />
+              <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" TextAlignment="Center" Opacity="0.8" />
+              <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center" Margin="0,8,0,0">
+                <Button Classes="primary" Content="Iniciar Sesión" Command="{Binding AuthenticateCommand}" Padding="16,8" />
+                <Button Content="Configuración" Command="{Binding ToggleSettingsCommand}" Padding="16,8" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
           <!-- List mode: the original row, one per line, with the per-row actions inline. -->
           <ListBox x:Name="ListModeListing"
                    Classes="driveListing"
                    ItemsSource="{Binding RootItems}"
                    IsVisible="{Binding IsListView}"
-                   KeyDown="OnListingKeyDown">
+                   KeyDown="OnListingKeyDown"
+                   DragDrop.AllowDrop="True"
+                   DragDrop.DragOver="OnCloudListingDragOver"
+                   DragDrop.DragLeave="OnCloudListingDragLeave"
+                   DragDrop.Drop="OnCloudListingDrop">
             <ListBox.ItemTemplate>
               <DataTemplate x:DataType="vm:DriveNodeViewModel">
                 <Grid Classes="hoverGroup"
                       Classes.selected="{Binding IsSelected}"
                       ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto"
                       Margin="0,0,0,6">
+                  <Grid.ContextMenu>
+                    <ContextMenu>
+                      <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
+                      <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
+                      <MenuItem Header="Copiar enlace para compartir"
+                                Command="{Binding ShareLinkCommand}"
+                                IsEnabled="{Binding CanShareLink}"
+                                ToolTip.Tip="{Binding ShareLinkTooltip}"
+                                ToolTip.ShowOnDisabled="True" />
+                      <Separator IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
+                      <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
+                      <MenuItem Header="Pausar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
+                      <MenuItem Header="Reanudar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
+                      <Separator />
+                      <MenuItem Header="Propiedades" Command="{Binding PropertiesCommand}" />
+                    </ContextMenu>
+                  </Grid.ContextMenu>
                   <Button Grid.Column="0"
                           Command="{Binding RowCommand}"
                           ToolTip.Tip="Select item or open folder"
@@ -301,6 +540,10 @@
                       <Path Classes="icon" Data="{StaticResource IconFolder}" IsVisible="{Binding IsFolder}" />
                       <Path Classes="icon" Data="{StaticResource IconFile}" IsVisible="{Binding IsFile}" />
                       <TextBlock Text="{Binding DisplayName}" />
+                      <Path Classes="icon" Data="{StaticResource IconRefresh}" Width="12" Height="12" Opacity="0.7"
+                            IsVisible="{Binding IsSyncPairActive}" ToolTip.Tip="Par de sincronización activo" />
+                      <Path Classes="icon" Data="{StaticResource IconPause}" Width="12" Height="12" Opacity="0.7"
+                            IsVisible="{Binding IsSyncPairPaused}" ToolTip.Tip="Par de sincronización pausado" />
                     </StackPanel>
                   </Button>
 
@@ -352,8 +595,7 @@
                           Classes="rowAction"
                           ToolTip.Tip="Move to trash"
                           Margin="8,0,0,0"
-                          Command="{Binding TrashCommand}"
-                          IsVisible="{Binding IsFile}">
+                          Command="{Binding TrashCommand}">
                     <Path Classes="icon" Data="{StaticResource IconTrash}" />
                   </Button>
                 </Grid>
@@ -385,7 +627,22 @@
                       <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
                       <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
                       <MenuItem Header="Descargar" Command="{Binding DownloadCommand}" IsVisible="{Binding IsFile}" />
-                      <MenuItem Header="Mover a la papelera" Command="{Binding TrashCommand}" IsVisible="{Binding IsFile}" />
+                      <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
+                      <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
+                      <MenuItem Header="Copiar enlace para compartir"
+                                Command="{Binding ShareLinkCommand}"
+                                IsEnabled="{Binding CanShareLink}"
+                                ToolTip.Tip="{Binding ShareLinkTooltip}"
+                                ToolTip.ShowOnDisabled="True" />
+                      <Separator IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
+                      <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
+                      <MenuItem Header="Pausar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
+                      <MenuItem Header="Reanudar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
+                      <Separator />
+                      <MenuItem Header="Mover a la papelera" Command="{Binding TrashCommand}" />
+                      <MenuItem Header="Propiedades" Command="{Binding PropertiesCommand}" />
                     </ContextMenu>
                   </Border.ContextMenu>
                   <Button Command="{Binding RowCommand}"
@@ -434,7 +691,22 @@
                       <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
                       <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
                       <MenuItem Header="Descargar" Command="{Binding DownloadCommand}" IsVisible="{Binding IsFile}" />
-                      <MenuItem Header="Mover a la papelera" Command="{Binding TrashCommand}" IsVisible="{Binding IsFile}" />
+                      <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
+                      <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
+                      <MenuItem Header="Copiar enlace para compartir"
+                                Command="{Binding ShareLinkCommand}"
+                                IsEnabled="{Binding CanShareLink}"
+                                ToolTip.Tip="{Binding ShareLinkTooltip}"
+                                ToolTip.ShowOnDisabled="True" />
+                      <Separator IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
+                      <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
+                      <MenuItem Header="Pausar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
+                      <MenuItem Header="Reanudar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
+                      <Separator />
+                      <MenuItem Header="Mover a la papelera" Command="{Binding TrashCommand}" />
+                      <MenuItem Header="Propiedades" Command="{Binding PropertiesCommand}" />
                     </ContextMenu>
                   </Border.ContextMenu>
                   <Button Command="{Binding RowCommand}"
@@ -479,15 +751,280 @@
             </ItemsRepeater.ItemTemplate>
           </ItemsRepeater>
           </ScrollViewer>
+
+          <!-- Drop-target badge (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4) — shown only
+               while a local item is being dragged over this pane. Last child of the overlapping
+               Grid.Row="2" (List/Icons/Gallery/auth-fallback all share this cell), so it always
+               paints on top regardless of which view mode is active. Text/visibility toggled from
+               code-behind's drag handlers, not bound to VM state — purely transient UI feedback
+               for a gesture the VM never sees. -->
+          <Border x:Name="CloudDropOverlay"
+                  IsVisible="False"
+                  IsHitTestVisible="False"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Top"
+                  Margin="0,12,0,0"
+                  Padding="12,8"
+                  CornerRadius="6"
+                  BorderThickness="1"
+                  BorderBrush="{DynamicResource AccentBrush}"
+                  Background="{DynamicResource AccentMutedBrush}">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Path Classes="icon" Data="{StaticResource IconUpload}" Width="14" Height="14" Stroke="{DynamicResource AccentBrush}" />
+              <TextBlock x:Name="CloudDropOverlayText" Foreground="{DynamicResource AccentBrush}" FontWeight="Bold" />
+            </StackPanel>
+          </Border>
           </Grid>
         </Grid>
 
-        <Border Grid.Column="1" Margin="0,0,16,16" Padding="16" Width="340" Background="{DynamicResource CardBackgroundBrush}">
+        <!-- Adjustable split between the cloud and local panes (docs/INTERFACE_IMPROVEMENT_PLAN.md
+             Task 3). Drag resizes both star-sized columns automatically; double-click resets them
+             to 50/50 via ExplorerSplitter_DoubleTapped (Avalonia's GridSplitter has no built-in
+             reset gesture). -->
+        <GridSplitter x:Name="ExplorerSplitter"
+                      Grid.Column="1"
+                      Width="6"
+                      Margin="4,16"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      Background="{DynamicResource CardBackgroundBrush}"
+                      Cursor="SizeWestEast"
+                      ResizeDirection="Columns"
+                      DoubleTapped="ExplorerSplitter_DoubleTapped"
+                      IsVisible="{Binding IsLocalExplorerPanelVisible}"
+                      ToolTip.Tip="Drag to resize · double-click to reset" />
+
+        <!-- Local pane: read-only browsing only (navigate, breadcrumb, home, hidden-files toggle,
+             free space). File operations and drag-and-drop transfer are separate plan tasks.
+             Hidden/shown via ToggleLocalExplorerPanelCommand; ExplorerColumnsGrid's own Column[2]
+             width is collapsed to 0 alongside this in MainWindow.axaml.cs, since a star-sized
+             column doesn't shrink on its own just because its content is invisible. IsVisible sits
+             on this outer Grid (still bound to the window's own DataContext) rather than the inner
+             one, which switches DataContext to LocalExplorer and so can't see this VM's property. -->
+        <Grid Grid.Column="2" Margin="0,0,16,16" IsVisible="{Binding IsLocalExplorerPanelVisible}">
+        <Grid RowDefinitions="Auto,*" DataContext="{Binding LocalExplorer}">
+          <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,8">
+            <Grid.Styles>
+              <Style Selector="Button.viewMode.active">
+                <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+              </Style>
+            </Grid.Styles>
+            <Border Grid.Column="0" Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
+              <StackPanel Spacing="4">
+                <!-- Which pane this is, for a first-time user — mirrors the provider label on the
+                     cloud pane's own breadcrumb card. -->
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <Path Classes="icon" Data="{StaticResource IconHome}" Width="12" Height="12" Opacity="0.7" />
+                  <TextBlock Text="Este equipo (local)" FontSize="11" FontWeight="Bold" Opacity="0.7" />
+                </StackPanel>
+              <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <StackPanel Orientation="Horizontal" Spacing="8" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:BreadcrumbSegmentViewModel">
+                      <Button Command="{Binding OpenCommand}"
+                              Content="{Binding Label}"
+                              ToolTip.Tip="{Binding Label}"
+                              IsEnabled="{Binding CanNavigate}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+              <!-- Quick filter over this folder's names — the local pane's counterpart to the
+                   cloud pane's own search box (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1). -->
+              <TextBox Width="200"
+                       HorizontalAlignment="Left"
+                       PlaceholderText="Buscar en esta carpeta…"
+                       Text="{Binding SearchText, Mode=TwoWay}" />
+              </StackPanel>
+            </Border>
+
+            <Button Grid.Column="1" ToolTip.Tip="Go to home folder" Command="{Binding GoHomeCommand}">
+              <Path Classes="icon" Data="{StaticResource IconHome}" />
+            </Button>
+            <Button Grid.Column="2"
+                    Classes="viewMode"
+                    Classes.active="{Binding ShowHiddenFiles}"
+                    ToolTip.Tip="Toggle hidden files"
+                    Command="{Binding ToggleHiddenFilesCommand}">
+              <Path Classes="icon" Data="{StaticResource IconEyeOff}" />
+            </Button>
+            <Button Grid.Column="3" ToolTip.Tip="Refresh" Command="{Binding RefreshCommand}">
+              <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+            </Button>
+            <TextBlock Grid.Column="4"
+                       VerticalAlignment="Center"
+                       Opacity="0.7"
+                       FontSize="12"
+                       Text="{Binding FreeSpaceText, StringFormat='{}{0} free'}" />
+          </Grid>
+
+          <Grid Grid.Row="1" RowDefinitions="Auto,Auto,*">
+            <TextBlock Grid.Row="0"
+                       Margin="0,0,0,8"
+                       TextWrapping="Wrap"
+                       Opacity="0.8"
+                       Text="{Binding StatusMessage}"
+                       IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+            <!-- Batch action bar — the local pane's counterpart to the cloud pane's own
+                 (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2). -->
+            <Border Grid.Row="1"
+                    Padding="10,8"
+                    Margin="0,0,0,8"
+                    CornerRadius="6"
+                    Background="{DynamicResource AccentMutedBrush}"
+                    IsVisible="{Binding HasMultipleSelected}">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <TextBlock VerticalAlignment="Center" FontWeight="Bold" Text="{Binding SelectionSummaryText}" />
+                <Button Content="Eliminar seleccionados" Command="{Binding DeleteSelectedCommand}" />
+              </StackPanel>
+            </Border>
+
+            <ListBox x:Name="LocalListing"
+                     Grid.Row="2"
+                     Classes="driveListing"
+                     ItemsSource="{Binding Items}"
+                     KeyDown="OnLocalListingKeyDown"
+                     DragDrop.AllowDrop="True"
+                     DragDrop.DragOver="OnLocalListingDragOver"
+                     DragDrop.DragLeave="OnLocalListingDragLeave"
+                     DragDrop.Drop="OnLocalListingDrop">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="local:LocalNodeViewModel">
+                  <Button Classes="hoverGroup"
+                          Classes.selected="{Binding IsSelected}"
+                          Command="{Binding RowCommand}"
+                          HorizontalContentAlignment="Stretch">
+                    <Button.ContextMenu>
+                      <ContextMenu>
+                        <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
+                        <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
+                        <Separator IsVisible="{Binding IsFolder}" />
+                        <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
+                        <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
+                        <MenuItem Header="Pausar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
+                        <MenuItem Header="Reanudar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
+                        <Separator />
+                        <MenuItem Header="Eliminar" Command="{Binding DeleteCommand}" />
+                        <MenuItem Header="Propiedades" Command="{Binding PropertiesCommand}" />
+                      </ContextMenu>
+                    </Button.ContextMenu>
+                    <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
+                      <Path Grid.Column="0"
+                            Classes="icon"
+                            Width="18"
+                            Height="18"
+                            Data="{Binding FileKind, Converter={x:Static conv:FileKindIconConverter.Instance}}" />
+                      <TextBlock Grid.Column="1"
+                                 VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis"
+                                 Text="{Binding DisplayName}" />
+                      <Path Grid.Column="2"
+                            Classes="icon"
+                            Width="12"
+                            Height="12"
+                            Opacity="0.7"
+                            VerticalAlignment="Center"
+                            Data="{StaticResource IconRefresh}"
+                            IsVisible="{Binding IsSyncPairActive}"
+                            ToolTip.Tip="Par de sincronización activo" />
+                      <Path Grid.Column="2"
+                            Classes="icon"
+                            Width="12"
+                            Height="12"
+                            Opacity="0.7"
+                            VerticalAlignment="Center"
+                            Data="{StaticResource IconPause}"
+                            IsVisible="{Binding IsSyncPairPaused}"
+                            ToolTip.Tip="Par de sincronización pausado" />
+                      <TextBlock Grid.Column="3"
+                                 VerticalAlignment="Center"
+                                 FontSize="12"
+                                 Opacity="0.8"
+                                 Text="{Binding SizeText}" />
+                      <TextBlock Grid.Column="4"
+                                 VerticalAlignment="Center"
+                                 FontSize="12"
+                                 Opacity="0.7"
+                                 Text="{Binding ModifiedText}" />
+                    </Grid>
+                  </Button>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- Drop-target badge — mirrors CloudDropOverlay for this pane (docs/
+                 INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4). -->
+            <Border x:Name="LocalDropOverlay"
+                    Grid.Row="2"
+                    IsVisible="False"
+                    IsHitTestVisible="False"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Margin="0,12,0,0"
+                    Padding="12,8"
+                    CornerRadius="6"
+                    BorderThickness="1"
+                    BorderBrush="{DynamicResource AccentBrush}"
+                    Background="{DynamicResource AccentMutedBrush}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Path Classes="icon" Data="{StaticResource IconDownload}" Width="14" Height="14" Stroke="{DynamicResource AccentBrush}" />
+                <TextBlock x:Name="LocalDropOverlayText" Foreground="{DynamicResource AccentBrush}" FontWeight="Bold" />
+              </StackPanel>
+            </Border>
+          </Grid>
+        </Grid>
+        </Grid>
+
+        <Border Grid.Column="3" Margin="0,0,16,16" Padding="16" Width="340" Background="{DynamicResource CardBackgroundBrush}" IsVisible="{Binding IsStatusPanelVisible}">
           <!-- Scrollable since the metrics section landed: status + selection + metrics is taller
                than the panel on a short window, and a clipped histogram is worse than a scrollbar. -->
           <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
           <StackPanel Spacing="10">
             <TextBlock FontSize="18" Text="Status" />
+
+            <!-- Drag-and-drop transfer queue (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5). Only
+                 status text and a Cancel button — no progress bar/ETA, since nothing in the CLI
+                 wrapper reports byte-level progress to build one from (see
+                 TransferQueueViewModel's own doc comment). -->
+            <StackPanel Spacing="6" IsVisible="{Binding TransferQueue.HasItems}">
+              <TextBlock FontWeight="Bold" Text="{Binding TransferQueue.Summary}" />
+              <ItemsControl ItemsSource="{Binding TransferQueue.Items}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:TransferItemViewModel">
+                    <Border Padding="8" Margin="0,0,0,4" CornerRadius="4" Background="{DynamicResource PanelBackgroundBrush}">
+                      <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" RowSpacing="2">
+                        <TextBlock Grid.Row="0"
+                                   Grid.Column="0"
+                                   FontSize="12"
+                                   TextTrimming="CharacterEllipsis"
+                                   Text="{Binding SourceLabel}" />
+                        <Button Grid.Row="0"
+                                Grid.Column="1"
+                                Padding="4"
+                                Command="{Binding CancelCommand}"
+                                ToolTip.Tip="Cancelar">
+                          <Path Classes="icon" Width="12" Height="12" Data="{StaticResource IconClear}" />
+                        </Button>
+                        <TextBlock Grid.Row="1"
+                                   Grid.Column="0"
+                                   Grid.ColumnSpan="2"
+                                   FontSize="11"
+                                   Opacity="0.7"
+                                   Text="{Binding StatusText}" />
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+
             <Border Name="StatusBorder"
                     Padding="8"
                     CornerRadius="4"
@@ -523,7 +1060,15 @@
                        Text="Select a file or folder to see its details."
                        IsVisible="{Binding !HasSelection}" />
 
-            <StackPanel Spacing="10" IsVisible="{Binding HasSelection}">
+            <!-- Multi-select summary (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) replaces the
+                 single-item details below once more than one row is marked — "the size" of three
+                 different files isn't one field. -->
+            <StackPanel Spacing="10" IsVisible="{Binding HasMultipleSelected}">
+              <TextBlock FontWeight="Bold" Text="{Binding SelectionSummaryText}" />
+              <TextBlock Opacity="0.7" TextWrapping="Wrap" Text="Usá la barra de acciones sobre la lista para descargar o mover a la papelera." />
+            </StackPanel>
+
+            <StackPanel Spacing="10" IsVisible="{Binding IsSingleSelected}">
               <TextBlock FontWeight="Bold" Text="Selected item" />
               <TextBlock Text="{Binding SelectedName}" />
               <TextBlock FontWeight="Bold" Text="Type" />
@@ -652,25 +1197,67 @@
             <TextBlock VerticalAlignment="Center" Text="Loading..." />
           </StackPanel>
 
-          <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
+          <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+            <Grid.Styles>
+              <Style Selector="Button.viewMode.active">
+                <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+              </Style>
+            </Grid.Styles>
             <TextBlock FontSize="16" FontWeight="Bold" Text="CLI activity" />
             <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding ActiveCommand}" />
-            <Button Grid.Column="2"
+            <TextBox Grid.Column="2"
+                      Width="160"
+                      PlaceholderText="Buscar en el log..."
+                      Text="{Binding LogSearchText, Mode=TwoWay}" />
+            <Button Grid.Column="3"
+                    Classes="viewMode"
+                    Classes.active="{Binding ShowOnlyWarningsAndErrors}"
+                    Command="{Binding ToggleLogFilterCommand}"
+                    ToolTip.Tip="Mostrar solo advertencias y errores">
+              <Path Classes="icon" Data="{StaticResource IconWarning}" />
+            </Button>
+            <Button Grid.Column="4"
                     Command="{Binding ToggleCommandConsoleCommand}"
                     ToolTip.Tip="{Binding CommandConsoleToggleLabel}">
               <TextBlock Text="{Binding CommandConsoleToggleGlyph}" />
             </Button>
-            <Button Grid.Column="3"
+            <Button Grid.Column="5"
                     Command="{Binding DownloadActivityCommand}"
                     ToolTip.Tip="Download activity log">
               <Path Classes="icon" Data="{StaticResource IconSave}" />
             </Button>
-            <Button Grid.Column="4"
+            <Button Grid.Column="6"
                     Command="{Binding ClearActivityCommand}"
                     ToolTip.Tip="Clear activity log">
               <Path Classes="icon" Data="{StaticResource IconClear}" />
             </Button>
           </Grid>
+
+          <!-- Persistent floating status line (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 4): a real
+               in-flight operation count and the last log line, visible only while the console body
+               below is collapsed. No transfer-rate figure — nothing in the activity feed reports
+               bytes/sec today, and inventing one would be exactly what AGENTS.md's "Never invent
+               CLI output shapes" warns against. -->
+          <StackPanel Orientation="Horizontal"
+                      Spacing="8"
+                      IsVisible="{Binding !IsCommandConsoleVisible}">
+            <TextBlock VerticalAlignment="Center"
+                       FontSize="12"
+                       Opacity="0.8"
+                       Text="{Binding ActiveOperationCount, StringFormat='{}{0} operación(es) activa(s)'}" />
+            <TextBlock VerticalAlignment="Center"
+                       FontSize="12"
+                       Opacity="0.5"
+                       Text="·" />
+            <TextBlock VerticalAlignment="Center"
+                       FontSize="12"
+                       Opacity="0.7"
+                       TextTrimming="CharacterEllipsis"
+                       Text="{Binding LastLogLine}"
+                       IsVisible="{Binding LastLogLine, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+
           <Border MaxHeight="{Binding CommandConsoleMaxHeight}"
                   Opacity="{Binding CommandConsoleOpacity}"
                   IsHitTestVisible="{Binding CommandConsoleHitTestVisible}"
@@ -706,12 +1293,35 @@
               Background="{DynamicResource PanelBackgroundBrush}"
               IsVisible="{Binding IsViewerVisible}">
         <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="8">
-          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
             <StackPanel Spacing="2">
               <TextBlock FontSize="18" FontWeight="Bold" Text="{Binding ViewerTitle}" TextTrimming="CharacterEllipsis" />
               <TextBlock FontSize="12" Opacity="0.7" Text="{Binding ViewerPath}" TextTrimming="CharacterEllipsis" />
             </StackPanel>
-            <Button Grid.Column="1"
+
+            <!-- Only images and PDF pages can be too big for the panel — the text viewer sizes by
+                 font, not by a decoded bitmap, so it has nothing for this to scale. -->
+            <StackPanel Grid.Column="1"
+                        Orientation="Horizontal"
+                        Spacing="8"
+                        VerticalAlignment="Center"
+                        IsVisible="{Binding HasViewerZoomableContent}">
+              <TextBlock VerticalAlignment="Center" FontSize="12" Opacity="0.7" Text="Zoom:" />
+              <Slider Width="140"
+                      VerticalAlignment="Center"
+                      Minimum="0.25"
+                      Maximum="1.5"
+                      SmallChange="0.05"
+                      LargeChange="0.25"
+                      Value="{Binding ViewerZoom, Mode=TwoWay}" />
+              <TextBlock VerticalAlignment="Center"
+                         FontSize="12"
+                         Opacity="0.7"
+                         Width="36"
+                         Text="{Binding ViewerZoom, StringFormat={}{0:P0}}" />
+            </StackPanel>
+
+            <Button Grid.Column="2"
                     VerticalAlignment="Top"
                     Command="{Binding CloseViewerCommand}"
                     ToolTip.Tip="Cerrar el visor">
@@ -750,36 +1360,125 @@
 
           <!-- The image counterpart: Stretch="Uniform" so a huge photo fits the panel instead of
                overflowing it, and the ScrollViewer stays available for the rare image bigger than
-               the panel even at that scale (a very tall panorama, say). -->
+               the panel even at that scale (a very tall panorama, say). LayoutTransformControl
+               applies ViewerZoom by re-measuring, not just re-painting — a bare RenderTransform
+               would scale the pixels but leave the ScrollViewer's extent (and so how much you have
+               to scroll) exactly as big as the untransformed content. -->
           <Border Grid.Row="3"
                   Padding="12"
                   CornerRadius="4"
                   Background="{DynamicResource ConsoleBackgroundBrush}"
                   IsVisible="{Binding HasViewerImage}">
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-              <Image Source="{Binding ViewerImageBytes, Converter={x:Static conv:BytesToBitmapConverter.Instance}}"
-                     Stretch="Uniform"
-                     HorizontalAlignment="Center"
-                     VerticalAlignment="Center" />
+              <LayoutTransformControl LayoutTransform="{Binding ViewerZoom, Converter={x:Static conv:DoubleToScaleTransformConverter.Instance}}">
+                <Image Source="{Binding ViewerImageBytes, Converter={x:Static conv:BytesToBitmapConverter.Instance}}"
+                       Stretch="Uniform"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center" />
+              </LayoutTransformControl>
+            </ScrollViewer>
+          </Border>
+
+          <!-- The PDF counterpart: every rendered page stacked in one vertical scroller — the PDFs
+               this app's own users actually preview are short (a monthly invoice, a couple of
+               pages), so a pager control would be more UI than the common case needs.
+               ViewerPdfPages is converted to a list of decoded Bitmaps up front
+               (PdfPagesToBitmapsConverter) so the item template's x:DataType can be the well-known
+               Bitmap type and stay on compiled bindings — a template over a bare byte[] item has no
+               x:DataType to declare, which would otherwise force reflection bindings and trip the
+               AOT/trim analyzer (see PdfPagesToBitmapsConverter's own doc comment). -->
+          <Border Grid.Row="3"
+                  Padding="12"
+                  CornerRadius="4"
+                  Background="{DynamicResource ConsoleBackgroundBrush}"
+                  IsVisible="{Binding HasViewerPdf}">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+              <LayoutTransformControl LayoutTransform="{Binding ViewerZoom, Converter={x:Static conv:DoubleToScaleTransformConverter.Instance}}">
+                <ItemsControl ItemsSource="{Binding ViewerPdfPages, Converter={x:Static conv:PdfPagesToBitmapsConverter.Instance}}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <StackPanel Orientation="Vertical" Spacing="12" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="Bitmap">
+                      <Image Source="{Binding}"
+                             Stretch="Uniform"
+                             HorizontalAlignment="Center" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </LayoutTransformControl>
             </ScrollViewer>
           </Border>
         </Grid>
       </Border>
     </Grid>
 
-    <!-- Settings view: CLI connection and local directory sync, in one place instead of stacked dialogs. -->
+    <!-- Settings view: CLI connection, preferences and local directory sync, in one place instead of stacked dialogs. -->
     <ScrollViewer Grid.Row="2" IsVisible="{Binding IsSettingsView}">
       <StackPanel Margin="16" Spacing="24">
+        <!-- General Preferences: Theme, Bandwidth throttle, Default sync folder -->
+        <StackPanel Spacing="10">
+          <TextBlock FontSize="18" FontWeight="Bold" Text="Preferencias Generales" />
+          <Border Padding="16" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
+            <StackPanel Spacing="14">
+              <!-- Theme Selection -->
+              <StackPanel Spacing="6">
+                <TextBlock FontWeight="SemiBold" Text="Tema visual del espacio de trabajo:" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Classes.primary="{Binding IsSystemTheme}" Content="Predeterminado del sistema" Command="{Binding SetThemeDefaultCommand}" />
+                  <Button Classes.primary="{Binding IsLightTheme}" Content="Claro" Command="{Binding SetThemeLightCommand}" />
+                  <Button Classes.primary="{Binding IsDarkTheme}" Content="Oscuro" Command="{Binding SetThemeDarkCommand}" />
+                </StackPanel>
+              </StackPanel>
+
+              <!-- Default Sync Folder -->
+              <StackPanel Spacing="6">
+                <TextBlock FontWeight="SemiBold" Text="Carpeta local de sincronización predeterminada:" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBox Width="420"
+                           PlaceholderText="Carpeta local predeterminada para descargas y sincronización"
+                           Text="{Binding DefaultSyncFolder, Mode=TwoWay}" />
+                  <Button ToolTip.Tip="Seleccionar carpeta de sincronización predeterminada" Click="BrowseDefaultSyncFolder">
+                    <Path Classes="icon" Data="{StaticResource IconFolder}" />
+                  </Button>
+                </StackPanel>
+              </StackPanel>
+
+              <!-- Bandwidth Throttling -->
+              <StackPanel Spacing="6">
+                <TextBlock FontWeight="SemiBold" Text="Límite de ancho de banda de red (KB/s, 0 = sin límite):" />
+                <NumericUpDown Width="200"
+                               HorizontalAlignment="Left"
+                               Minimum="0"
+                               Maximum="1000000"
+                               Increment="100"
+                               FormatString="{}{0:N0} KB/s"
+                               Value="{Binding BandwidthLimitKbps, Mode=TwoWay}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <!-- User Settings: app-level UI preferences that aren't tied to any provider or CLI. -->
+        <StackPanel Spacing="10">
+          <TextBlock FontSize="18" FontWeight="Bold" Text="User Settings" />
+          <Border Padding="16" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
+            <CheckBox Content="Status Visible" IsChecked="{Binding IsStatusPanelVisible, Mode=TwoWay}" />
+          </Border>
+        </StackPanel>
+
         <StackPanel Spacing="10">
           <TextBlock FontSize="18" FontWeight="Bold" Text="Conexión" />
 
-          <!-- Provider picker: which backend is active. Switching writes AppSettings.ActiveProvider
-               and asks for a restart rather than hot-swapping — every downstream service (cache,
-               sync engine, this window's own view model) was built once, at startup, against
-               whichever provider was active then (docs/PLAN-CLOUD-PROVIDERS.md §2.7). -->
+          <!-- Provider picker: which backend is active. -->
           <StackPanel Orientation="Horizontal" Spacing="8">
             <Button Classes.primary="{Binding IsProtonActive}" Content="Proton Drive" Command="{Binding SwitchToProtonCommand}" />
             <Button Classes.primary="{Binding IsOneDriveActive}" Content="OneDrive" Command="{Binding SwitchToOneDriveCommand}" />
+            <Button Classes.primary="{Binding IsGoogleDriveActive}" Content="Google Drive" Command="{Binding SwitchToGoogleDriveCommand}" />
+            <Button Classes.primary="{Binding IsNextcloudActive}" Content="Nextcloud" Command="{Binding SwitchToNextcloudCommand}" />
+            <Button Classes.primary="{Binding IsS3Active}" Content="Custom S3" Command="{Binding SwitchToS3Command}" />
           </StackPanel>
 
           <!-- Proton's card: CLI path, auth, version, self-update. -->
@@ -879,6 +1578,87 @@
                            TextWrapping="Wrap"
                            Opacity="0.8"
                            Text="{Binding OneDriveAccountLabel}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- Google Drive's card -->
+          <Border Padding="16"
+                  Background="{DynamicResource CardBackgroundBrush}"
+                  CornerRadius="6"
+                  IsVisible="{Binding IsGoogleDriveActive}">
+            <StackPanel Spacing="10">
+              <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
+              <TextBlock Text="Google Workspace &amp; Drive Account Connection" FontWeight="SemiBold" />
+              <TextBlock Opacity="0.6" FontSize="12" TextWrapping="Wrap"
+                         Text="Connect with Google OAuth2 credentials or API tokens for seamless synchronization." />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes.primary="{Binding !IsAuthenticated}" Content="Iniciar Sesión en Google Drive" Command="{Binding AuthenticateCommand}">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Path Classes="icon" Data="{StaticResource IconKey}" />
+                    <TextBlock Text="Conectar Google Drive" />
+                  </StackPanel>
+                </Button>
+                <Button ToolTip.Tip="Cerrar sesión" Command="{Binding LogoutCommand}" IsVisible="{Binding IsAuthenticated}">
+                  <Path Classes="icon" Data="{StaticResource IconLogout}" />
+                </Button>
+                <Button ToolTip.Tip="Actualizar contenido" Command="{Binding RefreshCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+                </Button>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- Nextcloud's card -->
+          <Border Padding="16"
+                  Background="{DynamicResource CardBackgroundBrush}"
+                  CornerRadius="6"
+                  IsVisible="{Binding IsNextcloudActive}">
+            <StackPanel Spacing="10">
+              <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
+              <TextBlock Text="Nextcloud Server Connection (WebDAV)" FontWeight="SemiBold" />
+              <TextBlock Opacity="0.6" FontSize="12" TextWrapping="Wrap"
+                         Text="Self-hosted Nextcloud instance connectivity and user credentials." />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes.primary="{Binding !IsAuthenticated}" Content="Conectar Nextcloud" Command="{Binding AuthenticateCommand}">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Path Classes="icon" Data="{StaticResource IconKey}" />
+                    <TextBlock Text="Conectar Nextcloud" />
+                  </StackPanel>
+                </Button>
+                <Button ToolTip.Tip="Cerrar sesión" Command="{Binding LogoutCommand}" IsVisible="{Binding IsAuthenticated}">
+                  <Path Classes="icon" Data="{StaticResource IconLogout}" />
+                </Button>
+                <Button ToolTip.Tip="Actualizar contenido" Command="{Binding RefreshCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+                </Button>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- Custom S3 Storage card -->
+          <Border Padding="16"
+                  Background="{DynamicResource CardBackgroundBrush}"
+                  CornerRadius="6"
+                  IsVisible="{Binding IsS3Active}">
+            <StackPanel Spacing="10">
+              <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
+              <TextBlock Text="Custom S3 / MinIO Object Storage" FontWeight="SemiBold" />
+              <TextBlock Opacity="0.6" FontSize="12" TextWrapping="Wrap"
+                         Text="Amazon S3, Cloudflare R2, Wasabi, or MinIO bucket endpoint and access keys." />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes.primary="{Binding !IsAuthenticated}" Content="Conectar Bucket S3" Command="{Binding AuthenticateCommand}">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Path Classes="icon" Data="{StaticResource IconKey}" />
+                    <TextBlock Text="Conectar S3" />
+                  </StackPanel>
+                </Button>
+                <Button ToolTip.Tip="Cerrar sesión" Command="{Binding LogoutCommand}" IsVisible="{Binding IsAuthenticated}">
+                  <Path Classes="icon" Data="{StaticResource IconLogout}" />
+                </Button>
+                <Button ToolTip.Tip="Actualizar contenido" Command="{Binding RefreshCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+                </Button>
               </StackPanel>
             </StackPanel>
           </Border>

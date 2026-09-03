@@ -226,7 +226,8 @@ public class DeltaRemoteScannerTests : IDisposable
         public ProviderCapabilities Capabilities { get; } = new(
             RemoteHash: RemoteHashAlgorithm.QuickXor, SupportsServerSideMove: true, SupportsServerSideCopy: true,
             CopyIsAsynchronous: false, SupportsBatchMove: false, SupportsDelta: true, RequiresRemoteViewInvalidation: false,
-            MaxSingleShotUploadBytes: null, UploadChunkSizeBytes: null, MaxRecommendedConcurrency: 4, CanSetRemoteModificationTime: true);
+            MaxSingleShotUploadBytes: null, UploadChunkSizeBytes: null, MaxRecommendedConcurrency: 4, CanSetRemoteModificationTime: true,
+            SupportsShareLinks: true);
         public IDriveOperations Operations => throw new NotSupportedException();
         public IDriveAuthenticator Auth => throw new NotSupportedException();
         public IProviderPathSyntax Paths { get; } = new FakePathSyntax(comparison);

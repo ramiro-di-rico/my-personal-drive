@@ -46,7 +46,8 @@ public sealed class OneDriveProvider : ICloudDriveProvider, IDisposable
         MaxSingleShotUploadBytes: 4L * 1024 * 1024,
         UploadChunkSizeBytes: 10 * 320 * 1024,
         MaxRecommendedConcurrency: 4,
-        CanSetRemoteModificationTime: true);
+        CanSetRemoteModificationTime: true,
+        SupportsShareLinks: true);
 
     public IDriveOperations Operations => _operations;
 

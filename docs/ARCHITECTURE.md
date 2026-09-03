@@ -89,12 +89,16 @@ src/MyPersonalDrive/
         CliErrorClassifier.cs, CliReleaseFeed.cs, CliUpdateInstaller.cs, CliPlatformKey.cs, CliVersionComparer.cs
     DriveCacheService.cs           # SQLite cache of listings
     AppSettings.cs / AppSettingsService.cs / AppJsonContext.cs
+    LocalFileSystemService.cs      # local pane's only filesystem access (read-only browsing)
   ViewModels/
     ObservableObject.cs            # minimal INotifyPropertyChanged
     AsyncCommand.cs                # async ICommand with re-entrancy guard
     MainWindowViewModel.cs         # ~950 lines, the brain of the app
     DriveNodeViewModel.cs          # one row of the listing
     BreadcrumbSegmentViewModel.cs
+    Local/
+      LocalExplorerViewModel.cs    # local pane's state (current path, listing, hidden-files toggle)
+      LocalNodeViewModel.cs        # one row of the local listing — navigation only, no file ops yet
   Views/
     MainWindow.axaml(.cs)          # UI + dialogs built in code-behind
 scripts/publish-linux.sh           # AOT publish + tarball
@@ -394,8 +398,55 @@ Central state. Key pieces:
 - `RootItems : ObservableCollection<DriveNodeViewModel>` — the visible listing.
 - `BreadcrumbItems` — rebuilt entirely on every navigation from the path string.
 - `Selected*` block — 7 flat strings feeding the detail panel.
+- `LocalExplorer : Local.LocalExplorerViewModel` — composed the same way `SyncPanel` is; the local
+  pane's own state (current path, listing, breadcrumb, hidden-files toggle), backed by
+  `LocalFileSystemService`. Read-only browsing only — no local file operations yet.
+- `IsLocalExplorerPanelVisible` / `IsStatusPanelVisible` — whether the local pane and the Status
+  sidebar are shown, each persisted (`AppSettings.ShowLocalExplorerPanel`/`ShowStatusPanel`) so the
+  choice is also next launch's default. The local pane toggles from a header button
+  (`ToggleLocalExplorerPanelCommand`); its column is `*`-sized (for the splitter), so hiding it also
+  needs `MainWindow.axaml.cs` to collapse `ExplorerColumnsGrid.ColumnDefinitions[2]` directly — an
+  `Auto` column (the Status sidebar's) already shrinks to 0 from `IsVisible` alone. The Status
+  sidebar instead toggles from a plain two-way-bound "User Settings" checkbox in the settings view
+  (no command, same pattern as `DefaultSyncFolder`/`BandwidthLimitKbps`).
 - Console block: `_commandLogLines` (ring buffer of 200), `CommandLogText`,
   `ActiveCommand`, and animation properties (`CommandConsoleMaxHeight/Opacity/HitTestVisible/ToggleLabel/Glyph`).
+  Collapse state persists (`AppSettings.ShowCommandConsole`, `Ctrl/Cmd+~`). `ShowOnlyWarningsAndErrors`/
+  `LogSearchText` re-render `CommandLogText` from `CommandLogBuffer.Lines` through `RefreshCommandLogText`
+  rather than keeping a second filtered copy; `ActiveOperationCount` is a real Started/Finished-pair
+  count (not the fabricated "transfer rate" Task 4's wishlist asks for — nothing in the activity feed
+  reports bytes/sec, and AGENTS.md rules out inventing a shape for it) and `LastLogLine` is the most
+  recent buffered line, both shown in a floating status line while the console is collapsed.
+- `TransferQueue : TransferQueueViewModel` — the drag-and-drop transfer queue
+  (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5), sequential and cancellable, shown in the Status
+  sidebar when non-empty. Two entry points, one per direction, are the only calls code-behind's
+  drag/drop handlers make into the VM:
+  - `HandleLocalFilesDroppedAsync(localPaths, targetPath)` — local pane onto cloud pane. Resolves
+    the upload-conflict strategy (reusing `UploadAsync`'s own check, factored out as
+    `ResolveUploadConflictStrategyAsync`) and hands off to the queue.
+  - `HandleCloudItemsDroppedAsync(items, targetPath)` — cloud pane onto local pane. Checks each
+    item's name against the local target via `LocalFileSystemService.Exists` (the VM's own
+    `_localFileSystem` field) and, on a conflict, can only honor "Skip" beyond a plain download —
+    `filesystem download` has no conflict-strategy flag the way upload's `-f`/`-d` do, so
+    "Replace"/"Keep Both" both just fall through to downloading normally; there's no verified way
+    to make the CLI (or this app, without an unbuilt download-to-temp-then-rename step) rename the
+    incoming file instead.
+
+  Drag-and-drop mechanics themselves (`OnLocalRowPointerPressed/Moved`, `OnCloudRowPointerPressed/
+  Moved`, `OnCloudListingDragOver/Drop`, `OnLocalListingDragOver/Drop`) live entirely in
+  `MainWindow.axaml.cs`, per the same "no Avalonia types in the VM" rule as everything else — the
+  row Button's own click still works normally below a small pixel threshold; only a real drag
+  (past it) calls `DragDrop.DoDragDropAsync`. The app's selection model is single-item, so a drag
+  always carries just the row under the pointer, not a multi-selection.
+- **Drop-target affordances** (Phase 4): a `.dropTarget` CSS-like class, toggled imperatively from
+  the same `DragOver`/`DragLeave` handlers (not bound to any VM property — this is transient
+  gesture feedback the VM has no reason to know about), highlights the pane and, when the drop
+  would land inside a specific folder rather than the pane's current path, that folder's row too.
+  `CloudDropOverlay`/`LocalDropOverlay` (named `Border`s, last child of each pane's overlapping
+  `Grid` cell so they paint above whichever view mode is active) show a "+ Subir a X"/"↓ Descargar
+  a X" badge, its target text computed by the same `ResolveCloudDropTargetPath`/
+  `ResolveLocalDropTargetPath` the `Drop` handlers themselves use — so the badge can never say one
+  folder while the drop actually lands in another.
 
 **Extension points toward the View** — the VM doesn't know about Avalonia except for
 `Dispatcher`; dialogs are injected as delegates the View sets in `OnDataContextChanged`:
@@ -517,8 +568,10 @@ compose into three reachable crashes documented there.
 8. **Cache with no versioning or TTL**, and `IsAuthenticated` with no real verification.
 9. **No persistent logging** beyond the in-memory 200-line ring buffer.
 10. **`_rootPath` hardcoded** to `/my-files`.
-11. **No recursive operations**: a whole folder cannot be downloaded/deleted
-    (`DownloadCommand`/`TrashCommand` are disabled for folders).
+11. **No recursive download**: a whole folder cannot be downloaded
+    (`DownloadCommand` is disabled for folders). `TrashCommand` supports folders — the CLI's
+    `filesystem trash` moves the whole subtree server-side in one call, no client-side walk needed
+    — and asks for confirmation first since it's destructive.
 12. **No progress or throughput** for upload/download: just the raw CLI text.
 
 ---

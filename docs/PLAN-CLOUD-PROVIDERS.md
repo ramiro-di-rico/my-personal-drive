@@ -295,6 +295,13 @@
 - [x] **P9** — filter the Sync window's pair list by account/provider, using the same filter-chip
       idiom the folder browser already uses for file kinds (`ProviderFilterViewModel`,
       `SyncPanelViewModel.VisiblePairs`). See [§P9](#p9--filter-sync-pairs-by-provider).
+- [ ] **P10 — Google Drive provider (planned, not started).** Design only so far — see
+      [§8](#8-google-drive-g--rest-api-v3-design) for the full design write-up (auth, the
+      id-based-addressing mode `IProviderPathSyntax` needs, capabilities, error mapping) and its
+      own phase entry below. This is the provider §7 originally flagged as "out of scope" for this
+      plan but explicitly kept addable; §7 has been updated accordingly. **Not yet approved for
+      implementation** — no provider code exists yet, this is Phase 1 (plan) of the
+      `add-cloud-provider` skill.
 
 ### Adversarial review of P1–P5 — 5 confirmed bugs fixed
 
@@ -885,6 +892,17 @@ browser already established for file kinds (`ViewModels/KindFilterViewModel.cs` 
 asked for; a general filter/sort bar for the Sync window is a separate, larger feature if ever
 wanted.
 
+### P10 — Google Drive provider (planned, not started)
+
+See §8. Lands `Services/Providers/GoogleDrive/` and nothing outside it except catalog
+registration (`ProviderId.GoogleDrive`, mirroring how `ProviderId.OneDrive` was added ahead of its
+own P6), `AppJsonContext` entries for the token/settings records, a settings-view connection card
+(§5-shaped, third card added to the same `HasDiagnostics`-gated pattern), and the doc updates §4.2
+required for OneDrive's own "second outbound call" decision (B10) — this is now a *third*.
+**Blocked on explicit user sign-off on §8, in particular the `drive` OAuth scope's consent-screen
+cost (§8.1) and the client-side conflict-strategy gap (§8.6/R7)** — this entry stays unchecked
+until that sign-off happens and Phase 2 of the `add-cloud-provider` skill begins.
+
 ### P8 — *Optional:* delta-based remote scanning — implemented, pending live verification
 
 `Capabilities.SupportsDelta` + `IDeltaSource.GetChangesAsync(string? deltaToken)`, consumed by the
@@ -1117,18 +1135,239 @@ should not imitate it.
 - **R6 — unverified Graph shapes.** Every *(unverified)* marker in §4 is a place where code written
   from documentation could be plausibly wrong. None of them may be implemented before a real capture
   lands in Appendix A.
+- **R7 — Drive has no server-side name-collision detection (§8.2, §8.6).** Unlike Proton and
+  Graph, `files.create`/`copy` never reject on a duplicate name — the app has to check for an
+  existing same-name sibling itself before it can honor `UploadConflictStrategy`, and that
+  check-then-act has a real TOCTOU race if the same folder is touched from another client
+  concurrently. Mitigation: documented as an accepted limitation in §8.6, not silently ignored;
+  revisit only if it causes an observed duplicate in practice.
+- **R8 — Drive addresses by id, not path (§8.2).** Every other provider in this plan takes a path
+  string at the `IDriveOperations` boundary and the sync engine (`PathMapper`, `SyncReconciler`,
+  the `DriveItems`/`FolderMetrics` schema) is built on "path uniquely identifies a node." Drive
+  breaks that at the root: names are not unique within a folder (confirmed in §8.2). The design in
+  §8.2 keeps the existing path-string interface intact by pushing id-resolution and an internal
+  path→id cache entirely inside `GoogleDriveOperations`, and extends the *existing*
+  collision-skip mechanism (§2.4, built for OneDrive's case-insensitivity) to also cover
+  duplicate-named Drive siblings — deliberately not a redesign of the path-based interface, on the
+  same "don't touch what isn't proven to need it" principle P3 already applied to `PathMapper`.
 
 ## 7. Explicitly out of scope
 
-- Google Drive. The seam is designed so it *can* be added (its listing is id-based rather than
-  path-based, which is the one thing `IProviderPathSyntax` would have to grow a mode for), but no
-  Google-specific code, scope or registration is planned here.
 - Copying or moving items *between* providers.
 - SharePoint document libraries and shared/other-user drives beyond `/me/drive`.
 - Provider-specific features with no equivalent in the other: Proton sharing links, OneDrive
   version history, Personal Vault.
 - Replacing the hand-wired composition root with a DI container.
 - Windows/macOS packaging changes.
+- **Google Drive, beyond the design in §8.** Shared Drives (`corpora=drive`/`allDrives`),
+  syncing Google-native files (Docs/Sheets/Slides — no binary content or checksum to sync at all;
+  §8.4 has the reasoning), and Drive's delta query (`changes.list`) are all explicitly deferred
+  past the initial Google Drive phase (P10), mirroring how OneDrive shipped its core provider in
+  P6 and delta separately in P8.
+
+---
+
+## 8. Google Drive (G) — REST API v3 design
+
+> **Provenance.** Everything in this section comes from Google's public Drive API v3
+> documentation (`developers.google.com/workspace/drive/api/...`), fetched live during this
+> planning pass, and is **not verified against a live account from this repo**. Per `AGENTS.md`
+> ("never invent output shapes") and the same rule §4 states for OneDrive, each item marked
+> *(unverified)* must be confirmed with a real capture before code depends on it, with the
+> confirmed shapes recorded in this document's Appendix A — the same discipline §4's Appendix A
+> already follows for OneDrive.
+
+### 8.1 Why REST, and which OAuth flow (G1)
+
+No first-party Linux CLI, so this follows OneDrive's shape: direct REST over `HttpClient` +
+`JsonDocument`/`AppJsonContext`, no Google API client library (B9 — Native AOT; Google's
+`Google.Apis.Drive.v3` client is reflection-heavy and not a safe fit, same reasoning that ruled out
+MSAL for OneDrive).
+
+- **Auth**: Google's installed/desktop-app OAuth2 flow, **authorization code + PKCE**, loopback
+  redirect (`http://127.0.0.1:{dynamic port}` — Google's own docs recommend the loopback IP form
+  over a custom URI scheme; OOB/manual-copy is explicitly no longer supported). Structurally the
+  same shape as `GraphAuthenticator` (P6): open the browser via `IAuthPrompt.OpenBrowserAsync`,
+  run a loopback `HttpListener`, exchange the code at `https://oauth2.googleapis.com/token`.
+- **Scope — the one decision to flag loudly.** A sync tool that mirrors an arbitrary,
+  user-chosen folder tree (not files hand-picked one at a time through a picker UI) needs the
+  broad **`drive`** scope ("View and manage all your Drive files"), not the narrower
+  **`drive.file`** scope (which only grants access to files the user explicitly opens/creates
+  through this app — useless for "sync whatever's already in this folder"). `drive` is a
+  **restricted** scope: Google Cloud Console gates it behind an OAuth consent screen that, while
+  the app is in "Testing" publishing status, caps external users and shows an "unverified app"
+  warning at sign-in *(unverified — the exact cap and warning copy were not confirmed against a
+  live Cloud Console session this pass, only against Google's scope-classification docs; confirm
+  before relying on a specific number)*. This is a real UX cost the user should sign off on before
+  P10 implementation starts: every sign-in shows a scarier consent screen than OneDrive's, unless
+  the app later goes through Google's verification process (out of scope here — see §7).
+- **Token storage**: same accepted-risk shape as OneDrive (§4.2) — `google-drive-token.json` in
+  `AppSettingsService.BaseFolder`, `chmod 600`, via `AppJsonContext`. Refresh token is long-lived
+  until revoked; access token expires in hours; same 401→refresh-once→retry-once pattern as
+  `GraphHttpClient`.
+
+### 8.2 Addressing model — the id-based mode `IProviderPathSyntax` needs (G2)
+
+This is the one place Drive is structurally different from both existing providers, and the part
+of this plan most worth the user's attention before sign-off.
+
+**What's confirmed:**
+- Every file/folder has a stable, opaque `id` (a folder is just an item with
+  `mimeType: application/vnd.google-apps.folder`, no separate folder concept). There is **no
+  native path** — a display path is built by walking `parents[0]` up to the root.
+- `parents` is schematically an array, but current Drive behavior is **effectively single-parent**:
+  the v3 File resource reference states "max one parent per file," and Google migrated away from
+  true multi-parent in 2020 (former secondary parents became shortcuts). This plan treats Drive as
+  single-parent — no DAG-shaped path resolution needed.
+- **Names are not unique within a folder** — stated explicitly in Google's own File resource docs.
+  Two files can share both a name and a parent, distinguished only by `id`. This is the load-bearing
+  difference from Proton and OneDrive, both of which reject a same-name create in the same folder.
+
+**Design decision — keep `IDriveOperations`'s path-string signatures unchanged; do not force an
+id-shaped interface onto the two providers that don't need one.** `GoogleDriveOperations` resolves
+a path to an id internally, segment by segment (`files.list` with
+`q="'<parentId>' in parents and name='<segment>' and trashed=false"`, using the well-known
+`root` alias id for the first segment so no extra call is needed to resolve the root itself), and
+keeps a private path→id cache scoped to the operation's lifetime (a full listing already visits
+every node, so `ListFolderAsync` populates it cheaply; a targeted single-path call like
+`DownloadFileAsync` pays the segment-walk cost directly). This mirrors §0.1's own framing: the
+false invariant here is "a path uniquely identifies a node," not "operations are addressed by
+path" — so the fix belongs at the same layer P3 already uses for case-insensitivity, not in a
+wider interface change.
+
+**Duplicate-name handling extends the existing collision mechanism, not a new one.**
+`IProviderPathSyntax` gains one more axis alongside `Comparison` (§2.4):
+
+```csharp
+bool AllowsDuplicateNamesInSameParent { get; }   // false: Proton, OneDrive. true: Google Drive.
+```
+
+`RemoteScanner`'s existing per-sibling-batch collision hook (added for OneDrive case-insensitivity,
+§2.4 / the P1-P5 adversarial-review bug #1 fix) already runs once per sibling batch before any item
+reaches the per-node callback — it is extended to also flag a duplicate name as a collision when
+`AllowsDuplicateNamesInSameParent` is true, using the same `NodeSkip(string Name, NodeSkipReason)`
+shape P1-P5's finding #5 already introduced (a new `NodeSkipReason.DuplicateName` value). The first
+child with a given name in a listing order wins deterministically (Drive's `files.list` order is
+not itself guaranteed stable across calls *(unverified)* — worth a real capture before relying on
+"first" being consistent run to run); every other same-named sibling is reported skipped, exactly
+like an unmappable name is today, never silently merged or overwritten.
+
+**Path building (`Combine`)**: plain `/`-join, same shape as Proton/OneDrive — Drive itself has no
+escaping requirement for `/` inside a *display* path the app builds (§8.6). **`Comparison`**:
+`Ordinal` — Drive names are case-sensitive and case-preserving (unlike OneDrive's
+`OrdinalIgnoreCase`). **`Root`**: `"/"`, and the literal id alias `"root"` is used directly as the
+first parent id rather than being resolved via a lookup.
+
+### 8.3 Listing and pagination (G3)
+
+`files.list` with an explicit `fields` parameter (Drive's default response omits most fields
+unless asked, opposite failure mode from Graph's "asks for everything by default" —
+`fields=nextPageToken,files(id,name,mimeType,parents,size,modifiedTime,md5Checksum,sha256Checksum,trashed)`),
+`q="'<parentId>' in parents and trashed=false"`, `pageSize` (max 1000), `pageToken` for
+continuation, `corpora=user`/`spaces=drive` for My Drive (Shared Drives — `corpora=drive` +
+`driveId`, or `allDrives` — are out of scope, §7). Must follow `nextPageToken` to exhaustion, same
+"a partial listing reads as a remote deletion" failure mode §4.3 already calls out for Graph
+pagination.
+
+### 8.4 `DriveItem` mapping and the Google-native-file problem (G4)
+
+| `DriveItem` field | Drive source |
+|---|---|
+| `NodeId` | `id` (stable across move/rename) |
+| `Name` | `name` |
+| `IsFolder` | `mimeType == "application/vnd.google-apps.folder"` |
+| `Size` | `size` — **absent for Google-native files** (see below) |
+| `ModifiedAt` | `modifiedTime` (client-settable on write, §8.5 — the analogue of OneDrive's `fileSystemInfo.lastModifiedDateTime`) |
+| `ContentHash` | `sha256Checksum` when present, else `md5Checksum` — see `RemoteHash` below |
+| `Path` | built by `GoogleDrivePathSyntax`/the id-resolution cache in §8.2, never from a server-provided path |
+
+**Google-native files (Docs, Sheets, Slides, Forms, Drawings — `mimeType` starting
+`application/vnd.google-apps.` other than `folder`/`shortcut`) have no binary content and
+therefore no checksum at all** (confirmed: `md5Checksum`/`sha1Checksum`/`sha256Checksum` are all
+documented as absent for them). There is no fallback hash to sync against. **Decision for P10:**
+treat them like an unmappable/skipped node — the same `NodeSkip` mechanism as §8.2's duplicate
+names — rather than attempting an export-to-binary conversion (Drive supports exporting a Doc to
+`.docx`/PDF etc. via `files.export`, but that's a real feature with its own format-choice and
+staleness questions, explicitly deferred, §7). A user syncing a folder containing Google Docs will
+see them reported as skipped with a clear reason, not silently dropped.
+
+**`RemoteHash` decision:** prefer `sha256Checksum` — `RemoteHashAlgorithm` (§2.5) already has a
+`Sha256` member reserved (added alongside `QuickXor` in P3, unused until now), so this needs no
+enum change. Unlike OneDrive's real per-drive-type hash split (§4.4/O4), Drive's docs show all
+three checksums populated together for any binary file, so this is a fixed choice, not a
+per-item fallback — *(unverified: confirm at least one real binary file actually returns
+`sha256Checksum` populated, not just documented; fall back to `md5Checksum` in code if it turns out
+absent in practice, same defensive shape O4 already uses)*.
+
+### 8.5 Two-way sync specifics (G5)
+
+- `modifiedTime` is client-writable directly in the request body on `files.update`/`create` (no v2-style
+  `setModifiedDate` query flag needed) → `CanSetRemoteModificationTime = true`, same reasoning as
+  O5: without this, every upload looks remotely-newer on the very next cycle.
+- Rate limiting: shared `HttpClient`, a concurrency gate from `MaxRecommendedConcurrency`, and
+  `DriveErrorKind.RateLimited` on 429 or 403 with reason `rateLimitExceeded`/`userRateLimitExceeded`
+  — reuse `SyncRetryPolicy`'s existing `Busy`/`RateLimited` branch, not a second mechanism (same
+  rule O5 states for Graph).
+- `SyncEchoSuppressor` needs no provider-specific change (path-keyed, provider-independent).
+
+### 8.6 Upload, conflict strategy, and the no-server-side-collision-check gap (G6)
+
+- **Simple/multipart** (`uploadType=media`/`multipart`): ≤ 5 MB. **Resumable**
+  (`uploadType=resumable`): initiate with JSON metadata → `Location` session URI → `PUT` in chunks
+  (multiple of 256 KiB recommended) with `Content-Range`; sessions expire after one week.
+  `MaxSingleShotUploadBytes = 5 MiB`, `UploadChunkSizeBytes` a multiple of 256 KiB (mirrors §4.3's
+  shape, different numbers).
+- **Trash**: `files.update(id, {trashed: true})` — 30-day auto-purge, matches "trash" semantics
+  used elsewhere. **Move**: `files.update` with `addParents=<dest>&removeParents=<current>` query
+  params (reparenting, not a path rename — consistent with §8.2's single-parent model).
+  `SupportsBatchMove = false` (one PATCH per item, same as OneDrive). **Copy**: `files.copy(id)` —
+  a normal synchronous POST, unlike Graph's async `202` + monitor-URL dance → `CopyIsAsynchronous
+  = false`, `SupportsServerSideCopy = true`.
+- **The real gap (R7): Drive never rejects a duplicate name.** `files.create`/`copy` happily
+  create a second `report.pdf` in the same folder — there is no server-side conflict to translate
+  the way Graph's `@microsoft.graph.conflictBehavior` or Proton's `skip` flag do. `UploadConflictStrategy`
+  therefore has to be enforced **client-side** in `GoogleDriveOperations`: before an upload, list
+  the target folder filtered to the exact name (`q="'<parent>' in parents and name='<name>' and
+  trashed=false"`) and branch on `None`/`Skip` (upload only if absent), `Replace` (patch the
+  existing file's content via `files.update` instead of creating a new one), `KeepBoth` (append a
+  suffix client-side, same as the app would for a local-filesystem collision). **Stated plainly as
+  a known, accepted limitation, not silently glossed over:** this check-then-act has a race if
+  another Drive client creates a same-named file between the list and the create call — see R8 in
+  §6.
+
+### 8.7 Error mapping (G7) — `GoogleDriveErrorClassifier`
+
+Body shape (v3, confirmed distinct from v2): `{"error":{"code":…,"message":…,"errors":[{"reason":…,"domain":…}]}}` —
+classify on `error.errors[0].reason` (machine-readable), not the human `message`, same rule §4.7
+states for Graph's `error.code`.
+
+| Signal | `DriveErrorKind` |
+|---|---|
+| 401, reason `authError` | `NotAuthenticated` |
+| 403, reason `insufficientFilePermissions` | `PermissionDenied` |
+| 404, reason `notFound` (Drive returns 404, not 403, for existence-concealing permission denials) | `NotFound` |
+| 403, reason `rateLimitExceeded`/`userRateLimitExceeded`; 429 | `RateLimited` |
+| 403, reason `storageQuotaExceeded` | `Quota` |
+| — (no native duplicate-name error; handled client-side, §8.6) | n/a |
+| `HttpRequestException`, DNS, TLS | `Network` |
+| `TaskCanceledException` from client timeout | `Timeout` |
+
+### 8.8 Testing (G8)
+
+Same shape as O8: `FakeHttpMessageHandler` + recorded/scrubbed Drive JSON fixtures under
+`tests/.../Fixtures/GoogleDrive/`; unit tests for path→id resolution (including the duplicate-name
+collision path, §8.2), paging exhaustion, client-side conflict-strategy enforcement (§8.6),
+Google-native-file skip handling (§8.4), error mapping, the 401-refresh-retry-once path, resumable
+upload chunk arithmetic. `MYPERSONALDRIVE_GOOGLEDRIVE_INTEGRATION=1` opt-in integration tests
+against a throwaway account, mirroring `RealOneDriveAuthTests`. `FakeDriveProvider` (P1) still means
+none of the sync-engine tests need any of this.
+
+### 8.9 What P10 explicitly does not attempt
+
+Shared Drives, Google-native-file export/sync, and delta (`changes.list`) are deferred past this
+provider's first phase — see §7. `IProviderPathSyntax.AllowsDuplicateNamesInSameParent` (§8.2) is
+the only new interface surface this design proposes; everything else reuses P1–P6's existing
+seam unchanged.
 
 ---
 

@@ -17,4 +17,5 @@ public sealed record ProviderCapabilities(
     long? MaxSingleShotUploadBytes,
     long? UploadChunkSizeBytes,
     int MaxRecommendedConcurrency,
-    bool CanSetRemoteModificationTime);
+    bool CanSetRemoteModificationTime,
+    bool SupportsShareLinks);

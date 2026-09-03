@@ -280,6 +280,23 @@ public sealed class OneDriveOperations : IDriveOperations, IDeltaSource
         throw new DriveException(monitorUrl, 0, string.Empty, string.Empty, $"Copying {sourcePath} on OneDrive did not finish in time.", DriveErrorKind.Timeout);
     }
 
+    public async Task<string> CreateShareLinkAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var url = $"{ItemSegment(path)}/createLink";
+        using var response = await _http.SendAsync(
+            $"POST {DescribePath(path)}/createLink",
+            () => new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = JsonContent.Create(new GraphSharingLinkRequest(), AppJsonContext.Default.GraphSharingLinkRequest),
+            },
+            cancellationToken);
+
+        var permission = await response.Content.ReadFromJsonAsync(AppJsonContext.Default.GraphPermission, cancellationToken);
+        return permission?.Link?.WebUrl is { Length: > 0 } webUrl
+            ? webUrl
+            : throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"OneDrive did not return a share link for {path}.", DriveErrorKind.Unknown);
+    }
+
     private async Task<string> GetItemIdAsync(string path, CancellationToken cancellationToken)
     {
         if (_targetIdCache.TryGetValue(path, out var cached))

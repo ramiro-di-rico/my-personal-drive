@@ -201,3 +201,16 @@ public sealed class GraphUploadSession
     [JsonPropertyName("uploadUrl")]
     public string UploadUrl { get; set; } = string.Empty;
 }
+
+/// <summary>The `permission` resource `POST .../createLink` returns — only the one field this app actually reads.</summary>
+public sealed class GraphPermission
+{
+    [JsonPropertyName("link")]
+    public GraphSharingLink? Link { get; set; }
+}
+
+public sealed class GraphSharingLink
+{
+    [JsonPropertyName("webUrl")]
+    public string WebUrl { get; set; } = string.Empty;
+}

@@ -26,6 +26,15 @@ public sealed class DriveNodeSyncActions
     public Func<DriveItem, Task>? ShowPropertiesAsync { get; init; }
 
     /// <summary>
+    /// Whether the active provider can generate a share link at all — Proton's CLI can't
+    /// (<c>ProviderCapabilities.SupportsShareLinks</c>). A fixed value per row, not per item: every
+    /// row in a pane shares the same provider.
+    /// </summary>
+    public bool SupportsShareLinks { get; init; }
+
+    public Func<DriveItem, Task>? CreateShareLinkAsync { get; init; }
+
+    /// <summary>
     /// Rebuilds the pane after an action that changes whether a sync-pair badge should show (pause/
     /// resume, creating a pair) — the row itself never re-queries <see cref="FindSyncPair"/> after
     /// construction, so this is how the badge catches up.

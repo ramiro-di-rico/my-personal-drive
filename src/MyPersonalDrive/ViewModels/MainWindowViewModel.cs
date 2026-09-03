@@ -2265,6 +2265,49 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     /// <summary>
+    /// "Share Link" — only reachable when <c>_provider.Capabilities.SupportsShareLinks</c> is true
+    /// (the row's own <see cref="DriveNodeViewModel.CanShareLink"/> disables the menu entry
+    /// otherwise), so the <see cref="DriveException"/> path below is a defensive fallback, not the
+    /// normal way this reports "unsupported".
+    /// </summary>
+    public async Task CreateShareLinkAsync(DriveItem item)
+    {
+        if (!_provider.Capabilities.SupportsShareLinks)
+        {
+            StatusMessage = $"{_provider.DisplayName} no permite generar enlaces para compartir.";
+            IsWarning = true;
+            return;
+        }
+
+        try
+        {
+            IsLoading = true;
+            StatusMessage = $"Generando un enlace para compartir {item.Name}...";
+            var url = await _provider.Operations.CreateShareLinkAsync(item.Path);
+
+            var copy = RequestCopyToClipboardAsync;
+            if (copy is not null)
+            {
+                await copy(url);
+                StatusMessage = $"Enlace copiado al portapapeles: {url}";
+            }
+            else
+            {
+                StatusMessage = $"Enlace para compartir: {url}";
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = FormatDriveError(item.Path, ex);
+            IsWarning = true;
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    /// <summary>
     /// "Subir a esta carpeta..." on a cloud folder row — the same upload path as the toolbar's
     /// <see cref="UploadAsync"/>, but targeting the right-clicked folder instead of always
     /// <see cref="CurrentPath"/>.
@@ -2767,6 +2810,8 @@ public sealed class MainWindowViewModel : ObservableObject
                 UploadToFolderAsync = UploadToFolderAsync,
                 DownloadHereAsync = DownloadToLocalPaneAsync,
                 ShowPropertiesAsync = ShowPropertiesAsync,
+                SupportsShareLinks = _provider.Capabilities.SupportsShareLinks,
+                CreateShareLinkAsync = CreateShareLinkAsync,
                 RefreshPaneAsync = RefreshAsync,
             });
             if (previouslySelectedPaths.Contains(item.Path))

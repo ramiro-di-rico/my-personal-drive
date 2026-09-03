@@ -516,6 +516,11 @@
                       <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
                       <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
                       <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
+                      <MenuItem Header="Copiar enlace para compartir"
+                                Command="{Binding ShareLinkCommand}"
+                                IsEnabled="{Binding CanShareLink}"
+                                ToolTip.Tip="{Binding ShareLinkTooltip}"
+                                ToolTip.ShowOnDisabled="True" />
                       <Separator IsVisible="{Binding IsFolder}" />
                       <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
                       <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
@@ -625,6 +630,11 @@
                       <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
                       <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
                       <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
+                      <MenuItem Header="Copiar enlace para compartir"
+                                Command="{Binding ShareLinkCommand}"
+                                IsEnabled="{Binding CanShareLink}"
+                                ToolTip.Tip="{Binding ShareLinkTooltip}"
+                                ToolTip.ShowOnDisabled="True" />
                       <Separator IsVisible="{Binding IsFolder}" />
                       <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
                       <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
@@ -684,6 +694,11 @@
                       <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
                       <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
                       <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
+                      <MenuItem Header="Copiar enlace para compartir"
+                                Command="{Binding ShareLinkCommand}"
+                                IsEnabled="{Binding CanShareLink}"
+                                ToolTip.Tip="{Binding ShareLinkTooltip}"
+                                ToolTip.ShowOnDisabled="True" />
                       <Separator IsVisible="{Binding IsFolder}" />
                       <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
                       <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />

@@ -52,6 +52,8 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
   cloud folder, start a sync pair pre-filled with that path, pause/resume/run-now an existing pair,
   rename or delete a local item, and view its properties. Folders with an active sync pair show a
   small badge (paused pairs show a different one) — see badge in list view and the local pane
+- Copy a share link for a cloud item to the clipboard (OneDrive only — Proton Drive's CLI has no
+  such command, so the menu entry stays disabled there, with a tooltip explaining why)
 - Live console with realtime output from the CLI (Proton) and Graph requests (OneDrive), tagged
   by account when both are active — collapsible (`Ctrl/Cmd+~`, remembered across restarts), with a
   search box, a warnings/errors-only filter, and a floating status line (active operation count,

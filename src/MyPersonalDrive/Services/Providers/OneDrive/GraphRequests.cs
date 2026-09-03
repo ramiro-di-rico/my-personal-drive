@@ -67,3 +67,18 @@ public sealed class GraphCreateUploadSessionRequest
     [JsonPropertyName("item")]
     public GraphUploadSessionItem Item { get; set; } = new();
 }
+
+/// <summary>
+/// Body for `POST .../createLink`. "view" (read-only) + "anonymous" (anyone with the link, no
+/// sign-in) — the least-privileged combination Graph offers, matching this app's "copy path"
+/// counterpart on Proton: a link to look at the item, not to edit it or limit it to the
+/// organization's own directory (which a personal Microsoft account has none of).
+/// </summary>
+public sealed class GraphSharingLinkRequest
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "view";
+
+    [JsonPropertyName("scope")]
+    public string Scope { get; set; } = "anonymous";
+}

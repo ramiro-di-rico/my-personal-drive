@@ -44,7 +44,8 @@ public sealed class GenericCloudDriveProvider : ICloudDriveProvider, IDriveOpera
         MaxSingleShotUploadBytes: 10L * 1024 * 1024,
         UploadChunkSizeBytes: 5 * 1024 * 1024,
         MaxRecommendedConcurrency: 4,
-        CanSetRemoteModificationTime: true);
+        CanSetRemoteModificationTime: true,
+        SupportsShareLinks: false);
 
     public IDriveOperations Operations => this;
 
@@ -180,5 +181,11 @@ public sealed class GenericCloudDriveProvider : ICloudDriveProvider, IDriveOpera
     {
         EnsureAuthenticated();
         throw NotImplemented(nameof(CopyItemAsync));
+    }
+
+    public Task<string> CreateShareLinkAsync(string path, CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticated();
+        throw NotImplemented(nameof(CreateShareLinkAsync));
     }
 }

@@ -159,6 +159,7 @@ public class TransferQueueViewModelTests
         public Task MoveItemsAsync(IReadOnlyList<string> paths, string targetParentPath, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task CopyItemAsync(string sourcePath, string targetParentPath, string? newName = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<string> CreateShareLinkAsync(string path, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         private async Task RunNextCallBehaviorAsync(CancellationToken cancellationToken)
         {

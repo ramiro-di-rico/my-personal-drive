@@ -41,6 +41,7 @@ public sealed class DriveNodeViewModel : ObservableObject
         SyncSelectedPathCommand = new AsyncCommand(SyncSelectedPathAsync, () => CanCreateSyncPair && _syncActions?.SyncSelectedPathAsync is not null, onError);
         TogglePauseSyncCommand = new AsyncCommand(TogglePauseSyncAsync, () => SyncPair is not null, onError);
         PropertiesCommand = new AsyncCommand(ShowPropertiesAsync, () => _syncActions?.ShowPropertiesAsync is not null, onError);
+        ShareLinkCommand = new AsyncCommand(ShareLinkAsync, () => CanShareLink && _syncActions?.CreateShareLinkAsync is not null, onError);
     }
 
     public DriveItem Item { get; }
@@ -118,6 +119,14 @@ public sealed class DriveNodeViewModel : ObservableObject
     /// <summary>Whether "Sync Selected Path..." makes sense here — a folder with no pair on it yet.</summary>
     public bool CanCreateSyncPair => IsFolder && !HasSyncPair;
 
+    /// <summary>Whether the active provider can generate a share link at all — false for Proton, whose CLI has no such command.</summary>
+    public bool CanShareLink => _syncActions?.SupportsShareLinks ?? false;
+
+    /// <summary>Explains a disabled "Share Link" menu entry — Avalonia's ToolTip.ShowOnDisabled keeps this visible even though the item can't be clicked.</summary>
+    public string ShareLinkTooltip => CanShareLink
+        ? "Copiar un enlace para compartir este elemento"
+        : "Esta funcionalidad no está disponible para el proveedor actual";
+
     public AsyncCommand RowCommand { get; }
 
     public AsyncCommand DownloadCommand { get; }
@@ -141,6 +150,8 @@ public sealed class DriveNodeViewModel : ObservableObject
     public AsyncCommand TogglePauseSyncCommand { get; }
 
     public AsyncCommand PropertiesCommand { get; }
+
+    public AsyncCommand ShareLinkCommand { get; }
 
     private async Task HandleRowClickAsync()
     {
@@ -241,6 +252,14 @@ public sealed class DriveNodeViewModel : ObservableObject
         if (_syncActions?.ShowPropertiesAsync is { } showPropertiesAsync)
         {
             await showPropertiesAsync(Item);
+        }
+    }
+
+    private async Task ShareLinkAsync()
+    {
+        if (_syncActions?.CreateShareLinkAsync is { } createShareLinkAsync)
+        {
+            await createShareLinkAsync(Item);
         }
     }
 }

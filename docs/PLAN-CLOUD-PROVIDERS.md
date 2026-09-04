@@ -295,16 +295,26 @@
 - [x] **P9** — filter the Sync window's pair list by account/provider, using the same filter-chip
       idiom the folder browser already uses for file kinds (`ProviderFilterViewModel`,
       `SyncPanelViewModel.VisiblePairs`). See [§P9](#p9--filter-sync-pairs-by-provider).
-- [x] **P10 — Google Drive provider.** Design approved 2026-09-04 (§8's OAuth scope cost and the
-      client-side conflict-strategy gap both explicitly accepted); Google Cloud Console side
-      (project `my-personal-drive-507613`, Drive API enabled, `drive` scope on the OAuth consent
-      screen, a Desktop-app OAuth client, the developer's own account added as a test user) set up
-      and confirmed by the user the same day. `Services/Providers/GoogleDrive/` implemented per
+- [x] **P10 — Google Drive provider (core paths live-verified).** Design approved 2026-09-04
+      (§8's OAuth scope cost and the client-side conflict-strategy gap both explicitly accepted);
+      Google Cloud Console side (project `my-personal-drive-507613`, Drive API enabled, `drive`
+      scope on the OAuth consent screen, a Desktop-app OAuth client, the developer's own account
+      added as a test user) set up and confirmed by the user the same day.
+      `Services/Providers/GoogleDrive/` implemented per
       [§8](#8-google-drive-g--rest-api-v3-design)'s signed-off design — see its own phase entry
       below for what shipped and where it deviated. Unit tests green
-      (`./scripts/run-tests.sh`), AOT-clean (no new IL2xxx/IL3xxx). **Live verification against a
-      real Google account is still pending** — that happens in a separate follow-up session with
-      real credentials, same as P8's own entry records for its own pending live pass.
+      (`./scripts/run-tests.sh`, 974 passing), AOT-clean (no new IL2xxx/IL3xxx, re-checked after
+      every live-verification fix below).
+      **Live-verified against a real Google account, 2026-09-04 — see Appendix A2:** sign-in,
+      listing, download, upload, rename, copy, trash, share-link creation, `sha256Checksum`
+      confirmed populated on real files, and a real two-way sync pair round-tripped end to end.
+      Five real bugs found live and fixed in the same session: the OAuth sign-in wait had no
+      timeout and could wedge the whole UI; `files.size` deserialization (a real int64-as-string
+      Drive convention no fixture had captured); the header ComboBox losing the provider selection
+      (took four iterations to find the actual cause — see Appendix A2 #4); and the Explorer's
+      preview/download buttons being live instead of disabled for a Google-native Doc/Sheet.
+      **Not yet captured**: pagination past a folder's first page, the resumable (>5 MiB) upload
+      path specifically, and moving an item between folders — see Appendix A2 for the exact list.
 
 ### Adversarial review of P1–P5 — 5 confirmed bugs fixed
 
@@ -1595,11 +1605,42 @@ integration test suite.
    not a reason to try a different plausible-sounding thing at the same layer — the same discipline
    this plan's Appendix A already applies to backend behavior.
 
-**Not yet captured**: a full folder listing beyond the first page, upload (small and resumable),
-move, copy, trash, rename, share-link creation, a real Google-native file (Doc/Sheet) actually
-being skipped as designed, and the exact `sha256Checksum`/`md5Checksum` presence on a real file
-(§8.4's own open question). Each stays marked (unverified) until captured — this live-verification
-pass is still in progress, not complete.
+5. **Download, upload, rename, copy, trash, and share-link creation all confirmed working**
+   against the real account via the app's own UI — every `IDriveOperations` method except move.
+6. **`sha256Checksum` confirmed populated on real files, resolving §8.4's open question.** Queried
+   `GET https://www.googleapis.com/drive/v3/files` directly (using the app's own stored access
+   token) with `fields=files(id,name,mimeType,size,md5Checksum,sha256Checksum)` against ten real
+   files already in the account — every one with binary content (PNG, JPEG, PDF, plain text,
+   `.xlsx`) returned both `md5Checksum` **and** `sha256Checksum` populated together, confirming
+   §8.4's "all three checksums present together for any binary file" assumption exactly, with no
+   fallback ever needed in practice on this account. A native Google Map
+   (`application/vnd.google-apps.map`) returned neither, as expected for a Google-native mimeType.
+7. **Google-native files (Docs/Sheets/Slides) listed correctly, per the design — but the Explorer's
+   preview and download buttons were live and failed instead of simply not appearing.** Two real
+   gaps the §8.4 design decision (mark, don't hide, so a browse still shows them) didn't anticipate:
+   - `TextPreviewPolicy.IsTextName`'s "no extension at all" fallback (meant for files like `LICENSE`
+     or `Makefile`) also matched Google-native items, which have no file extension either — so the
+     preview ("eye") button showed up for a Google Doc and then failed against Drive's real 403 on
+     `alt=media` for non-binary content, instead of the button never appearing the way it already
+     does for genuinely non-previewable files.
+   - `DriveNodeViewModel.DownloadCommand` was gated only on `!Item.IsFolder`, with no equivalent
+     check — same failure mode, but for a *disabled-with-an-explanation* button (matching
+     `CanShareLink`/`ShareLinkTooltip`'s existing pattern) rather than a hidden one, since download
+     is otherwise a normal file action.
+   **Fixed**: `DriveNodeViewModel.CanPreview` now also requires `!Item.IsRemoteOnlyDocument`; a new
+   `CanDownload`/`DownloadTooltip` pair (mirroring `CanShareLink`/`ShareLinkTooltip`) gates
+   `DownloadCommand` and explains the disabled state in both the row's download button and its
+   context-menu entry. Regression test:
+   `MainWindowShareLinkTests.DriveNodeViewModel_ARemoteOnlyDocument_CannotBeDownloadedOrPreviewed`.
+   Exporting a Google-native file to a real format (`.docx`/PDF/etc. via `files.export`) remains
+   explicitly out of scope (§7/§8.9) — this fix only stops the app from offering an action that was
+   always going to fail.
+
+**Not yet captured**: pagination past a folder's first page, the resumable (>5 MiB) upload path
+specifically (only a small upload was exercised), and moving an item between folders. Each stays
+marked (unverified) until captured. A full sync-pair cycle (upload direction) was separately
+verified working end-to-end against Google Drive during this same session — see the sync-engine
+side of testing, not this REST-API-level appendix.
 
 ## Appendix B — File-by-file change inventory
 

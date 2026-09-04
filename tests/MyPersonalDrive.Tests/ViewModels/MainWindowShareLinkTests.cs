@@ -135,4 +135,33 @@ public class MainWindowShareLinkTests : IDisposable
         Assert.False(unsupported.ShareLinkCommand.CanExecute(null));
         Assert.Contains("no está disponible", unsupported.ShareLinkTooltip);
     }
+
+    /// <summary>
+    /// docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2, live-verification finding: a Google-native Doc
+    /// has no binary content, so Drive rejects a plain download/preview read with a 403 — before
+    /// this fix the buttons were live and the user hit that error instead of the button simply not
+    /// being clickable. `IsRemoteOnlyDocument` has no extension either, so without the explicit
+    /// check TextPreviewPolicy's "no extension at all" fallback would offer to preview it as text.
+    /// </summary>
+    [Fact]
+    public void DriveNodeViewModel_ARemoteOnlyDocument_CannotBeDownloadedOrPreviewed()
+    {
+        var googleDoc = new DriveNodeViewModel(
+            new DriveItem("/Meeting Notes", "Meeting Notes", IsFolder: false, IsRemoteOnlyDocument: true),
+            _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask,
+            previewItemAsync: _ => Task.CompletedTask);
+        var ordinaryFile = new DriveNodeViewModel(
+            new DriveItem("/notes.txt", "notes.txt", IsFolder: false, Size: 10),
+            _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask,
+            previewItemAsync: _ => Task.CompletedTask);
+
+        Assert.False(googleDoc.CanDownload);
+        Assert.False(googleDoc.DownloadCommand.CanExecute(null));
+        Assert.Contains("no se pueden descargar", googleDoc.DownloadTooltip);
+        Assert.False(googleDoc.CanPreview);
+
+        Assert.True(ordinaryFile.CanDownload);
+        Assert.True(ordinaryFile.DownloadCommand.CanExecute(null));
+        Assert.True(ordinaryFile.CanPreview);
+    }
 }

@@ -587,7 +587,7 @@
 
                   <Button Grid.Column="5"
                           Classes="rowAction"
-                          ToolTip.Tip="Download file"
+                          ToolTip.Tip="{Binding DownloadTooltip}"
                           Margin="8,0,0,0"
                           Command="{Binding DownloadCommand}"
                           IsVisible="{Binding IsFile}">
@@ -629,7 +629,12 @@
                       <MenuItem Header="Ver el contenido" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
                       <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
                       <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
-                      <MenuItem Header="Descargar" Command="{Binding DownloadCommand}" IsVisible="{Binding IsFile}" />
+                      <MenuItem Header="Descargar"
+                                Command="{Binding DownloadCommand}"
+                                IsVisible="{Binding IsFile}"
+                                IsEnabled="{Binding CanDownload}"
+                                ToolTip.Tip="{Binding DownloadTooltip}"
+                                ToolTip.ShowOnDisabled="True" />
                       <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
                       <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
                       <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
@@ -693,7 +698,12 @@
                       <MenuItem Header="Ver el contenido" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
                       <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
                       <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
-                      <MenuItem Header="Descargar" Command="{Binding DownloadCommand}" IsVisible="{Binding IsFile}" />
+                      <MenuItem Header="Descargar"
+                                Command="{Binding DownloadCommand}"
+                                IsVisible="{Binding IsFile}"
+                                IsEnabled="{Binding CanDownload}"
+                                ToolTip.Tip="{Binding DownloadTooltip}"
+                                ToolTip.ShowOnDisabled="True" />
                       <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
                       <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
                       <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />

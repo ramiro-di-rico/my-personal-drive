@@ -1636,11 +1636,41 @@ integration test suite.
    explicitly out of scope (§7/§8.9) — this fix only stops the app from offering an action that was
    always going to fail.
 
+8. **A Google Drive move/rename test surfaced no bug in `GoogleDriveOperations` at all — it
+   surfaced a real, pre-existing sync-panel UX gap.** Attempting to exercise a real remote move
+   (rename a file inside a `TwoWay` pair's local folder, expecting `SyncReconciler.DetectLocalMoves`
+   to issue a `MoveItemsAsync`/`addParents`+`removeParents` `PATCH`) went through three rounds of
+   confusion before landing on the real explanation, each one confirmed directly against
+   `cache.db`/the code rather than guessed:
+   - The pair being tested turned out to be `LocalToRemote` (upload-only), not `TwoWay` as the user
+     believed — confirmed by querying `SyncPairs` directly. Move/rename detection is deliberately
+     `TwoWay`-only (`SyncReconciler.Reconcile`'s own doc comment: a one-way mirror keeps no baseline
+     to correlate a move against), so a rename there correctly just re-uploads under the new name
+     and leaves the old one, exactly as observed — not a bug.
+   - Editing that pair to `TwoWay` afterward appeared to silently fail (reopening the edit dialog
+     still showed `LocalToRemote`). Also not a bug: `SyncPairValidator.ValidateDirectionChange`
+     correctly refused the change, because two *other* pairs (Proton's and OneDrive's, both
+     `LocalToRemote`) already shared that exact local folder — switching the Google Drive pair to
+     `TwoWay` would have let it start writing into a folder two other pairs treat as
+     upload-only-safe, which is precisely the unsafe shape that rule exists to block.
+   - **The real, fixable gap**: that correct refusal was only ever shown as a `StatusMessage` line,
+     easy to miss once the edit dialog had already closed — indistinguishable, from the user's
+     seat, from the save silently failing. **Fixed**: added `SyncPanelViewModel.RequestAlertAsync`
+     (a blocking, single-button "Can't do that" dialog, `MainWindow.axaml.cs.ShowAlertAsync`,
+     mirroring the existing `AskAsync` confirmation dialog's shape) and wired it into both places a
+     `SyncPairValidator` rejection can happen — `AddPairAsync`'s validation and
+     `SyncPairViewModel.EditAsync`'s direction-change validation (via the existing `OnError`
+     plumbing). Regression tests:
+     `SyncPanelPairCreationTests.ANestedLocalFolder_IsRefused_AndNothingIsPersisted` (extended) and
+     `SyncPairEditTests.RejectingAnUnsafeDirectionChange_AlsoRaisesABlockingAlert_NotJustStatusText`.
+
 **Not yet captured**: pagination past a folder's first page, the resumable (>5 MiB) upload path
-specifically (only a small upload was exercised), and moving an item between folders. Each stays
-marked (unverified) until captured. A full sync-pair cycle (upload direction) was separately
-verified working end-to-end against Google Drive during this same session — see the sync-engine
-side of testing, not this REST-API-level appendix.
+specifically (only a small upload was exercised), and moving an item between folders (blocked on
+setting up a `TwoWay` pair against a local folder not shared with another provider's pair — not
+yet retried after the alert-visibility fix above). Each stays marked (unverified) until captured.
+A full sync-pair cycle (upload direction) was separately verified working end-to-end against
+Google Drive during this same session — see the sync-engine side of testing, not this
+REST-API-level appendix.
 
 ## Appendix B — File-by-file change inventory
 

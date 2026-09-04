@@ -76,10 +76,14 @@ public class GoogleDriveOperationsTests : IDisposable
     [Fact]
     public async Task ListFolderAsync_MapsFolderAndFileCorrectly()
     {
+        // "size" is a real int64 field, and Drive serializes int64 fields as JSON *strings* (not
+        // bare numbers) to avoid precision loss for JS clients — confirmed live against a real
+        // account (docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A). A bare-number fixture here would
+        // have hidden the exact bug that broke a real first listing.
         WhenGet("'root' in parents", _ => FakeHttpMessageHandler.Json(HttpStatusCode.OK, """
             {"files":[
                 {"id":"1","name":"Photos","mimeType":"application/vnd.google-apps.folder"},
-                {"id":"2","name":"notes.txt","mimeType":"text/plain","size":42,"modifiedTime":"2026-01-02T03:04:05Z","sha256Checksum":"abc123"}
+                {"id":"2","name":"notes.txt","mimeType":"text/plain","size":"42","modifiedTime":"2026-01-02T03:04:05Z","sha256Checksum":"abc123"}
             ]}
             """));
 
@@ -102,7 +106,7 @@ public class GoogleDriveOperationsTests : IDisposable
     public async Task ListFolderAsync_AFileWithOnlyMd5Checksum_GetsNoContentHash()
     {
         WhenGet("'root' in parents", _ => FakeHttpMessageHandler.Json(HttpStatusCode.OK, """
-            {"files":[{"id":"1","name":"legacy.txt","mimeType":"text/plain","size":10,"md5Checksum":"deadbeef"}]}
+            {"files":[{"id":"1","name":"legacy.txt","mimeType":"text/plain","size":"10","md5Checksum":"deadbeef"}]}
             """));
 
         var items = await _sut.ListFolderAsync("/");

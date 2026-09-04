@@ -1516,6 +1516,46 @@ children, chunked upload for a file over 4 MiB, async copy monitoring, 429/503 r
 in practice, and the exact reserved-name list in §4.6/O6 (still per Microsoft's documentation, not
 tested against the live service). Each remains marked (unverified) until captured.
 
+## Appendix A2 — Verified Google Drive behavior
+
+Live-verification session in progress, 2026-09-04, against a real personal Google account
+(project `my-personal-drive-507613`) via the real app UI (`dotnet run`), not yet the opt-in
+integration test suite.
+
+1. **OAuth sign-in itself worked** — authorization-code + PKCE via the loopback listener,
+   `access_type=offline`/`prompt=consent` on the authorize URL, `client_secret` on the token
+   exchange — all as designed in §8.1. Confirms Google still issues a `client_secret` for a
+   "Desktop app" OAuth client (seen directly in the downloaded credentials JSON) and that the
+   token exchange accepts it.
+2. **A real sign-in attempt hung the entire UI** the first time it was tried, confirming the
+   defect §8.1's design didn't anticipate: `GoogleDriveAuthenticator.AuthenticateAsync` awaited
+   `HttpListener.GetContextAsync()` with **no timeout**, and every `!IsLoading`-gated command in
+   `MainWindowViewModel` (including switching the browsed provider) went unresponsive for as long
+   as that wait lasted — observed lasting indefinitely across two separate attempts, both requiring
+   the app to be killed. Root-caused by reading `MainWindowViewModel.AuthenticateAsync`/`SwitchBrowserAccountAsync`
+   together: `SelectedProvider`'s setter (the header combo box) has no `IsLoading` guard and so kept
+   working, which is what made the symptom look inconsistent ("the settings-tab switch buttons do
+   nothing, but the header dropdown does") rather than a clean full freeze. **Fixed**:
+   `GoogleDriveAuthenticator` now bounds that wait to a 5-minute `SignInTimeout`, throwing a clear
+   `DriveErrorKind.Timeout` `DriveException` instead of hanging forever.
+3. **`files.list`'s `size` field is a JSON string, not a bare number** — confirmed live: a real
+   first `ListFolderAsync("/")` after a successful sign-in threw
+   `System.Text.Json.JsonException: The JSON value could not be converted to
+   System.Nullable\`1[System.Int64]` on `$.files[0].size`, because `GoogleDriveFile.Size` was typed
+   `long?` with no string-reading allowance. This is Google's own documented convention for int64
+   API fields (avoids precision loss for JavaScript clients) — the phase's own research pass (§8,
+   pre-implementation) didn't surface it because no live capture had been taken yet. **Fixed**:
+   `[JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]` added to `GoogleDriveFile.Size`.
+   The unit-test fixtures in `GoogleDriveOperationsTests` had been written with a bare-number
+   `"size":42` (an assumption, not a captured shape) and were corrected to the real
+   `"size":"42"` string form so they would have caught this before it reached a live account.
+
+**Not yet captured**: a full folder listing beyond the first page, upload (small and resumable),
+move, copy, trash, rename, share-link creation, a real Google-native file (Doc/Sheet) actually
+being skipped as designed, and the exact `sha256Checksum`/`md5Checksum` presence on a real file
+(§8.4's own open question). Each stays marked (unverified) until captured — this live-verification
+pass is still in progress, not complete.
+
 ## Appendix B — File-by-file change inventory
 
 | File | P1 | P2 | P3 | P4 | P5 | P6 | P10 |

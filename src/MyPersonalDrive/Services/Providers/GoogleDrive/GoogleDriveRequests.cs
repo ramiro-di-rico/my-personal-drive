@@ -22,7 +22,11 @@ public sealed class GoogleDriveFile
     [JsonPropertyName("parents")]
     public List<string>? Parents { get; set; }
 
+    // Drive serializes int64 fields as JSON strings (avoids precision loss for JS clients) —
+    // confirmed live: a real `files.list` response returned `"size":"12345"`, not a bare number,
+    // and the default reader threw on it (docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A).
     [JsonPropertyName("size")]
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
     public long? Size { get; set; }
 
     [JsonPropertyName("modifiedTime")]

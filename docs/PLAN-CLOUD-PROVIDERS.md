@@ -1552,17 +1552,37 @@ integration test suite.
 
 4. **Switching the browsed provider directly between two non-adjacent entries in the header
    ComboBox (e.g. Proton → Google Drive) silently did nothing** — going through a third provider
-   first (Proton → OneDrive → Google Drive) always worked. Root cause: `ProviderDescriptor` is a
-   record with full-property default equality, and `MainWindowViewModel.AvailableProviders`/
-   `SelectedProvider` rebuild brand-new instances on every access; the ComboBox's two-way
-   `SelectedItem` binding resolves the bound value against its current `ItemsSource` via `Equals`,
-   and whenever two recomputations of "the same" provider differed in `AccountIdentity`/
-   `IsAuthenticated` (which change across the several `OnPropertyChanged` cascades one switch
-   fires), Avalonia treated them as different items and lost the selection. Not specific to Google
-   Drive — pre-existed for every provider pair, just never noticed before this session exercised
-   more direct provider-to-provider switches than usual. **Fixed**: `ProviderDescriptor.Equals`/
-   `GetHashCode` now compare by `Id` alone (its real identity), not the whole record. Regression
-   test: `ProviderDescriptorTests`.
+   first (Proton → OneDrive → Google Drive) always worked. Not specific to Google Drive —
+   pre-existed for every provider pair, just never noticed before this session exercised more
+   direct provider-to-provider switches than usual. Took three iterations, live-tested each time,
+   to actually fix:
+   - **First attempt**: `ProviderDescriptor` is a record with full-property default equality, and
+     `AvailableProviders`/`SelectedProvider` rebuild brand-new instances on every access; the
+     ComboBox's two-way `SelectedItem` binding resolves the bound value against its current
+     `ItemsSource` via `Equals`, and whenever two recomputations of "the same" provider differed in
+     `AccountIdentity`/`IsAuthenticated`, Avalonia treated them as different items and lost the
+     selection. Changed `ProviderDescriptor.Equals`/`GetHashCode` to compare by `Id` alone. Live
+     retest: **did not fix it**.
+   - **Second attempt**: suspected reentrancy instead — `SelectedProvider`'s setter ran the switch's
+     synchronous prefix inline, inside the ComboBox's own SelectedItem-changed handling. Deferred
+     the switch via `Dispatcher.UIThread.Post`. Live retest: **made it worse** — every switch now
+     visibly flickered to the new provider and then snapped back to the original one, consistently,
+     for every pair (not just non-adjacent ones). Root cause of the regression: the getter could now
+     be read (as part of the ComboBox's own binding round-trip) in the window *before* the deferred
+     post had actually run `_provider`'s reassignment, returning the stale value and causing
+     Avalonia to "correct" the visual selection back.
+   - **Actual fix**: stopped relying on `SelectedItem`/`Equals`-based matching entirely.
+     `MainWindowViewModel` gained `SelectedProviderIndex` (a plain `int`, immune to the
+     reference/value-matching ambiguity a freshly-rebuilt list of records has no way to avoid), and
+     `MainWindow.axaml`'s ComboBox binds `SelectedIndex` to it instead of `SelectedItem` to
+     `SelectedProvider`. The `Dispatcher.UIThread.Post` deferral from the second attempt was
+     reverted — not needed once selection isn't matched by equality at all. `SelectedProvider`
+     itself (get/set) is kept, unchanged in behavior, since existing tests and other call sites
+     still use it directly. Regression tests: `ProviderDescriptorTests`,
+     `ProviderContextSwitcherTests.SelectedProviderIndex_TracksTheActiveProvider_AcrossASwitch`.
+   Recorded in full because the failed middle attempt is itself the lesson: a plausible-sounding
+   fix for a UI binding bug still needs a live retest before being trusted, the same discipline
+   this plan's Appendix A already applies to backend behavior.
 
 **Not yet captured**: a full folder listing beyond the first page, upload (small and resumable),
 move, copy, trash, rename, share-link creation, a real Google-native file (Doc/Sheet) actually

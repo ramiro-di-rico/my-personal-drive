@@ -1550,6 +1550,20 @@ integration test suite.
    `"size":42` (an assumption, not a captured shape) and were corrected to the real
    `"size":"42"` string form so they would have caught this before it reached a live account.
 
+4. **Switching the browsed provider directly between two non-adjacent entries in the header
+   ComboBox (e.g. Proton → Google Drive) silently did nothing** — going through a third provider
+   first (Proton → OneDrive → Google Drive) always worked. Root cause: `ProviderDescriptor` is a
+   record with full-property default equality, and `MainWindowViewModel.AvailableProviders`/
+   `SelectedProvider` rebuild brand-new instances on every access; the ComboBox's two-way
+   `SelectedItem` binding resolves the bound value against its current `ItemsSource` via `Equals`,
+   and whenever two recomputations of "the same" provider differed in `AccountIdentity`/
+   `IsAuthenticated` (which change across the several `OnPropertyChanged` cascades one switch
+   fires), Avalonia treated them as different items and lost the selection. Not specific to Google
+   Drive — pre-existed for every provider pair, just never noticed before this session exercised
+   more direct provider-to-provider switches than usual. **Fixed**: `ProviderDescriptor.Equals`/
+   `GetHashCode` now compare by `Id` alone (its real identity), not the whole record. Regression
+   test: `ProviderDescriptorTests`.
+
 **Not yet captured**: a full folder listing beyond the first page, upload (small and resumable),
 move, copy, trash, rename, share-link creation, a real Google-native file (Doc/Sheet) actually
 being skipped as designed, and the exact `sha256Checksum`/`md5Checksum` presence on a real file

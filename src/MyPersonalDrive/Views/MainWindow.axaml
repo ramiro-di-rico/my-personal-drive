@@ -123,9 +123,12 @@
             <TextBlock Text="DRIVE" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" />
           </StackPanel>
 
-          <!-- Provider Context Switcher ComboBox -->
+          <!-- Provider Context Switcher ComboBox. Bound by index, not SelectedItem: AvailableProviders
+               rebuilds fresh ProviderDescriptor instances on every access, and an index has no
+               equality-matching ambiguity for Avalonia to get wrong (docs/PLAN-CLOUD-PROVIDERS.md
+               P10 Appendix A2). -->
           <ComboBox ItemsSource="{Binding AvailableProviders}"
-                    SelectedItem="{Binding SelectedProvider}"
+                    SelectedIndex="{Binding SelectedProviderIndex}"
                     VerticalAlignment="Center"
                     CornerRadius="6"
                     Padding="10,4"

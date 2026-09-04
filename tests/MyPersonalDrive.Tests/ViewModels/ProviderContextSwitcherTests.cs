@@ -115,6 +115,28 @@ public class ProviderContextSwitcherTests : IDisposable
         Assert.Equal(15L * 1024 * 1024 * 1024, vm.QuotaTotalBytes); // 15 GB for Google Drive
     }
 
+    /// <summary>
+    /// docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2: the header ComboBox binds by index rather than
+    /// SelectedItem precisely because AvailableProviders rebuilds fresh ProviderDescriptor instances
+    /// on every access — this locks in that SelectedProviderIndex still resolves to the right
+    /// position after that kind of repeated recomputation, across a real switch.
+    /// </summary>
+    [Fact]
+    public async Task SelectedProviderIndex_TracksTheActiveProvider_AcrossASwitch()
+    {
+        var vm = await BuildAsync();
+
+        var before = vm.AvailableProviders;
+        Assert.Equal(before.ToList().FindIndex(p => p.Id == ProviderId.Proton), vm.SelectedProviderIndex);
+
+        await vm.SwitchBrowserAccountAsync(ProviderId.GoogleDrive);
+
+        // A brand-new AvailableProviders computation, deliberately not reusing `before` — this is
+        // exactly what the real ComboBox's ItemsSource re-read does on every property-changed tick.
+        var after = vm.AvailableProviders;
+        Assert.Equal(after.ToList().FindIndex(p => p.Id == ProviderId.GoogleDrive), vm.SelectedProviderIndex);
+    }
+
     [Fact]
     public async Task SwitchToNextcloud_UpdatesActiveFlags_AndQuota()
     {

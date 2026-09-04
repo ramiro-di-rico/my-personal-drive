@@ -187,19 +187,49 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (value is not null && value.Id != _provider.Id)
             {
-                // Deferred to the next UI-thread dispatch, not run inline. This setter fires
-                // synchronously from inside the ComboBox's own SelectedItem-changed handling (the
-                // user's click); SwitchBrowserAccountAsync's synchronous prefix immediately
-                // reassigns _provider and re-raises PropertyChanged for SelectedProvider/
-                // AvailableProviders before that handling has unwound — a reentrant "the bound
-                // value changed again, right now, mid-update" that Avalonia's SelectingItemsControl
-                // doesn't reliably resync from. That reentrancy is what made switching directly
-                // between two non-adjacent providers in the header ComboBox silently do nothing
-                // (docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2) — posting the actual switch to run
-                // after this call stack fully unwinds avoids it regardless of the exact internal
-                // ComboBox mechanics.
-                var targetId = value.Id;
-                Dispatcher.UIThread.Post(() => _ = SwitchProviderAndReportErrorsAsync(targetId));
+                _ = SwitchProviderAndReportErrorsAsync(value.Id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The header ComboBox binds its selection here instead of to <see cref="SelectedProvider"/>
+    /// directly. A <c>SelectedItem</c> binding needs Avalonia to match the bound value against
+    /// <see cref="AvailableProviders"/> by <c>Equals</c> — and since that list is rebuilt with
+    /// brand-new <see cref="ProviderDescriptor"/> instances on every access, any mismatch between
+    /// two recomputations (even after making <see cref="ProviderDescriptor"/>'s equality Id-only)
+    /// left switching between two non-adjacent providers unreliable in practice
+    /// (docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2). An index is a plain <see cref="int"/> with no
+    /// such ambiguity — it can't fail to match itself — so it sidesteps the whole class of bug
+    /// rather than depending on getting the equality semantics exactly right.
+    /// </summary>
+    public int SelectedProviderIndex
+    {
+        get
+        {
+            var providers = AvailableProviders;
+            for (var i = 0; i < providers.Count; i++)
+            {
+                if (providers[i].Id == _provider.Id)
+                {
+                    return i;
+                }
+            }
+
+            return providers.Count > 0 ? 0 : -1;
+        }
+        set
+        {
+            var providers = AvailableProviders;
+            if (value < 0 || value >= providers.Count)
+            {
+                return;
+            }
+
+            var target = providers[value];
+            if (target.Id != _provider.Id)
+            {
+                _ = SwitchProviderAndReportErrorsAsync(target.Id);
             }
         }
     }
@@ -1427,6 +1457,7 @@ public sealed class MainWindowViewModel : ObservableObject
             UpdateQuotaMetrics();
             OnPropertyChanged(nameof(AvailableProviders));
             OnPropertyChanged(nameof(SelectedProvider));
+            OnPropertyChanged(nameof(SelectedProviderIndex));
             OnPropertyChanged(nameof(OneDriveAccountLabel));
             OnPropertyChanged(nameof(GoogleDriveAccountLabel));
             await GoToRootAsync();
@@ -1454,6 +1485,7 @@ public sealed class MainWindowViewModel : ObservableObject
             UpdateQuotaMetrics();
             OnPropertyChanged(nameof(AvailableProviders));
             OnPropertyChanged(nameof(SelectedProvider));
+            OnPropertyChanged(nameof(SelectedProviderIndex));
             OnPropertyChanged(nameof(OneDriveAccountLabel));
             OnPropertyChanged(nameof(GoogleDriveAccountLabel));
             ResetBrowserState();
@@ -1506,6 +1538,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             StatusMessage = $"{id} isn't configured.";
             OnPropertyChanged(nameof(SelectedProvider));
+            OnPropertyChanged(nameof(SelectedProviderIndex));
             return;
         }
 
@@ -1550,6 +1583,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         OnPropertyChanged(nameof(AvailableProviders));
         OnPropertyChanged(nameof(SelectedProvider));
+        OnPropertyChanged(nameof(SelectedProviderIndex));
         OnPropertyChanged(nameof(ActiveProviderDisplayName));
         OnPropertyChanged(nameof(BrowserHeaderTitle));
         OnPropertyChanged(nameof(BrowserHeaderSubtitle));

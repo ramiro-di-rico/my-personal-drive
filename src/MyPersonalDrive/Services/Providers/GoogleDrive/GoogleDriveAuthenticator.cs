@@ -35,6 +35,18 @@ public sealed class GoogleDriveAuthenticator : IDriveAuthenticator
     /// <summary>Refresh this far ahead of the stored expiry, so a request in flight never races an about-to-expire token.</summary>
     private static readonly TimeSpan RefreshMargin = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// How long <see cref="AuthenticateAsync"/> waits for the browser to complete the sign-in and
+    /// redirect back to the loopback listener, before giving up. Without this, an abandoned or
+    /// failed browser flow (no default browser, the user closes the tab, <c>xdg-open</c> not
+    /// configured) left <c>HttpListener.GetContextAsync()</c> waiting forever — and since the
+    /// caller keeps <c>IsLoading</c> true for the whole duration, every other <c>!IsLoading</c>-gated
+    /// command in the app (including switching the browsed provider) went silently unresponsive
+    /// along with it. Found live: a real sign-in attempt against this provider hung the whole UI
+    /// exactly this way (docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A).
+    /// </summary>
+    private static readonly TimeSpan SignInTimeout = TimeSpan.FromMinutes(5);
+
     private readonly string _clientId;
     private readonly string _clientSecret;
     private readonly GoogleDriveTokenStore _tokenStore;
@@ -80,9 +92,15 @@ public sealed class GoogleDriveAuthenticator : IDriveAuthenticator
 
         TryLaunchBrowser(authorizeUrl);
 
+        // Bounds the wait below to SignInTimeout, distinguishable from the caller's own
+        // cancellationToken so a timeout gets its own clear message instead of a bare
+        // OperationCanceledException.
+        using var timeoutCts = new CancellationTokenSource(SignInTimeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+
         try
         {
-            var code = await WaitForRedirectAsync(listener, state, cancellationToken);
+            var code = await WaitForRedirectAsync(listener, state, linkedCts.Token);
             var token = await ExchangeCodeForTokenAsync(code, verifier, redirectUri, cancellationToken);
             var accountLabel = await TryFetchAccountLabelAsync(token.AccessToken, cancellationToken);
 
@@ -95,6 +113,11 @@ public sealed class GoogleDriveAuthenticator : IDriveAuthenticator
             });
 
             Activity?.Invoke(this, new ProviderActivity(ActivityKind.Finished, $"GET {AuthorizeEndpoint}", Text: null, IsError: false, ExitCode: 0, Duration: null));
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            Activity?.Invoke(this, new ProviderActivity(ActivityKind.Finished, $"GET {AuthorizeEndpoint}", Text: null, IsError: true, ExitCode: 1, Duration: null));
+            throw SignInTimedOut();
         }
         catch
         {
@@ -361,4 +384,12 @@ public sealed class GoogleDriveAuthenticator : IDriveAuthenticator
 
     private static DriveException NotAuthenticated(string message)
         => new("Google Drive sign-in", exitCode: 1, stdout: string.Empty, stderr: message, message, DriveErrorKind.NotAuthenticated);
+
+    private static DriveException SignInTimedOut()
+    {
+        var message = $"Google Drive sign-in timed out after {SignInTimeout.TotalMinutes:0} minutes — " +
+            "no browser completed the login. Make sure a browser window opened to accounts.google.com, " +
+            "finish signing in there, and try again.";
+        return new("Google Drive sign-in", exitCode: 1, stdout: string.Empty, stderr: message, message, DriveErrorKind.Timeout);
+    }
 }

@@ -295,13 +295,14 @@
 - [x] **P9** — filter the Sync window's pair list by account/provider, using the same filter-chip
       idiom the folder browser already uses for file kinds (`ProviderFilterViewModel`,
       `SyncPanelViewModel.VisiblePairs`). See [§P9](#p9--filter-sync-pairs-by-provider).
-- [ ] **P10 — Google Drive provider (planned, not started).** Design only so far — see
+- [ ] **P10 — Google Drive provider (design approved 2026-09-04, implementation starting).** See
       [§8](#8-google-drive-g--rest-api-v3-design) for the full design write-up (auth, the
       id-based-addressing mode `IProviderPathSyntax` needs, capabilities, error mapping) and its
       own phase entry below. This is the provider §7 originally flagged as "out of scope" for this
-      plan but explicitly kept addable; §7 has been updated accordingly. **Not yet approved for
-      implementation** — no provider code exists yet, this is Phase 1 (plan) of the
-      `add-cloud-provider` skill.
+      plan but explicitly kept addable; §7 has been updated accordingly. Google Cloud Console side
+      (project `my-personal-drive-507613`, Drive API enabled, `drive` scope on the OAuth consent
+      screen, a Desktop-app OAuth client, the developer's own account added as a test user) is set
+      up and confirmed by the user as of 2026-09-04.
 
 ### Adversarial review of P1–P5 — 5 confirmed bugs fixed
 
@@ -892,16 +893,17 @@ browser already established for file kinds (`ViewModels/KindFilterViewModel.cs` 
 asked for; a general filter/sort bar for the Sync window is a separate, larger feature if ever
 wanted.
 
-### P10 — Google Drive provider (planned, not started)
+### P10 — Google Drive provider (design approved, implementation in progress)
 
 See §8. Lands `Services/Providers/GoogleDrive/` and nothing outside it except catalog
 registration (`ProviderId.GoogleDrive`, mirroring how `ProviderId.OneDrive` was added ahead of its
 own P6), `AppJsonContext` entries for the token/settings records, a settings-view connection card
 (§5-shaped, third card added to the same `HasDiagnostics`-gated pattern), and the doc updates §4.2
 required for OneDrive's own "second outbound call" decision (B10) — this is now a *third*.
-**Blocked on explicit user sign-off on §8, in particular the `drive` OAuth scope's consent-screen
-cost (§8.1) and the client-side conflict-strategy gap (§8.6/R7)** — this entry stays unchecked
-until that sign-off happens and Phase 2 of the `add-cloud-provider` skill begins.
+User signed off on §8 on 2026-09-04 (the `drive` OAuth scope's consent-screen cost, §8.1, and the
+client-side conflict-strategy gap, §8.6/R7, both explicitly accepted) and completed the Google
+Cloud Console setup (project `my-personal-drive-507613`) — Phase 2 of the `add-cloud-provider`
+skill is now underway.
 
 ### P8 — *Optional:* delta-based remote scanning — implemented, pending live verification
 

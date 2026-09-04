@@ -147,36 +147,62 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>
     /// What the settings view's provider picker and header dropdown list — see docs/PLAN-CLOUD-PROVIDERS.md P5/P6.
     /// Dynamically reflects the live account identities and connection statuses.
+    ///
+    /// One stable instance for the lifetime of the ViewModel, populated once in the constructor and
+    /// updated in place afterward by <see cref="RefreshAvailableProviders"/> — never reassigned to a
+    /// brand-new collection. The header ComboBox's <c>ItemsSource</c> binds to this exact instance;
+    /// swapping in a new collection object on every provider switch (the original design, and every
+    /// attempted fix short of this one) is what made switching directly between two providers
+    /// unreliable: Avalonia's <c>SelectingItemsControl</c> resets or mis-tracks
+    /// <c>SelectedItem</c>/<c>SelectedIndex</c> whenever <c>ItemsSource</c> itself changes identity,
+    /// no matter how carefully the selected value is kept in sync afterward
+    /// (docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2 — three prior attempts, each live-tested and
+    /// each still broken, all treated a symptom of this instead of the cause).
     /// </summary>
-    public IReadOnlyList<ProviderDescriptor> AvailableProviders
+    public ObservableCollection<ProviderDescriptor> AvailableProviders { get; } = new();
+
+    /// <summary>
+    /// Recomputes every entry's live fields (<c>AccountIdentity</c>/<c>IsAuthenticated</c>) and
+    /// writes them into <see cref="AvailableProviders"/> by index — each assignment is an
+    /// <see cref="ObservableCollection{T}"/> element replacement (a granular
+    /// <c>CollectionChanged</c> notification), not a reassignment of the collection itself. Called
+    /// once from the constructor to populate it, and again after anything that can change a
+    /// provider's live auth state (sign-in/out, a live account switch).
+    /// </summary>
+    private void RefreshAvailableProviders()
     {
-        get
+        var settings = _settings.Load();
+        var available = (_providerCatalog ?? new ProviderCatalog()).Available;
+
+        for (var i = 0; i < available.Count; i++)
         {
-            var settings = _settings.Load();
-            var available = (_providerCatalog ?? new ProviderCatalog()).Available;
-            return available.Select(desc =>
+            var desc = available[i];
+
+            // The active provider's live in-memory flag is fresher than settings (which may not
+            // have been persisted yet mid-session); every other provider is read from settings.
+            var isAuth = desc.Id == _provider.Id ? _isAuthenticated : settings.IsProviderAuthenticated(desc.Id);
+
+            // OneDrive's account label lives on its live GraphAuthenticator, not settings, until
+            // AuthenticateAsync persists it — settings can lag behind what's actually signed in.
+            var liveLabel = _provider is OneDriveProvider { Auth: GraphAuthenticator { AccountLabel: { } label } } && label != "Not signed in."
+                ? label
+                : null;
+
+            var persistedLabel = settings.ProviderAccountLabel(desc.Id);
+            var identity = liveLabel
+                ?? (!string.IsNullOrWhiteSpace(persistedLabel) ? persistedLabel : null)
+                ?? (isAuth ? PlaceholderIdentity(desc.Id) : null);
+
+            var updated = desc with { AccountIdentity = identity, IsAuthenticated = isAuth };
+
+            if (i < AvailableProviders.Count)
             {
-                // The active provider's live in-memory flag is fresher than settings (which may not
-                // have been persisted yet mid-session); every other provider is read from settings.
-                var isAuth = desc.Id == _provider.Id ? _isAuthenticated : settings.IsProviderAuthenticated(desc.Id);
-
-                // OneDrive's account label lives on its live GraphAuthenticator, not settings, until
-                // AuthenticateAsync persists it — settings can lag behind what's actually signed in.
-                var liveLabel = _provider is OneDriveProvider { Auth: GraphAuthenticator { AccountLabel: { } label } } && label != "Not signed in."
-                    ? label
-                    : null;
-
-                var persistedLabel = settings.ProviderAccountLabel(desc.Id);
-                var identity = liveLabel
-                    ?? (!string.IsNullOrWhiteSpace(persistedLabel) ? persistedLabel : null)
-                    ?? (isAuth ? PlaceholderIdentity(desc.Id) : null);
-
-                return desc with
-                {
-                    AccountIdentity = identity,
-                    IsAuthenticated = isAuth
-                };
-            }).ToList();
+                AvailableProviders[i] = updated;
+            }
+            else
+            {
+                AvailableProviders.Add(updated);
+            }
         }
     }
 
@@ -373,6 +399,7 @@ public sealed class MainWindowViewModel : ObservableObject
         KindFilters = new ObservableCollection<KindFilterViewModel>();
         BreadcrumbItems = new ObservableCollection<BreadcrumbSegmentViewModel>();
         UpdateBreadcrumbs(_rootPath);
+        RefreshAvailableProviders();
 
         AuthenticateCommand = new AsyncCommand(AuthenticateAsync, CanAuthenticate, HandleUnexpectedError);
         LogoutCommand = new AsyncCommand(LogoutAsync, CanLogout, HandleUnexpectedError);
@@ -1455,7 +1482,7 @@ public sealed class MainWindowViewModel : ObservableObject
             });
             UpdateConnectionTelemetry();
             UpdateQuotaMetrics();
-            OnPropertyChanged(nameof(AvailableProviders));
+            RefreshAvailableProviders();
             OnPropertyChanged(nameof(SelectedProvider));
             OnPropertyChanged(nameof(SelectedProviderIndex));
             OnPropertyChanged(nameof(OneDriveAccountLabel));
@@ -1483,7 +1510,7 @@ public sealed class MainWindowViewModel : ObservableObject
             _settings.Update(settings => settings.SetProviderAuthenticated(_provider.Id, false));
             UpdateConnectionTelemetry();
             UpdateQuotaMetrics();
-            OnPropertyChanged(nameof(AvailableProviders));
+            RefreshAvailableProviders();
             OnPropertyChanged(nameof(SelectedProvider));
             OnPropertyChanged(nameof(SelectedProviderIndex));
             OnPropertyChanged(nameof(OneDriveAccountLabel));
@@ -1581,7 +1608,7 @@ public sealed class MainWindowViewModel : ObservableObject
         UpdateQuotaMetrics();
         UpdateConnectionTelemetry();
 
-        OnPropertyChanged(nameof(AvailableProviders));
+        RefreshAvailableProviders();
         OnPropertyChanged(nameof(SelectedProvider));
         OnPropertyChanged(nameof(SelectedProviderIndex));
         OnPropertyChanged(nameof(ActiveProviderDisplayName));

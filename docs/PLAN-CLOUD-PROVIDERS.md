@@ -1554,10 +1554,10 @@ integration test suite.
    ComboBox (e.g. Proton → Google Drive) silently did nothing** — going through a third provider
    first (Proton → OneDrive → Google Drive) always worked. Not specific to Google Drive —
    pre-existed for every provider pair, just never noticed before this session exercised more
-   direct provider-to-provider switches than usual. Took three iterations, live-tested each time,
-   to actually fix:
+   direct provider-to-provider switches than usual. Took **four** iterations, live-tested every
+   time, to actually fix — the first three all treated a symptom, not the cause:
    - **First attempt**: `ProviderDescriptor` is a record with full-property default equality, and
-     `AvailableProviders`/`SelectedProvider` rebuild brand-new instances on every access; the
+     `AvailableProviders`/`SelectedProvider` rebuilt brand-new instances on every access; the
      ComboBox's two-way `SelectedItem` binding resolves the bound value against its current
      `ItemsSource` via `Equals`, and whenever two recomputations of "the same" provider differed in
      `AccountIdentity`/`IsAuthenticated`, Avalonia treated them as different items and lost the
@@ -1567,21 +1567,32 @@ integration test suite.
      synchronous prefix inline, inside the ComboBox's own SelectedItem-changed handling. Deferred
      the switch via `Dispatcher.UIThread.Post`. Live retest: **made it worse** — every switch now
      visibly flickered to the new provider and then snapped back to the original one, consistently,
-     for every pair (not just non-adjacent ones). Root cause of the regression: the getter could now
-     be read (as part of the ComboBox's own binding round-trip) in the window *before* the deferred
-     post had actually run `_provider`'s reassignment, returning the stale value and causing
-     Avalonia to "correct" the visual selection back.
-   - **Actual fix**: stopped relying on `SelectedItem`/`Equals`-based matching entirely.
-     `MainWindowViewModel` gained `SelectedProviderIndex` (a plain `int`, immune to the
-     reference/value-matching ambiguity a freshly-rebuilt list of records has no way to avoid), and
-     `MainWindow.axaml`'s ComboBox binds `SelectedIndex` to it instead of `SelectedItem` to
-     `SelectedProvider`. The `Dispatcher.UIThread.Post` deferral from the second attempt was
-     reverted — not needed once selection isn't matched by equality at all. `SelectedProvider`
-     itself (get/set) is kept, unchanged in behavior, since existing tests and other call sites
-     still use it directly. Regression tests: `ProviderDescriptorTests`,
+     for every pair (not just non-adjacent ones).
+   - **Third attempt**: stopped relying on `SelectedItem`/`Equals`-based matching — added
+     `SelectedProviderIndex` (a plain `int`) and rebound the ComboBox to `SelectedIndex`. Live
+     retest: **still broken**, same symptom as before switching to index binding.
+   - **Actual root cause, found on the fourth pass**: none of the first three attempts touched the
+     real problem — `AvailableProviders` itself was reassigned to a **brand-new collection object**
+     on every provider switch (`OnPropertyChanged(nameof(AvailableProviders))` after a getter that
+     rebuilt the whole list from scratch). Avalonia's `SelectingItemsControl` resets or mis-tracks
+     `SelectedItem`/`SelectedIndex` whenever its bound `ItemsSource` **itself** changes identity —
+     no amount of care in how the selected value is kept in sync afterward can compensate for the
+     items collection being swapped out from under it. This is what the first three attempts were
+     each, unknowingly, trying to work around from the wrong side.
+   - **Fix**: `AvailableProviders` is now `ObservableCollection<ProviderDescriptor>` — one stable
+     instance for the ViewModel's lifetime, populated once in the constructor and updated
+     afterward by a new `RefreshAvailableProviders()` that writes each entry **in place** via the
+     indexer (`AvailableProviders[i] = updated`), never reassigning the collection itself. Every
+     `OnPropertyChanged(nameof(AvailableProviders))` call site became a `RefreshAvailableProviders()`
+     call instead. `SelectedProviderIndex` (from the third attempt) and `SelectedProvider` both kept
+     unchanged otherwise. Regression tests: `ProviderDescriptorTests`,
+     `ProviderContextSwitcherTests.AvailableProviders_IsTheSameInstance_AcrossASwitch` (pins the
+     reference identity directly — the actual property this bug depended on),
      `ProviderContextSwitcherTests.SelectedProviderIndex_TracksTheActiveProvider_AcrossASwitch`.
-   Recorded in full because the failed middle attempt is itself the lesson: a plausible-sounding
-   fix for a UI binding bug still needs a live retest before being trusted, the same discipline
+   Recorded in full, including the two failed middle attempts, because that arc is itself the
+   lesson: a plausible-sounding fix for a UI binding bug still needs a live retest before being
+   trusted, and "still broken" after a fix is information about where the *next* fix should look,
+   not a reason to try a different plausible-sounding thing at the same layer — the same discipline
    this plan's Appendix A already applies to backend behavior.
 
 **Not yet captured**: a full folder listing beyond the first page, upload (small and resumable),

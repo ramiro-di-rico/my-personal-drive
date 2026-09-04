@@ -116,25 +116,44 @@ public class ProviderContextSwitcherTests : IDisposable
     }
 
     /// <summary>
+    /// docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2: three earlier fix attempts all failed live
+    /// because AvailableProviders was reassigned to a brand-new collection object on every provider
+    /// switch — Avalonia's ComboBox resets/mis-tracks selection whenever its bound ItemsSource
+    /// itself changes identity, no matter how the selected value is kept in sync afterward. The
+    /// actual fix makes AvailableProviders one stable instance, updated in place. This pins that
+    /// down directly: the reference must never change.
+    /// </summary>
+    [Fact]
+    public async Task AvailableProviders_IsTheSameInstance_AcrossASwitch()
+    {
+        var vm = await BuildAsync();
+        var before = vm.AvailableProviders;
+
+        await vm.SwitchBrowserAccountAsync(ProviderId.GoogleDrive);
+
+        Assert.Same(before, vm.AvailableProviders);
+    }
+
+    /// <summary>
     /// docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2: the header ComboBox binds by index rather than
-    /// SelectedItem precisely because AvailableProviders rebuilds fresh ProviderDescriptor instances
-    /// on every access — this locks in that SelectedProviderIndex still resolves to the right
-    /// position after that kind of repeated recomputation, across a real switch.
+    /// SelectedItem so a stray equality mismatch can never lose the selection — this locks in that
+    /// SelectedProviderIndex resolves to the right position, both before and after a real switch.
     /// </summary>
     [Fact]
     public async Task SelectedProviderIndex_TracksTheActiveProvider_AcrossASwitch()
     {
         var vm = await BuildAsync();
 
-        var before = vm.AvailableProviders;
-        Assert.Equal(before.ToList().FindIndex(p => p.Id == ProviderId.Proton), vm.SelectedProviderIndex);
+        var providers = vm.AvailableProviders;
+        Assert.Equal(providers.ToList().FindIndex(p => p.Id == ProviderId.Proton), vm.SelectedProviderIndex);
 
         await vm.SwitchBrowserAccountAsync(ProviderId.GoogleDrive);
 
-        // A brand-new AvailableProviders computation, deliberately not reusing `before` — this is
-        // exactly what the real ComboBox's ItemsSource re-read does on every property-changed tick.
-        var after = vm.AvailableProviders;
-        Assert.Equal(after.ToList().FindIndex(p => p.Id == ProviderId.GoogleDrive), vm.SelectedProviderIndex);
+        // Same instance (pinned by AvailableProviders_IsTheSameInstance_AcrossASwitch above), its
+        // contents updated in place — re-reading it here isn't testing anything different from
+        // reusing `providers`, deliberately kept anyway to mirror how the real ComboBox re-reads it.
+        var providersAfter = vm.AvailableProviders;
+        Assert.Equal(providersAfter.ToList().FindIndex(p => p.Id == ProviderId.GoogleDrive), vm.SelectedProviderIndex);
     }
 
     [Fact]

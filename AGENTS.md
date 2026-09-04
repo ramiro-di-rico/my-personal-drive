@@ -1,10 +1,11 @@
 # Agent guide — my-personal-drive
 
 Avalonia UI 12 (.NET 10) desktop front-end for cloud drive storage, behind a provider seam
-(`ICloudDriveProvider`, `Services/Providers/`) — see `docs/PLAN-CLOUD-PROVIDERS.md`. Two providers
-exist: **Proton Drive**, via the official CLI (`proton-drive`) — every remote operation launches a
-CLI process and parses its stdout, never talking to Proton's API directly — and **OneDrive**, via
-Microsoft Graph over HTTP (`Services/Providers/OneDrive/`), which is inherently network-based.
+(`ICloudDriveProvider`, `Services/Providers/`) — see `docs/PLAN-CLOUD-PROVIDERS.md`. Three
+providers exist: **Proton Drive**, via the official CLI (`proton-drive`) — every remote operation
+launches a CLI process and parses its stdout, never talking to Proton's API directly — **OneDrive**,
+via Microsoft Graph over HTTP (`Services/Providers/OneDrive/`), and **Google Drive**, via the Drive
+API v3 over HTTP (`Services/Providers/GoogleDrive/`) — both inherently network-based, no CLI.
 
 On the Proton side, the one exception to "CLI only" is `CliReleaseFeed`, which GETs the published
 CLI release manifest (`https://proton.me/download/drive/cli/version.json`) so the app can offer to

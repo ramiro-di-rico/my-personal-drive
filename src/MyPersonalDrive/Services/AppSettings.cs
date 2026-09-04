@@ -51,6 +51,22 @@ public sealed class AppSettings
 
     public string OneDriveAccountLabel { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The Google Cloud Console OAuth client's (Desktop app) client id, entered in Settings — same
+    /// reasoning as <see cref="OneDriveClientId"/>. See docs/PLAN-CLOUD-PROVIDERS.md §8.1/P10.
+    /// </summary>
+    public string GoogleDriveClientId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The OAuth client's "secret" — Google still issues one for a Desktop-app client even though
+    /// it isn't required to be kept truly confidential for this client type (it ships inside a
+    /// downloaded, publicly-distributable app the same way <see cref="OneDriveClientId"/>'s
+    /// counterpart does not need one at all). Stored in plaintext here, same accepted-risk shape as
+    /// the token store itself (docs/PLAN-CLOUD-PROVIDERS.md §4.2/R3, §8.1) — not a real secret in
+    /// the way a web-app client secret would be.
+    /// </summary>
+    public string GoogleDriveClientSecret { get; set; } = string.Empty;
+
     public bool IsGoogleDriveAuthenticated { get; set; }
 
     public string GoogleDriveAccountLabel { get; set; } = string.Empty;

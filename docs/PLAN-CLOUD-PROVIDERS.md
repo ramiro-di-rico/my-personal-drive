@@ -295,14 +295,16 @@
 - [x] **P9** — filter the Sync window's pair list by account/provider, using the same filter-chip
       idiom the folder browser already uses for file kinds (`ProviderFilterViewModel`,
       `SyncPanelViewModel.VisiblePairs`). See [§P9](#p9--filter-sync-pairs-by-provider).
-- [ ] **P10 — Google Drive provider (design approved 2026-09-04, implementation starting).** See
-      [§8](#8-google-drive-g--rest-api-v3-design) for the full design write-up (auth, the
-      id-based-addressing mode `IProviderPathSyntax` needs, capabilities, error mapping) and its
-      own phase entry below. This is the provider §7 originally flagged as "out of scope" for this
-      plan but explicitly kept addable; §7 has been updated accordingly. Google Cloud Console side
+- [x] **P10 — Google Drive provider.** Design approved 2026-09-04 (§8's OAuth scope cost and the
+      client-side conflict-strategy gap both explicitly accepted); Google Cloud Console side
       (project `my-personal-drive-507613`, Drive API enabled, `drive` scope on the OAuth consent
-      screen, a Desktop-app OAuth client, the developer's own account added as a test user) is set
-      up and confirmed by the user as of 2026-09-04.
+      screen, a Desktop-app OAuth client, the developer's own account added as a test user) set up
+      and confirmed by the user the same day. `Services/Providers/GoogleDrive/` implemented per
+      [§8](#8-google-drive-g--rest-api-v3-design)'s signed-off design — see its own phase entry
+      below for what shipped and where it deviated. Unit tests green
+      (`./scripts/run-tests.sh`), AOT-clean (no new IL2xxx/IL3xxx). **Live verification against a
+      real Google account is still pending** — that happens in a separate follow-up session with
+      real credentials, same as P8's own entry records for its own pending live pass.
 
 ### Adversarial review of P1–P5 — 5 confirmed bugs fixed
 
@@ -893,17 +895,101 @@ browser already established for file kinds (`ViewModels/KindFilterViewModel.cs` 
 asked for; a general filter/sort bar for the Sync window is a separate, larger feature if ever
 wanted.
 
-### P10 — Google Drive provider (design approved, implementation in progress)
+### P10 — Google Drive provider — implemented, pending live verification
 
-See §8. Lands `Services/Providers/GoogleDrive/` and nothing outside it except catalog
-registration (`ProviderId.GoogleDrive`, mirroring how `ProviderId.OneDrive` was added ahead of its
-own P6), `AppJsonContext` entries for the token/settings records, a settings-view connection card
-(§5-shaped, third card added to the same `HasDiagnostics`-gated pattern), and the doc updates §4.2
-required for OneDrive's own "second outbound call" decision (B10) — this is now a *third*.
-User signed off on §8 on 2026-09-04 (the `drive` OAuth scope's consent-screen cost, §8.1, and the
-client-side conflict-strategy gap, §8.6/R7, both explicitly accepted) and completed the Google
-Cloud Console setup (project `my-personal-drive-507613`) — Phase 2 of the `add-cloud-provider`
-skill is now underway.
+Implements §8's signed-off design. New `Services/Providers/GoogleDrive/`:
+`GoogleDriveAuthenticator.cs` (authorization-code + PKCE via a loopback `HttpListener` at
+`http://127.0.0.1:{port}/`, mirroring `GraphAuthenticator`'s structure; Google-specific
+`access_type=offline`/`prompt=consent` on the authorize URL and a `client_secret` on the token
+exchange/refresh, per §8.1), `GoogleDriveTokenStore.cs` (`google-drive-token.json`, chmod 600,
+same accepted-risk shape as OneDrive's own store), `GoogleDriveHttpClient.cs` (bearer attach,
+401→refresh→retry-once, `Retry-After` on 429 and on a 403 whose `error.errors[0].reason` is
+`rateLimitExceeded`/`userRateLimitExceeded`), `GoogleDriveRequests.cs` (typed DTOs — no
+anonymous-type `JsonContent.Create` anywhere), `GoogleDriveErrorClassifier.cs` (the §8.7 table,
+reading `error.errors[0].reason` with a defensive fallback to status-code-only classification),
+`GoogleDrivePathSyntax.cs` (`Comparison = Ordinal`, `AllowsDuplicateNamesInSameParent = true`,
+essentially unrestricted local-name mappability per §8.6), `GoogleDriveOperations.cs` (the
+path→id resolution cache from §8.2, `q`-filter escaping, pagination to exhaustion, client-side
+conflict-strategy enforcement for `None`/`Skip`/`Replace`/`KeepBoth` since Drive never rejects a
+duplicate name server-side, synchronous `copy`, `addParents`/`removeParents` move, multipart vs.
+resumable upload), and `GoogleDriveProvider.cs` (`RemoteHash: Sha256`, `SupportsDelta: false`,
+`CopyIsAsynchronous: false`, `SupportsBatchMove: false`, `DeltaSource: null`, `RemoteView: null`,
+`Diagnostics: null`).
+
+**New shared-seam surface (per §8.9's own note, the only one this design proposes):**
+`IProviderPathSyntax.AllowsDuplicateNamesInSameParent` — a C# default-interface member defaulting
+to `false`, so `ProtonPathSyntax`/`OneDrivePathSyntax` and every existing test fake implementing
+`IProviderPathSyntax` needed no change. `Models/DriveItem.cs` gained one new field,
+`IsRemoteOnlyDocument` (default `false`) — the mechanism chosen (of the two the skill sketched)
+for flagging a Google-native file (Docs/Sheets/Slides/…, no binary content or checksum at all,
+§8.4): `ListFolderAsync` still returns them (so a plain folder *browse* still shows them) but marks
+them, and `RemoteScanner` skips a marked item during a *sync* scan the same way it already skips an
+unmappable name. `Services/Sync/RemoteScanner.cs`'s `NodeSkipReason` gained two values —
+`GoogleNativeFile` (for the above) and `DuplicateName` (for two Drive siblings sharing an exact
+name, §8.2) — and its sibling-collision filter (`DropCaseCollisions`, renamed `DropNameCollisions`)
+now also fires when `Paths.AllowsDuplicateNamesInSameParent` is true, not only when `Comparison`
+is case-insensitive; the same exact-duplicate-name group it already detected via
+`StringComparer.FromComparison(Ordinal)` grouping just gets reported under the new reason instead
+of `CaseCollision`. `Services/Sync/SyncExecutor.cs`'s `DescribeSkip` got matching messages for both.
+
+**The real latent bug this session's own checklist called out, and fixed:** `App.axaml.cs`'s
+`BuildAccountContext` picked a hasher with a two-way `provider.Capabilities.RemoteHash ==
+RemoteHashAlgorithm.QuickXor ? new QuickXorHasher() : new Sha1ContentHasher()` — since Google
+Drive's capability reports `RemoteHashAlgorithm.Sha256`, that ternary would have silently fallen
+through to `Sha1ContentHasher()`, producing a hash that could never match Drive's real
+`sha256Checksum` and would make every Google Drive file look permanently changed. Added
+`Services/Providers/Sha256ContentHasher.cs` (a thin `System.Security.Cryptography.SHA256` wrapper,
+lowercase-hex output to match Drive's own `sha256Checksum` format) and turned the hasher pick into
+a real three-way `switch` so this class of mismatch can't reappear silently for a future provider
+either.
+
+**Deviations from §8 as written:**
+- §8.4 said "fall back to `md5Checksum` in code if `sha256Checksum` turns out absent in practice."
+  Not implemented that way: `GoogleDriveOperations.ToDriveItem` only ever reads `sha256Checksum`,
+  with no fallback — falling back to `md5Checksum` while `Capabilities.RemoteHash` stays fixed at
+  `Sha256` would have been exactly the silent hash-algorithm mismatch R2 (and this session's own
+  hasher-switch fix above) exists to prevent. A file with no `sha256Checksum` just gets no content
+  hash, mirroring `OneDriveOperations.BuildDriveItem`'s own no-fallback handling of `quickXorHash`.
+- §8.6 left the resumable-upload chunk size as "a multiple of 256 KiB, your call." Chose
+  `8 * 256 * 1024` (2 MiB) — a round number comfortably above Drive's 256 KiB minimum without being
+  needlessly small for a multi-MB file.
+- The Google-native-file skip mechanism (§8.4 left this as an open decision between two sketched
+  options) landed as option (a): a new `DriveItem.IsRemoteOnlyDocument` flag plus a
+  `RemoteScanner`-level skip, not an exclusion inside `ListFolderAsync` itself — so a folder browse
+  still shows a Google Doc as a (non-syncable) row instead of hiding it outright.
+
+**Wiring:** `ProviderCatalog.Create`'s `GoogleDrive` arm now builds
+`GoogleDriveTokenStore` → `GoogleDriveAuthenticator(clientId, clientSecret, tokenStore)` →
+`GoogleDriveHttpClient` → `GoogleDriveProvider`, replacing the `GenericCloudDriveProvider` stub —
+mirrors `CreateOneDrive` exactly. `AppSettings` gained `GoogleDriveClientId` and
+`GoogleDriveClientSecret` (the latter stored in plaintext, same accepted-risk reasoning as every
+other credential this app persists to disk — R3-style, noted in its own doc comment);
+`IsGoogleDriveAuthenticated`/`GoogleDriveAccountLabel` already existed from an earlier UI-scaffolding
+commit and needed no change. `MainWindowViewModel` gained `GoogleDriveClientId`/
+`GoogleDriveClientSecret`/`GoogleDriveAccountLabel` properties (mirroring OneDrive's), a
+`GoogleDrive` arm in `CanAuthenticate`'s per-provider switch, and a `GoogleDriveProvider` arm in
+the live-account-label switch used after sign-in/out. The Settings view's existing (UI-only)
+Google Drive card gained the client-id/secret fields and account-label row the OneDrive card
+already has, wired to those bindings.
+
+**Testing:** `tests/.../Services/Providers/GoogleDrive/` — `GoogleDriveOperationsTests` (path→id
+resolution including a duplicate-name-in-same-parent case confirming first-match-wins,
+pagination exhaustion, all four conflict-strategy branches, the Google-native-file skip, move,
+copy, trash, rename, create-folder, both the multipart and resumable upload paths),
+`GoogleDrivePathSyntaxTests`, `GoogleDriveErrorClassifierTests` (Drive's real v3 error shape),
+`GoogleDriveTokenStoreTests`, `GoogleDriveAuthenticatorTests` (PKCE verifier/challenge math and the
+token-refresh path, no real browser). `RemoteScannerTests` extended with a minimal fake
+`ICloudDriveProvider` (Proton's real CLI-backed fake can't produce a duplicate-name or
+remote-only-document item) covering the two new skip reasons.
+`ProviderCatalogTests.Create_GoogleDrive_ReturnsAWorkingGoogleDriveProvider_NotTheGenericStub`
+replaces the old stub-returning assumption. No golden-vector hash test for
+`Sha256ContentHasher` — a standard algorithm, not a from-spec implementation like `QuickXorHasher`.
+
+**Not yet done:** live verification against a real Google account (sign in through the real OAuth
+consent screen, list a real Drive root, upload/download and compare a real `sha256Checksum`,
+observe a real Google Doc get skipped) — this phase's own Appendix A entry stays unfilled until
+that follow-up session runs, same as P8's own entry still records for what it hasn't captured live
+yet. Do not read the "implemented" checkbox above as "live-verified" — it isn't, on purpose.
 
 ### P8 — *Optional:* delta-based remote scanning — implemented, pending live verification
 
@@ -1432,30 +1518,34 @@ tested against the live service). Each remains marked (unverified) until capture
 
 ## Appendix B — File-by-file change inventory
 
-| File | P1 | P2 | P3 | P4 | P5 | P6 |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|
-| `App.axaml.cs` | ● | ● | ● | ● | ● | ● |
-| `Services/ProtonDriveService.cs` → `Providers/Proton/` | ● | | ● | | | |
-| `Services/ProtonDriveCli{Executor,Locator}.cs` → `Providers/Proton/` | ● | ● | | | | |
-| `Services/CliErrorClassifier.cs`, `CliException.cs`, `CliErrorKind.cs` | ● | ● | | | | |
-| `Services/Cli{ReleaseFeed,UpdateInstaller,PlatformKey,VersionComparer}.cs` | ● | | | | ● | |
-| `Services/CliCommandEventArgs.cs` → `ProviderActivity` | | ● | | | | |
-| `Services/RemoteViewFreshnessPolicy.cs` | ● | | | | | |
-| `Services/RemoteTreeWalker.cs`, `FolderStatsScanner.cs` | ● | | | | | |
-| `Services/DriveCacheService.cs`, `FolderMetricsStore.cs` | | | | ● | | |
-| `Services/DriveDatabaseMigrations.cs` | | | | ● | | |
-| `Services/AppSettings.cs`, `AppSettingsService.cs`, `AppJsonContext.cs` | | ● | | | ● | ● |
-| `Services/Sync/SyncExecutor.cs` | ● | | ● | | | |
-| `Services/Sync/RemoteScanner.cs` | ● | | ● | | | |
-| `Services/Sync/SyncBaselineWriter.cs` | ● | | ● | ● | | |
-| `Services/Sync/PathMapper.cs` | | | ● | | | |
-| `Services/Sync/SyncReconciler.cs` | | | ● | ● | | |
-| `Services/Sync/LocalFileHasher.cs` → `IContentHasher` | | | ● | | | |
-| `Services/Sync/SyncStateStore.cs` | | | | ● | | |
-| `Services/Sync/SyncRetryPolicy.cs` | | ● | | | | ● |
-| `ViewModels/MainWindowViewModel.cs` | ● | ● | ● | | ● | |
-| `ViewModels/CommandLogBuffer.cs` | | ● | | | | |
-| `ViewModels/Sync/SyncPanelViewModel.cs` | ● | | | | ● | |
-| `Views/MainWindow.axaml(.cs)` | | | | | ● | |
-| `AGENTS.md`, `docs/ARCHITECTURE.md` | ● | ● | ● | ● | ● | ● |
-| `.claude/skills/cli-command/SKILL.md` (becomes Proton-scoped) | ● | | | | | |
+| File | P1 | P2 | P3 | P4 | P5 | P6 | P10 |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| `App.axaml.cs` | ● | ● | ● | ● | ● | ● | ● |
+| `Services/ProtonDriveService.cs` → `Providers/Proton/` | ● | | ● | | | | |
+| `Services/ProtonDriveCli{Executor,Locator}.cs` → `Providers/Proton/` | ● | ● | | | | | |
+| `Services/CliErrorClassifier.cs`, `CliException.cs`, `CliErrorKind.cs` | ● | ● | | | | | |
+| `Services/Cli{ReleaseFeed,UpdateInstaller,PlatformKey,VersionComparer}.cs` | ● | | | | ● | | |
+| `Services/CliCommandEventArgs.cs` → `ProviderActivity` | | ● | | | | | |
+| `Services/RemoteViewFreshnessPolicy.cs` | ● | | | | | | |
+| `Services/RemoteTreeWalker.cs`, `FolderStatsScanner.cs` | ● | | | | | | |
+| `Services/DriveCacheService.cs`, `FolderMetricsStore.cs` | | | | ● | | | |
+| `Services/DriveDatabaseMigrations.cs` | | | | ● | | | |
+| `Services/AppSettings.cs`, `AppSettingsService.cs`, `AppJsonContext.cs` | | ● | | | ● | ● | ● |
+| `Services/Providers/IProviderPathSyntax.cs` (new `AllowsDuplicateNamesInSameParent` default member) | | | ● | | | | ● |
+| `Services/Providers/GoogleDrive/*` (new) | | | | | | | ● |
+| `Services/Providers/Sha256ContentHasher.cs` (new) | | | | | | | ● |
+| `Models/DriveItem.cs` (new `IsRemoteOnlyDocument` field) | ● | | | | | | ● |
+| `Services/Sync/SyncExecutor.cs` | ● | | ● | | | | ● |
+| `Services/Sync/RemoteScanner.cs` | ● | | ● | | | | ● |
+| `Services/Sync/SyncBaselineWriter.cs` | ● | | ● | ● | | | |
+| `Services/Sync/PathMapper.cs` | | | ● | | | | |
+| `Services/Sync/SyncReconciler.cs` | | | ● | ● | | | |
+| `Services/Sync/LocalFileHasher.cs` → `IContentHasher` | | | ● | | | | |
+| `Services/Sync/SyncStateStore.cs` | | | | ● | | | |
+| `Services/Sync/SyncRetryPolicy.cs` | | ● | | | | ● | |
+| `ViewModels/MainWindowViewModel.cs` | ● | ● | ● | | ● | | ● |
+| `ViewModels/CommandLogBuffer.cs` | | ● | | | | | |
+| `ViewModels/Sync/SyncPanelViewModel.cs` | ● | | | | ● | | |
+| `Views/MainWindow.axaml(.cs)` | | | | | ● | | ● |
+| `AGENTS.md`, `docs/ARCHITECTURE.md` | ● | ● | ● | ● | ● | ● | ● |
+| `.claude/skills/cli-command/SKILL.md` (becomes Proton-scoped) | ● | | | | | | |

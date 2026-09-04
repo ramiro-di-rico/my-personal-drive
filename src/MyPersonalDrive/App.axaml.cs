@@ -143,10 +143,17 @@ public partial class App : Application
         var echoSuppressor = new SyncEchoSuppressor();
         // Which hasher/algorithm-tag pair matches this provider's own Capabilities.RemoteHash —
         // SyncExecutor's own default (Sha1ContentHasher) is only correct for Proton
-        // (docs/PLAN-CLOUD-PROVIDERS.md P3/P6, and SyncExecutor's own doc comment on `hasher`).
-        var hasher = provider.Capabilities.RemoteHash == RemoteHashAlgorithm.QuickXor
-            ? (IContentHasher)new QuickXorHasher()
-            : new Sha1ContentHasher();
+        // (docs/PLAN-CLOUD-PROVIDERS.md P3/P6/P10, and SyncExecutor's own doc comment on `hasher`).
+        // A two-way `? :` here used to silently fall through Google Drive's Sha256 capability to
+        // Sha1ContentHasher — a real latent bug (R2): the resulting hash would never match Drive's
+        // real sha256Checksum, making every file look remotely-changed forever. A real multi-branch
+        // switch makes that mismatch impossible to reintroduce silently for a future algorithm too.
+        var hasher = provider.Capabilities.RemoteHash switch
+        {
+            RemoteHashAlgorithm.QuickXor => (IContentHasher)new QuickXorHasher(),
+            RemoteHashAlgorithm.Sha256 => new Sha256ContentHasher(),
+            _ => new Sha1ContentHasher(),
+        };
         // Delta-based scanning only for a provider whose backend actually supports it (P8) — Proton
         // has none, and stays on the full-walk RemoteScanner it always used.
         var deltaScanner = provider.Capabilities.SupportsDelta && provider.DeltaSource is not null

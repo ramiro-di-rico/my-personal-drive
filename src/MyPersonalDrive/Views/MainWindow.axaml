@@ -1582,7 +1582,8 @@
             </StackPanel>
           </Border>
 
-          <!-- Google Drive's card -->
+          <!-- Google Drive's card: client id/secret, sign-in/out, account label. No CLI path, no
+               version row — there is no external binary to point at or version (Diagnostics is null). -->
           <Border Padding="16"
                   Background="{DynamicResource CardBackgroundBrush}"
                   CornerRadius="6"
@@ -1590,21 +1591,38 @@
             <StackPanel Spacing="10">
               <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
               <TextBlock Text="Google Workspace &amp; Drive Account Connection" FontWeight="SemiBold" />
-              <TextBlock Opacity="0.6" FontSize="12" TextWrapping="Wrap"
-                         Text="Connect with Google OAuth2 credentials or API tokens for seamless synchronization." />
+              <TextBlock Opacity="0.6"
+                         FontSize="12"
+                         TextWrapping="Wrap"
+                         Text="Needs a Google Cloud Console OAuth client (Desktop app) with the Drive API enabled — see README.md § Google Drive setup." />
+              <TextBlock Text="OAuth client ID:" />
+              <TextBox Width="420"
+                       PlaceholderText="OAuth 2.0 client ID"
+                       Text="{Binding GoogleDriveClientId, Mode=TwoWay}" />
+              <TextBlock Text="OAuth client secret:" />
+              <TextBox Width="420"
+                       PlaceholderText="OAuth 2.0 client secret"
+                       PasswordChar="*"
+                       Text="{Binding GoogleDriveClientSecret, Mode=TwoWay}" />
               <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button Classes.primary="{Binding !IsAuthenticated}" Content="Iniciar Sesión en Google Drive" Command="{Binding AuthenticateCommand}">
-                  <StackPanel Orientation="Horizontal" Spacing="6">
-                    <Path Classes="icon" Data="{StaticResource IconKey}" />
-                    <TextBlock Text="Conectar Google Drive" />
-                  </StackPanel>
+                <Button Classes="primary" ToolTip.Tip="Sign in to Google Drive" Command="{Binding AuthenticateCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconKey}" />
                 </Button>
-                <Button ToolTip.Tip="Cerrar sesión" Command="{Binding LogoutCommand}" IsVisible="{Binding IsAuthenticated}">
+                <Button ToolTip.Tip="Sign out of Google Drive" Command="{Binding LogoutCommand}">
                   <Path Classes="icon" Data="{StaticResource IconLogout}" />
                 </Button>
-                <Button ToolTip.Tip="Actualizar contenido" Command="{Binding RefreshCommand}">
+                <Button ToolTip.Tip="Refresh folder content" Command="{Binding RefreshCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
+              </StackPanel>
+
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock VerticalAlignment="Center" Text="Cuenta:" />
+                <TextBlock VerticalAlignment="Center"
+                           MaxWidth="420"
+                           TextWrapping="Wrap"
+                           Opacity="0.8"
+                           Text="{Binding GoogleDriveAccountLabel}" />
               </StackPanel>
             </StackPanel>
           </Border>

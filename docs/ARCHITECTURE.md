@@ -1,7 +1,7 @@
 # MyPersonalDrive — Technical Reference
 
 > Reference document describing the current state of the application (branch
-> `feature/cloud-providers-seam`, commit `3538eb7`).
+> `feature/google-drive-provider`, commit `b87afac`).
 > Meant to give full context to any future chat/session without having to re-read all the code.
 
 ---
@@ -325,6 +325,51 @@ plan), so this never changes mid-session.
 live-verified against a real account (docs/PLAN-CLOUD-PROVIDERS.md Appendix A). Pagination past one
 page, chunked upload, async copy, rate-limiting, and the exact O6 reserved-name list remain per
 Microsoft's documentation only, not yet captured live — R6 still applies to those specifically.
+
+### 5.5 The Google Drive provider (Drive API v3)
+
+Also no CLI — HTTP directly against `www.googleapis.com/drive/v3`. docs/PLAN-CLOUD-PROVIDERS.md §8
+has the full request-by-request design; this is the as-built shape, following the OneDrive
+provider's split as closely as Drive's own differences allow.
+
+| Piece | Role |
+|---|---|
+| [`GoogleDriveAuthenticator`](../src/MyPersonalDrive/Services/Providers/GoogleDrive/GoogleDriveAuthenticator.cs) | `IDriveAuthenticator`. Authorization-code + PKCE via a loopback `HttpListener` at the loopback **IP** `http://127.0.0.1:{port}/` (Google's own recommendation, unlike Azure's literal `localhost` requirement); `access_type=offline` + `prompt=consent` on the authorize URL (without both, Google either never issues a refresh token or stops issuing one on re-auth); sends a `client_secret` on the token exchange/refresh (Google still issues one for a "Desktop app" OAuth client, unlike OneDrive's public client) |
+| [`GoogleDriveTokenStore`](../src/MyPersonalDrive/Services/Providers/GoogleDrive/GoogleDriveTokenStore.cs) | Persists to `google-drive-token.json`, chmod 600 — same accepted-risk plaintext shape as `OneDriveTokenStore` |
+| [`GoogleDriveHttpClient`](../src/MyPersonalDrive/Services/Providers/GoogleDrive/GoogleDriveHttpClient.cs) | Bearer attach, 401→refresh→retry-once, honors `Retry-After` on 429 and on a 403 whose `error.errors[0].reason` is `rateLimitExceeded`/`userRateLimitExceeded` |
+| [`GoogleDriveErrorClassifier`](../src/MyPersonalDrive/Services/Providers/GoogleDrive/GoogleDriveErrorClassifier.cs) | Reads `error.errors[0].reason` (v3's structured error shape) → `DriveErrorKind`, falling back to status-code-only classification when that array is absent/malformed |
+| [`GoogleDriveOperations`](../src/MyPersonalDrive/Services/Providers/GoogleDrive/GoogleDriveOperations.cs) | `IDriveOperations`. Drive has **no native path** — every operation resolves its path-string argument to an internal id first, via a per-instance path→id cache seeded with the `root` alias; paginated listing (`nextPageToken` to exhaustion); client-side conflict-strategy enforcement before every upload, since Drive never rejects a duplicate name server-side; synchronous `copy` (no monitor-URL polling, unlike Graph); `addParents`/`removeParents` move; multipart upload ≤ 5 MiB, resumable session above it |
+| [`GoogleDrivePathSyntax`](../src/MyPersonalDrive/Services/Providers/GoogleDrive/GoogleDrivePathSyntax.cs) | `Comparison = Ordinal` (Drive is case-sensitive, like Proton/Linux, unlike OneDrive); `AllowsDuplicateNamesInSameParent = true` — a new `IProviderPathSyntax` member this phase added (default `false`, so Proton/OneDrive needed no change), since Drive's own File resource docs state names are *not* unique within a folder |
+| [`Sha256ContentHasher`](../src/MyPersonalDrive/Services/Providers/Sha256ContentHasher.cs) | `IContentHasher` for `RemoteHashAlgorithm.Sha256` — a thin `SHA256` wrapper, lowercase hex to match Drive's `sha256Checksum` format |
+
+**Hash tagging**: `GoogleDriveOperations.ToDriveItem` only ever reads `sha256Checksum` — same
+no-fallback rule as OneDrive's `quickXorHash`-only handling, for the same reason (tagging an
+`md5Checksum`-only item's hash as `Sha256` would silently mislabel it).
+
+**Google-native files** (Docs/Sheets/Slides/…, `mimeType` starting
+`application/vnd.google-apps.` other than `folder`) have no binary content or checksum at all.
+`ListFolderAsync` still returns them (so a plain folder browse still shows them), but
+`GoogleDriveOperations.ToDriveItem` sets the new `DriveItem.IsRemoteOnlyDocument` flag, and
+`RemoteScanner` skips a flagged item during a *sync* scan (`NodeSkipReason.GoogleNativeFile`) the
+same way it already skips an unmappable name.
+
+**Duplicate names**: `RemoteScanner`'s sibling-collision filter (originally built for OneDrive's
+case-insensitivity, §2.4) now also fires whenever `Paths.AllowsDuplicateNamesInSameParent` is
+true — the same exact-duplicate-name group its existing `Ordinal`-comparer grouping already
+detects, reported as `NodeSkipReason.DuplicateName` instead of `CaseCollision`. Every member of a
+colliding group is skipped and reported, never silently merged; the underlying check-then-act
+during upload has a known, accepted TOCTOU race against a concurrent Drive client (R8/§8.6),
+documented rather than solved.
+
+**Settings surface**: `AppSettings.GoogleDriveClientId`/`GoogleDriveClientSecret` (both plaintext
+strings — the "secret" isn't a real confidentiality boundary for a Desktop-app OAuth client) and
+`IsGoogleDriveAuthenticated`/`GoogleDriveAccountLabel`, alongside Proton's and OneDrive's own
+fields, same "no shared provider-keyed structure yet" reasoning as §5.4.
+
+**Verification status**: unit-tested against a fake HTTP transport only. **Not yet live-verified
+against a real Google account** — sign-in, a real listing, a real upload/download and
+`sha256Checksum` comparison, and a real Google Doc being skipped are all still pending a follow-up
+session with real credentials (docs/PLAN-CLOUD-PROVIDERS.md P10's own status entry).
 
 ---
 

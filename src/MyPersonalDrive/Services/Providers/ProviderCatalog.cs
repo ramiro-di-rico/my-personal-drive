@@ -22,7 +22,7 @@ public sealed class ProviderCatalog : IProviderCatalog
         {
             ProviderId.Proton => CreateProton(settings),
             ProviderId.OneDrive => CreateOneDrive(settings),
-            ProviderId.GoogleDrive => new GenericCloudDriveProvider(ProviderId.GoogleDrive, "Google Drive"),
+            ProviderId.GoogleDrive => CreateGoogleDrive(settings),
             ProviderId.Nextcloud => new GenericCloudDriveProvider(ProviderId.Nextcloud, "Nextcloud"),
             ProviderId.S3 => new GenericCloudDriveProvider(ProviderId.S3, "Custom S3"),
             _ => throw new NotSupportedException($"Provider '{id}' is not available yet.")
@@ -46,5 +46,14 @@ public sealed class ProviderCatalog : IProviderCatalog
         var authenticator = new OneDrive.GraphAuthenticator(appSettings.OneDriveClientId, tokenStore);
         var http = new OneDrive.GraphHttpClient(authenticator);
         return new OneDrive.OneDriveProvider(authenticator, http);
+    }
+
+    private static GoogleDrive.GoogleDriveProvider CreateGoogleDrive(AppSettingsService settings)
+    {
+        var appSettings = settings.Load();
+        var tokenStore = new GoogleDrive.GoogleDriveTokenStore(settings.BaseFolder);
+        var authenticator = new GoogleDrive.GoogleDriveAuthenticator(appSettings.GoogleDriveClientId, appSettings.GoogleDriveClientSecret, tokenStore);
+        var http = new GoogleDrive.GoogleDriveHttpClient(authenticator);
+        return new GoogleDrive.GoogleDriveProvider(authenticator, http);
     }
 }

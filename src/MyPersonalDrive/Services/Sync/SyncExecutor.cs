@@ -364,6 +364,12 @@ public sealed class SyncExecutor
             NodeSkipReason.CaseCollision =>
                 $"Skipped '{skip.Name}': its name collides with a sibling once case is ignored. " +
                 "Both stay on Proton Drive but won't be synced — rename one of them there to include it.",
+            NodeSkipReason.DuplicateName =>
+                $"Skipped '{skip.Name}': more than one item shares this exact name in the same folder. " +
+                "All of them stay on the remote drive but won't be synced — rename all but one to include it.",
+            NodeSkipReason.GoogleNativeFile =>
+                $"Skipped '{skip.Name}': it's a Google Docs/Sheets/Slides file with no downloadable content. " +
+                "It stays on Google Drive but won't be synced.",
             _ => $"Skipped '{skip.Name}': it can't be represented locally."
         };
 

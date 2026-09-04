@@ -187,7 +187,19 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (value is not null && value.Id != _provider.Id)
             {
-                _ = SwitchProviderAndReportErrorsAsync(value.Id);
+                // Deferred to the next UI-thread dispatch, not run inline. This setter fires
+                // synchronously from inside the ComboBox's own SelectedItem-changed handling (the
+                // user's click); SwitchBrowserAccountAsync's synchronous prefix immediately
+                // reassigns _provider and re-raises PropertyChanged for SelectedProvider/
+                // AvailableProviders before that handling has unwound — a reentrant "the bound
+                // value changed again, right now, mid-update" that Avalonia's SelectingItemsControl
+                // doesn't reliably resync from. That reentrancy is what made switching directly
+                // between two non-adjacent providers in the header ComboBox silently do nothing
+                // (docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2) — posting the actual switch to run
+                // after this call stack fully unwinds avoids it regardless of the exact internal
+                // ComboBox mechanics.
+                var targetId = value.Id;
+                Dispatcher.UIThread.Post(() => _ = SwitchProviderAndReportErrorsAsync(targetId));
             }
         }
     }

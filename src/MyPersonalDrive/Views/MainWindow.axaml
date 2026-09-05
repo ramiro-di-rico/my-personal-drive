@@ -177,6 +177,15 @@
 
         <!-- Center / Right Telemetry, Quota & Theme Switcher -->
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <!-- The theme buttons and the local-pane toggle both set Classes.active, and the only
+               Button.active style in this file is scoped to the view tabs below — so neither was
+               showing its state up here. -->
+          <StackPanel.Styles>
+            <Style Selector="Button.active">
+              <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+              <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+            </Style>
+          </StackPanel.Styles>
           <!-- Connection Status Telemetry Badge. A Button, not a Border: when the state is one the
                user can act on (Disconnected / Degraded) it retries or re-authenticates, so the app
                stops reporting a problem it won't help with (U2). Hit-testing is switched off in the
@@ -290,6 +299,19 @@
             </StackPanel>
           </Border>
 
+          <!-- Show/hide the local pane. A window-level view toggle, so it sits with the other
+               window-level toggles rather than in a pane's own toolbar — it was the one button in
+               the explorer's old full-width header that genuinely was not about the remote pane
+               (docs/PLAN-UX-ROUND-2.md §14). Persisted: the state the user leaves it in is also
+               next launch's default (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 3). -->
+          <Button Command="{Binding ToggleLocalExplorerPanelCommand}"
+                  Classes.active="{Binding IsLocalExplorerPanelVisible}"
+                  IsVisible="{Binding IsExplorerView}"
+                  ToolTip.Tip="Mostrar u ocultar el explorador local"
+                  Padding="8,6">
+            <Path Classes="icon" Data="{StaticResource IconPanelRight}" Width="14" Height="14" />
+          </Button>
+
           <!-- Global Settings Shortcut Button -->
           <Button Command="{Binding ToggleSettingsCommand}"
                   Classes.active="{Binding IsSettingsView}"
@@ -350,73 +372,67 @@
     </StackPanel>
 
     <!-- Explorer view: breadcrumbs, folder browser, status panel and CLI activity log. -->
-    <Grid Grid.Row="2" RowDefinitions="Auto,*,Auto" IsVisible="{Binding IsExplorerView}">
-      <Grid Grid.Row="0" Margin="16" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
-        <Grid.Styles>
-          <Style Selector="Button.viewMode.active">
-            <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
-            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-          </Style>
-        </Grid.Styles>
-        <Border Grid.Column="0" Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
-          <views:BreadcrumbBar ItemsSource="{Binding BreadcrumbItems}"
-                               Label="{Binding ActiveProviderDisplayName}"
-                               Icon="{StaticResource IconCloud}" />
-        </Border>
+    <Grid Grid.Row="2" RowDefinitions="*,Auto" IsVisible="{Binding IsExplorerView}">
+      <Grid x:Name="ExplorerColumnsGrid" Grid.Row="0" ColumnDefinitions="*,Auto,*,Auto">
+        <Grid Grid.Column="0" Margin="16,0,16,16" RowDefinitions="Auto,Auto,Auto,Auto,*">
+          <!-- This pane's own header, mirroring the local pane's (docs/PLAN-UX-ROUND-2.md §14).
+               It used to be a full-window-width row above both panes, which pushed these six
+               buttons — every one of which acts on THIS pane — against the right edge of the
+               window, directly above the local pane and its separate toolbar. -->
+          <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,8">
+            <Grid.Styles>
+              <Style Selector="Button.viewMode.active">
+                <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+              </Style>
+            </Grid.Styles>
 
-        <Button Grid.Column="1" ToolTip.Tip="Volver atrás" Command="{Binding BackCommand}">
-          <Path Classes="icon" Data="{StaticResource IconArrowLeft}" />
-        </Button>
-        <Button Grid.Column="2" ToolTip.Tip="Crear una carpeta" Command="{Binding CreateFolderCommand}">
-          <Path Classes="icon" Data="{StaticResource IconFolderPlus}" />
-        </Button>
-        <Button Grid.Column="3" ToolTip.Tip="Subir archivos" Command="{Binding UploadCommand}">
-          <Path Classes="icon" Data="{StaticResource IconUpload}" />
-        </Button>
+            <Border Grid.Column="0" Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
+              <views:BreadcrumbBar ItemsSource="{Binding BreadcrumbItems}"
+                                   Label="{Binding ActiveProviderDisplayName}"
+                                   Icon="{StaticResource IconCloud}" />
+            </Border>
 
-        <!-- View mode: list / icons / gallery. Only the presentation changes; the listing and the
-             current selection are untouched (docs/PLAN-BROWSER-VIEWS.md V1). -->
-        <Button Grid.Column="4"
-                Classes="viewMode"
-                Classes.active="{Binding IsListView}"
-                ToolTip.Tip="Ver como lista"
-                Command="{Binding ShowListViewCommand}">
-          <Path Classes="icon" Data="{StaticResource IconViewList}" />
-        </Button>
-        <Button Grid.Column="5"
-                Classes="viewMode"
-                Classes.active="{Binding IsIconsView}"
-                ToolTip.Tip="Ver como iconos"
-                Command="{Binding ShowIconsViewCommand}">
-          <Path Classes="icon" Data="{StaticResource IconViewGrid}" />
-        </Button>
-        <Button Grid.Column="6"
-                Classes="viewMode"
-                Classes.active="{Binding IsGalleryView}"
-                ToolTip.Tip="Ver como galería"
-                Command="{Binding ShowGalleryViewCommand}">
-          <Path Classes="icon" Data="{StaticResource IconViewGallery}" />
-        </Button>
+            <Button Grid.Column="1" ToolTip.Tip="Volver atrás" Command="{Binding BackCommand}">
+              <Path Classes="icon" Data="{StaticResource IconArrowLeft}" />
+            </Button>
+            <Button Grid.Column="2" ToolTip.Tip="Crear una carpeta" Command="{Binding CreateFolderCommand}">
+              <Path Classes="icon" Data="{StaticResource IconFolderPlus}" />
+            </Button>
+            <Button Grid.Column="3" ToolTip.Tip="Subir archivos" Command="{Binding UploadCommand}">
+              <Path Classes="icon" Data="{StaticResource IconUpload}" />
+            </Button>
 
-        <!-- Persisted (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 3): the state the user leaves it in
-             is also next launch's default. The Status sidebar has the equivalent checkbox under
-             "User Settings" instead of a header button. -->
-        <Button Grid.Column="7"
-                Classes="viewMode"
-                Classes.active="{Binding IsLocalExplorerPanelVisible}"
-                ToolTip.Tip="Mostrar/ocultar el explorador local"
-                Command="{Binding ToggleLocalExplorerPanelCommand}">
-          <Path Classes="icon" Data="{StaticResource IconPanelRight}" />
-        </Button>
-      </Grid>
+            <!-- View mode: list / icons / gallery. Only the presentation changes; the listing and
+                 the current selection are untouched (docs/PLAN-BROWSER-VIEWS.md V1). -->
+            <Button Grid.Column="4"
+                    Classes="viewMode"
+                    Classes.active="{Binding IsListView}"
+                    ToolTip.Tip="Ver como lista"
+                    Command="{Binding ShowListViewCommand}">
+              <Path Classes="icon" Data="{StaticResource IconViewList}" />
+            </Button>
+            <Button Grid.Column="5"
+                    Classes="viewMode"
+                    Classes.active="{Binding IsIconsView}"
+                    ToolTip.Tip="Ver como iconos"
+                    Command="{Binding ShowIconsViewCommand}">
+              <Path Classes="icon" Data="{StaticResource IconViewGrid}" />
+            </Button>
+            <Button Grid.Column="6"
+                    Classes="viewMode"
+                    Classes.active="{Binding IsGalleryView}"
+                    ToolTip.Tip="Ver como galería"
+                    Command="{Binding ShowGalleryViewCommand}">
+              <Path Classes="icon" Data="{StaticResource IconViewGallery}" />
+            </Button>
+          </Grid>
 
-      <Grid x:Name="ExplorerColumnsGrid" Grid.Row="1" ColumnDefinitions="*,Auto,*,Auto">
-        <Grid Grid.Column="0" Margin="16,0,16,16" RowDefinitions="Auto,Auto,Auto,*">
           <!-- One sort control for all three modes rather than column headers in list mode plus a
                separate control for the tiles: the state is the same either way, and two ways to set
                it means two places to keep in step (docs/PLAN-BROWSER-VIEWS.md V4). Sorting is done
                in memory over the rows already loaded, so it costs no CLI call. -->
-          <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="4" Margin="0,0,0,8">
+          <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="4" Margin="0,0,0,8">
             <StackPanel.Styles>
               <Style Selector="Button.sortKey">
                 <Setter Property="Background" Value="Transparent" />
@@ -488,7 +504,7 @@
           <!-- Batch action bar (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) — only worth showing once
                Ctrl/Shift+Click or Ctrl+A has actually marked more than one row; a single selection
                already has its own row-level actions (inline buttons, context menu). -->
-          <Border Grid.Row="1"
+          <Border Grid.Row="2"
                   Padding="10,8"
                   Margin="0,0,0,8"
                   CornerRadius="6"
@@ -505,7 +521,7 @@
                kinds the folder actually contains (docs/PLAN-BROWSER-VIEWS.md M6). Filtering is a
                view of what was already loaded - it makes no CLI call, and it does not change the
                metrics panel, which keeps describing the whole folder. -->
-          <ItemsControl Grid.Row="2" ItemsSource="{Binding KindFilters}" Margin="0,0,0,8">
+          <ItemsControl Grid.Row="3" ItemsSource="{Binding KindFilters}" Margin="0,0,0,8">
             <ItemsControl.Styles>
               <Style Selector="Button.kindChip">
                 <Setter Property="Padding" Value="8,3" />
@@ -534,7 +550,7 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
 
-          <Grid Grid.Row="3">
+          <Grid Grid.Row="4">
           <!-- Unauthenticated / Expired Session Fallback Card -->
           <Border IsVisible="{Binding !IsAuthenticated}"
                   Background="{DynamicResource CardBackgroundBrush}"
@@ -1266,7 +1282,7 @@
         </Border>
       </Grid>
 
-      <Border Grid.Row="2" Margin="16,0,16,16" Padding="12" Background="{DynamicResource ConsoleBackgroundBrush}" CornerRadius="6">
+      <Border Grid.Row="1" Margin="16,0,16,16" Padding="12" Background="{DynamicResource ConsoleBackgroundBrush}" CornerRadius="6">
         <StackPanel Spacing="8">
           <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsLoading}">
             <ProgressBar Width="120" IsIndeterminate="True" />
@@ -1362,7 +1378,7 @@
         in code-behind. Covers row 1 only, so the breadcrumbs above and the CLI activity log below
         stay visible while a file is open.
       -->
-      <Border Grid.Row="1"
+      <Border Grid.Row="0"
               Margin="16,0,16,16"
               Padding="16"
               CornerRadius="6"

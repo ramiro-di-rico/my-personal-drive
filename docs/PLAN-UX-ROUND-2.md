@@ -583,6 +583,52 @@ does cost something here.
 
 ---
 
+## 14. Each pane owns its own toolbar
+
+Reported by the repo owner as ambiguity: the buttons at the top right of the explorer look like
+they belong to the local pane, and it is not clear which pane they act on. They were right, and it
+was structural rather than a matter of taste.
+
+**What the markup actually was:**
+
+```
+Grid.Row=0   ← spanned the FULL window width
+   [ remote breadcrumb ..........*.......... ][ 7 buttons ]
+Grid.Row=1   ← only here did it split into panes
+   [ remote pane ][ splitter ][ local pane + its OWN toolbar ][ status ]
+```
+
+The remote pane's header was not inside the remote column. It spanned the window, and because its
+first column was star-sized, the buttons were pushed to the window's right edge — directly above
+the local pane, roughly 100px above *that* pane's own toolbar. Two toolbars stacked in the same
+visual column, belonging to different panes.
+
+Six of the seven buttons (back, create folder, upload, and the three view modes) act on the
+**remote** pane. Position said one thing, command did another.
+
+**Now:** the breadcrumb and those six buttons live inside the remote column as its own header row,
+exactly mirroring the local pane, which already had that shape. The explorer's full-width row is
+gone entirely, so the view gains a row of vertical height and the two pane headers line up.
+
+The seventh button — show/hide the local pane — was the one that genuinely was not about the remote
+pane. It moved to the window header alongside the theme switcher and the settings shortcut, where
+the other window-level toggles already live.
+
+**This finishes what [§10](#10-u10--deduplicate-the-breadcrumbs) left half-done.** That item
+unified the breadcrumb *control* but left the two instances in structurally different places — one
+inside its pane, one spanning the window. Same asymmetry, different axis; deduplicating the markup
+made the panes look alike without making them *be* alike.
+
+**Found in passing.** The header's theme buttons set `Classes.active` but the only `Button.active`
+style in the file is scoped to the view tabs further down, so that state was never rendered up
+there. A scoped style on the header's own panel fixes it for both them and the new toggle.
+
+**Not visually verified.** Same caveat as the status block: the app builds, loads and runs, but
+nobody has looked at the result. This one is a layout change to the largest view, and the tests
+cannot fail on a bad-looking result because no behaviour changed.
+
+---
+
 ## Appendix A — Claims checked against the source
 
 The initial screenshot review made eleven claims. Each was checked before being written up here.

@@ -11,7 +11,7 @@ Two auth models live behind one seam:
 |---|---|---|
 | Proton Drive | `proton-drive auth login` / `auth logout`, a CLI process | the CLI's own store, outside this app |
 | OneDrive | OAuth authorization-code + PKCE over a loopback `HttpListener`, no MSAL | `onedrive-token.json`, chmod 600 |
-| Google Drive | same shape, Drive API v3 | `google-token.json`, chmod 600 |
+| Google Drive | same shape, Drive API v3 | `google-drive-token.json`, chmod 600 |
 
 The seam is `IDriveAuthenticator` (`AuthenticateAsync` / `LogoutAsync`) — deliberately minimal.
 Read `docs/PLAN-CLOUD-PROVIDERS.md` §2.3 and §4.2 before widening it; the interface stays small
@@ -52,7 +52,7 @@ until a second implementation justifies the shape.
 3. Wire the state through `ProviderCatalog`/`ProviderDescriptor` so the UI's per-provider
    signed-in indicator reflects it. The UI must never call an authenticator directly from
    code-behind — it goes through the ViewModel (`add-feature` skill).
-4. **Tests** — `tests/MyPersonalDrive.Tests/Services/Providers/`:
+4. **Tests** — `tests/MyPersonalDrive.Tests/Services/Providers/<Provider>/`:
    - `FakeHttpMessageHandler` for the token endpoint. Cover: successful exchange, refresh before
      expiry, refresh *failure* (→ signed out, not a crash), and a mismatched `state` on redirect.
    - Token store: save/load round-trip, the 600 mode on POSIX (`PosixFactAttribute`), and a

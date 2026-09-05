@@ -17,11 +17,16 @@ are pointers to these same files.
 | Add/change a `proton-drive` command | [`cli-command`](../.claude/skills/cli-command/SKILL.md) |
 | Add a UI feature (MVVM) | [`add-feature`](../.claude/skills/add-feature/SKILL.md) |
 | Add a new cloud storage provider | [`add-cloud-provider`](../.claude/skills/add-cloud-provider/SKILL.md) |
+| Change the local-sync engine | [`sync-change`](../.claude/skills/sync-change/SKILL.md) |
+| Provider sign-in / tokens | [`provider-auth`](../.claude/skills/provider-auth/SKILL.md) |
+| Capture or debug real CLI output | [`debug-cli`](../.claude/skills/debug-cli/SKILL.md) |
 | Add a UI language, or refresh a locale | [`add-language`](../.claude/skills/add-language/SKILL.md) |
 | Cut a Linux release | [`release-linux`](../.claude/skills/release-linux/SKILL.md) |
+| Add or change CI | [`ci-setup`](../.claude/skills/ci-setup/SKILL.md) |
 | Check Native AOT / trim safety | [`aot-check`](../.claude/skills/aot-check/SKILL.md) |
 | Run the app locally | [`run-app`](../.claude/skills/run-app/SKILL.md) |
 | Manual smoke pass | [`smoke-test`](../.claude/skills/smoke-test/SKILL.md) |
+| UI review of a visual change | [`ui-review`](../.claude/skills/ui-review/SKILL.md) |
 | Write/update a plan doc | [`plan-doc`](../.claude/skills/plan-doc/SKILL.md) |
 | Park an out-of-scope finding | [`debt`](../.claude/skills/debt/SKILL.md) |
 | Create a git commit | [`commit`](../.claude/skills/commit/SKILL.md) |

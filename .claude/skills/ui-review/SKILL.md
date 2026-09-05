@@ -36,8 +36,9 @@ in practice:
   provider lacks — check `ProviderCapabilities` for what the current provider actually supports,
   and confirm the auth indicator matches the real signed-in state for *each* tab.
 - **Theme.** Light and dark both, since Fluent is themed; hard-coded colors show up immediately.
-- **Text.** Every user-visible string is localized and present in every locale — see the
-  `add-language` skill. A new English string with no translations is an unfinished change.
+- **Text.** Once the localization seam exists, every user-visible string goes through it and
+  every locale has the key — see the `add-language` skill. A new English string with no
+  translations is an unfinished change.
 - **Console panel.** Still readable, still showing the exact command and live output.
 
 ## Against the plan

@@ -24,9 +24,11 @@ are pointers to these same files.
 | Cut a Linux release | [`release-linux`](../.claude/skills/release-linux/SKILL.md) |
 | Add or change CI | [`ci-setup`](../.claude/skills/ci-setup/SKILL.md) |
 | Check Native AOT / trim safety | [`aot-check`](../.claude/skills/aot-check/SKILL.md) |
+| Bump a dependency or the SDK | [`upgrade-deps`](../.claude/skills/upgrade-deps/SKILL.md) |
 | Run the app locally | [`run-app`](../.claude/skills/run-app/SKILL.md) |
 | Manual smoke pass | [`smoke-test`](../.claude/skills/smoke-test/SKILL.md) |
 | UI review of a visual change | [`ui-review`](../.claude/skills/ui-review/SKILL.md) |
+| Accessibility and theming | [`a11y-theming`](../.claude/skills/a11y-theming/SKILL.md) |
 | Write/update a plan doc | [`plan-doc`](../.claude/skills/plan-doc/SKILL.md) |
 | Park an out-of-scope finding | [`debt`](../.claude/skills/debt/SKILL.md) |
 | Create a git commit | [`commit`](../.claude/skills/commit/SKILL.md) |

@@ -23,9 +23,11 @@ plain Markdown procedures, not Claude-specific — they apply to you unchanged.
 | Cut a Linux release | [`.claude/skills/release-linux/SKILL.md`](../.claude/skills/release-linux/SKILL.md) |
 | Add or change CI | [`.claude/skills/ci-setup/SKILL.md`](../.claude/skills/ci-setup/SKILL.md) |
 | Check Native AOT / trim safety | [`.claude/skills/aot-check/SKILL.md`](../.claude/skills/aot-check/SKILL.md) |
+| Bump a dependency or the SDK | [`.claude/skills/upgrade-deps/SKILL.md`](../.claude/skills/upgrade-deps/SKILL.md) |
 | Run the app locally | [`.claude/skills/run-app/SKILL.md`](../.claude/skills/run-app/SKILL.md) |
 | Manual smoke pass | [`.claude/skills/smoke-test/SKILL.md`](../.claude/skills/smoke-test/SKILL.md) |
 | UI review of a visual change | [`.claude/skills/ui-review/SKILL.md`](../.claude/skills/ui-review/SKILL.md) |
+| Accessibility and theming | [`.claude/skills/a11y-theming/SKILL.md`](../.claude/skills/a11y-theming/SKILL.md) |
 | Write/update a plan doc | [`.claude/skills/plan-doc/SKILL.md`](../.claude/skills/plan-doc/SKILL.md) |
 | Park an out-of-scope finding | [`.claude/skills/debt/SKILL.md`](../.claude/skills/debt/SKILL.md) |
 | Create a git commit | [`.claude/skills/commit/SKILL.md`](../.claude/skills/commit/SKILL.md) |

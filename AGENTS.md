@@ -34,9 +34,11 @@ one-line description.
 | [`release-linux`](.claude/skills/release-linux/SKILL.md) | Cutting a Linux release or producing an installable artifact |
 | [`ci-setup`](.claude/skills/ci-setup/SKILL.md) | Adding or changing the automated CI checks |
 | [`aot-check`](.claude/skills/aot-check/SKILL.md) | After touching serialization, reflection, packages, or bindings; before a release |
+| [`upgrade-deps`](.claude/skills/upgrade-deps/SKILL.md) | Bumping a NuGet package, Avalonia, or the SDK — publish-date rule and the deliberate pins |
 | [`run-app`](.claude/skills/run-app/SKILL.md) | Running the app for real, with the real CLI or a stub |
 | [`smoke-test`](.claude/skills/smoke-test/SKILL.md) | Before a PR or release — the manual pass unit tests can't do |
 | [`ui-review`](.claude/skills/ui-review/SKILL.md) | Reviewing a visual change against the UX plans, with real screenshots |
+| [`a11y-theming`](.claude/skills/a11y-theming/SKILL.md) | Adding or restyling a control: theme brushes, keyboard reach, accessible names |
 | [`plan-doc`](.claude/skills/plan-doc/SKILL.md) | Writing or refreshing a `docs/PLAN-*.md` or `ARCHITECTURE.md` |
 | [`debt`](.claude/skills/debt/SKILL.md) | Parking an out-of-scope finding instead of widening the diff |
 | [`commit`](.claude/skills/commit/SKILL.md) | Creating a git commit — no AI co-author trailer in this repo |

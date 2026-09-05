@@ -197,6 +197,28 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// </summary>
     public Func<string, Task<bool>>? RequestConfirmationAsync { get; set; }
 
+    /// <summary>
+    /// A blocking, must-be-dismissed notice — for a rejection the user needs to actually notice,
+    /// not just <see cref="StatusMessage"/> quietly changing underneath a dialog that already
+    /// closed. <see cref="SyncPairValidator"/>'s rejections (a direction change that would let a
+    /// pair start overwriting a folder another pair uploads into, an overlapping new pair) are
+    /// real, correct refusals — the gap this closes is that they were easy to miss, not that they
+    /// were wrong (found live testing Google Drive's P10 phase: a rejected edit looked
+    /// indistinguishable from a silently-failed save). Left null falls back to
+    /// <see cref="StatusMessage"/> alone, same graceful-degradation shape as every other optional
+    /// delegate here.
+    /// </summary>
+    public Func<string, Task>? RequestAlertAsync { get; set; }
+
+    private async Task AlertAsync(string message)
+    {
+        StatusMessage = message;
+        if (RequestAlertAsync is { } alert)
+        {
+            await alert(message);
+        }
+    }
+
     public async Task InitializeAsync() => await LoadPairsAsync();
 
     /// <summary>
@@ -314,7 +336,9 @@ public sealed class SyncPanelViewModel : ObservableObject
             RequestEditAsync = RequestEditPairAsync,
             ValidateDirectionChangeAsync = async newDirection
                 => SyncPairValidator.ValidateDirectionChange(pair, newDirection, await GetAllPairsAcrossAccountsAsync()),
-            OnError = message => StatusMessage = message,
+            // A rejected edit (SyncPairValidator.ValidateDirectionChange) routes through here —
+            // fire-and-forget is fine, OnError itself is a synchronous Action<string>.
+            OnError = message => _ = AlertAsync(message),
         };
         Pairs.Add(viewModel);
         return viewModel;
@@ -417,7 +441,7 @@ public sealed class SyncPanelViewModel : ObservableObject
                                   ?? LocalFolderInspector.CheckWritable(request.LocalPath);
             if (validationError is not null)
             {
-                StatusMessage = validationError;
+                await AlertAsync(validationError);
                 return;
             }
 

@@ -36,4 +36,15 @@ public interface IProviderPathSyntax
     /// remote side considers one node but the local side would split into two.
     /// </summary>
     StringComparison Comparison { get; }
+
+    /// <summary>
+    /// True when this provider's backend can hold two siblings with the exact same name in the
+    /// same parent, distinguished only by an internal id — Google Drive (docs/PLAN-CLOUD-PROVIDERS.md
+    /// §8.2/G2). Defaulted to <c>false</c> so Proton and OneDrive (and any test fake implementing
+    /// this interface before this member existed) need no change. <see cref="Sync.RemoteScanner"/>
+    /// treats this the same way it already treats a case-insensitive <see cref="Comparison"/>: every
+    /// member of a same-name sibling group is skipped and reported
+    /// (<see cref="Sync.NodeSkipReason.DuplicateName"/>), never silently merged or overwritten.
+    /// </summary>
+    bool AllowsDuplicateNamesInSameParent => false;
 }

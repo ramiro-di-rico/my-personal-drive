@@ -83,6 +83,18 @@ public class ProviderCatalogTests : IDisposable
     }
 
     [Fact]
+    public void Create_GoogleDrive_ReturnsAWorkingGoogleDriveProvider_NotTheGenericStub()
+    {
+        var sut = new ProviderCatalog();
+        var settings = new AppSettingsService();
+
+        var provider = sut.Create(ProviderId.GoogleDrive, settings);
+
+        Assert.Equal(ProviderId.GoogleDrive, provider.Id);
+        Assert.IsType<MyPersonalDrive.Services.Providers.GoogleDrive.GoogleDriveProvider>(provider);
+    }
+
+    [Fact]
     public void Create_UnknownProvider_ThrowsRatherThanGuessing()
     {
         var sut = new ProviderCatalog();
@@ -115,5 +127,6 @@ public class ProviderCatalogTests : IDisposable
 
         Assert.Equal(ProviderId.Proton, sut.ResolveOrDefault(ProviderId.Proton));
         Assert.Equal(ProviderId.OneDrive, sut.ResolveOrDefault(ProviderId.OneDrive));
+        Assert.Equal(ProviderId.GoogleDrive, sut.ResolveOrDefault(ProviderId.GoogleDrive));
     }
 }

@@ -123,9 +123,12 @@
             <TextBlock Text="DRIVE" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" />
           </StackPanel>
 
-          <!-- Provider Context Switcher ComboBox -->
+          <!-- Provider Context Switcher ComboBox. Bound by index, not SelectedItem: AvailableProviders
+               rebuilds fresh ProviderDescriptor instances on every access, and an index has no
+               equality-matching ambiguity for Avalonia to get wrong (docs/PLAN-CLOUD-PROVIDERS.md
+               P10 Appendix A2). -->
           <ComboBox ItemsSource="{Binding AvailableProviders}"
-                    SelectedItem="{Binding SelectedProvider}"
+                    SelectedIndex="{Binding SelectedProviderIndex}"
                     VerticalAlignment="Center"
                     CornerRadius="6"
                     Padding="10,4"
@@ -584,7 +587,7 @@
 
                   <Button Grid.Column="5"
                           Classes="rowAction"
-                          ToolTip.Tip="Download file"
+                          ToolTip.Tip="{Binding DownloadTooltip}"
                           Margin="8,0,0,0"
                           Command="{Binding DownloadCommand}"
                           IsVisible="{Binding IsFile}">
@@ -626,7 +629,12 @@
                       <MenuItem Header="Ver el contenido" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
                       <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
                       <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
-                      <MenuItem Header="Descargar" Command="{Binding DownloadCommand}" IsVisible="{Binding IsFile}" />
+                      <MenuItem Header="Descargar"
+                                Command="{Binding DownloadCommand}"
+                                IsVisible="{Binding IsFile}"
+                                IsEnabled="{Binding CanDownload}"
+                                ToolTip.Tip="{Binding DownloadTooltip}"
+                                ToolTip.ShowOnDisabled="True" />
                       <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
                       <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
                       <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
@@ -690,7 +698,12 @@
                       <MenuItem Header="Ver el contenido" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
                       <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
                       <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
-                      <MenuItem Header="Descargar" Command="{Binding DownloadCommand}" IsVisible="{Binding IsFile}" />
+                      <MenuItem Header="Descargar"
+                                Command="{Binding DownloadCommand}"
+                                IsVisible="{Binding IsFile}"
+                                IsEnabled="{Binding CanDownload}"
+                                ToolTip.Tip="{Binding DownloadTooltip}"
+                                ToolTip.ShowOnDisabled="True" />
                       <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
                       <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
                       <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
@@ -1582,7 +1595,8 @@
             </StackPanel>
           </Border>
 
-          <!-- Google Drive's card -->
+          <!-- Google Drive's card: client id/secret, sign-in/out, account label. No CLI path, no
+               version row — there is no external binary to point at or version (Diagnostics is null). -->
           <Border Padding="16"
                   Background="{DynamicResource CardBackgroundBrush}"
                   CornerRadius="6"
@@ -1590,21 +1604,38 @@
             <StackPanel Spacing="10">
               <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
               <TextBlock Text="Google Workspace &amp; Drive Account Connection" FontWeight="SemiBold" />
-              <TextBlock Opacity="0.6" FontSize="12" TextWrapping="Wrap"
-                         Text="Connect with Google OAuth2 credentials or API tokens for seamless synchronization." />
+              <TextBlock Opacity="0.6"
+                         FontSize="12"
+                         TextWrapping="Wrap"
+                         Text="Needs a Google Cloud Console OAuth client (Desktop app) with the Drive API enabled — see README.md § Google Drive setup." />
+              <TextBlock Text="OAuth client ID:" />
+              <TextBox Width="420"
+                       PlaceholderText="OAuth 2.0 client ID"
+                       Text="{Binding GoogleDriveClientId, Mode=TwoWay}" />
+              <TextBlock Text="OAuth client secret:" />
+              <TextBox Width="420"
+                       PlaceholderText="OAuth 2.0 client secret"
+                       PasswordChar="*"
+                       Text="{Binding GoogleDriveClientSecret, Mode=TwoWay}" />
               <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button Classes.primary="{Binding !IsAuthenticated}" Content="Iniciar Sesión en Google Drive" Command="{Binding AuthenticateCommand}">
-                  <StackPanel Orientation="Horizontal" Spacing="6">
-                    <Path Classes="icon" Data="{StaticResource IconKey}" />
-                    <TextBlock Text="Conectar Google Drive" />
-                  </StackPanel>
+                <Button Classes="primary" ToolTip.Tip="Sign in to Google Drive" Command="{Binding AuthenticateCommand}">
+                  <Path Classes="icon" Data="{StaticResource IconKey}" />
                 </Button>
-                <Button ToolTip.Tip="Cerrar sesión" Command="{Binding LogoutCommand}" IsVisible="{Binding IsAuthenticated}">
+                <Button ToolTip.Tip="Sign out of Google Drive" Command="{Binding LogoutCommand}">
                   <Path Classes="icon" Data="{StaticResource IconLogout}" />
                 </Button>
-                <Button ToolTip.Tip="Actualizar contenido" Command="{Binding RefreshCommand}">
+                <Button ToolTip.Tip="Refresh folder content" Command="{Binding RefreshCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
+              </StackPanel>
+
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock VerticalAlignment="Center" Text="Cuenta:" />
+                <TextBlock VerticalAlignment="Center"
+                           MaxWidth="420"
+                           TextWrapping="Wrap"
+                           Opacity="0.8"
+                           Text="{Binding GoogleDriveAccountLabel}" />
               </StackPanel>
             </StackPanel>
           </Border>

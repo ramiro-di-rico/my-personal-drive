@@ -8,6 +8,7 @@ using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Providers.OneDrive;
+using MyPersonalDrive.Services.Providers.GoogleDrive;
 using MyPersonalDrive.Services.Providers.Generic;
 using MyPersonalDrive.ViewModels.Local;
 using Avalonia.Threading;
@@ -71,6 +72,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _commandLogFlushScheduled;
     private string _cliPath;
     private string _oneDriveClientId;
+    private string _googleDriveClientId;
+    private string _googleDriveClientSecret;
     private string _currentPath;
     private string _statusMessage = "Select a Proton Drive CLI executable to begin.";
     private bool _isWarning;
@@ -144,36 +147,62 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>
     /// What the settings view's provider picker and header dropdown list — see docs/PLAN-CLOUD-PROVIDERS.md P5/P6.
     /// Dynamically reflects the live account identities and connection statuses.
+    ///
+    /// One stable instance for the lifetime of the ViewModel, populated once in the constructor and
+    /// updated in place afterward by <see cref="RefreshAvailableProviders"/> — never reassigned to a
+    /// brand-new collection. The header ComboBox's <c>ItemsSource</c> binds to this exact instance;
+    /// swapping in a new collection object on every provider switch (the original design, and every
+    /// attempted fix short of this one) is what made switching directly between two providers
+    /// unreliable: Avalonia's <c>SelectingItemsControl</c> resets or mis-tracks
+    /// <c>SelectedItem</c>/<c>SelectedIndex</c> whenever <c>ItemsSource</c> itself changes identity,
+    /// no matter how carefully the selected value is kept in sync afterward
+    /// (docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2 — three prior attempts, each live-tested and
+    /// each still broken, all treated a symptom of this instead of the cause).
     /// </summary>
-    public IReadOnlyList<ProviderDescriptor> AvailableProviders
+    public ObservableCollection<ProviderDescriptor> AvailableProviders { get; } = new();
+
+    /// <summary>
+    /// Recomputes every entry's live fields (<c>AccountIdentity</c>/<c>IsAuthenticated</c>) and
+    /// writes them into <see cref="AvailableProviders"/> by index — each assignment is an
+    /// <see cref="ObservableCollection{T}"/> element replacement (a granular
+    /// <c>CollectionChanged</c> notification), not a reassignment of the collection itself. Called
+    /// once from the constructor to populate it, and again after anything that can change a
+    /// provider's live auth state (sign-in/out, a live account switch).
+    /// </summary>
+    private void RefreshAvailableProviders()
     {
-        get
+        var settings = _settings.Load();
+        var available = (_providerCatalog ?? new ProviderCatalog()).Available;
+
+        for (var i = 0; i < available.Count; i++)
         {
-            var settings = _settings.Load();
-            var available = (_providerCatalog ?? new ProviderCatalog()).Available;
-            return available.Select(desc =>
+            var desc = available[i];
+
+            // The active provider's live in-memory flag is fresher than settings (which may not
+            // have been persisted yet mid-session); every other provider is read from settings.
+            var isAuth = desc.Id == _provider.Id ? _isAuthenticated : settings.IsProviderAuthenticated(desc.Id);
+
+            // OneDrive's account label lives on its live GraphAuthenticator, not settings, until
+            // AuthenticateAsync persists it — settings can lag behind what's actually signed in.
+            var liveLabel = _provider is OneDriveProvider { Auth: GraphAuthenticator { AccountLabel: { } label } } && label != "Not signed in."
+                ? label
+                : null;
+
+            var persistedLabel = settings.ProviderAccountLabel(desc.Id);
+            var identity = liveLabel
+                ?? (!string.IsNullOrWhiteSpace(persistedLabel) ? persistedLabel : null)
+                ?? (isAuth ? PlaceholderIdentity(desc.Id) : null);
+
+            var updated = desc with { AccountIdentity = identity, IsAuthenticated = isAuth };
+
+            if (i < AvailableProviders.Count)
             {
-                // The active provider's live in-memory flag is fresher than settings (which may not
-                // have been persisted yet mid-session); every other provider is read from settings.
-                var isAuth = desc.Id == _provider.Id ? _isAuthenticated : settings.IsProviderAuthenticated(desc.Id);
-
-                // OneDrive's account label lives on its live GraphAuthenticator, not settings, until
-                // AuthenticateAsync persists it — settings can lag behind what's actually signed in.
-                var liveLabel = _provider is OneDriveProvider { Auth: GraphAuthenticator { AccountLabel: { } label } } && label != "Not signed in."
-                    ? label
-                    : null;
-
-                var persistedLabel = settings.ProviderAccountLabel(desc.Id);
-                var identity = liveLabel
-                    ?? (!string.IsNullOrWhiteSpace(persistedLabel) ? persistedLabel : null)
-                    ?? (isAuth ? PlaceholderIdentity(desc.Id) : null);
-
-                return desc with
-                {
-                    AccountIdentity = identity,
-                    IsAuthenticated = isAuth
-                };
-            }).ToList();
+                AvailableProviders[i] = updated;
+            }
+            else
+            {
+                AvailableProviders.Add(updated);
+            }
         }
     }
 
@@ -185,6 +214,48 @@ public sealed class MainWindowViewModel : ObservableObject
             if (value is not null && value.Id != _provider.Id)
             {
                 _ = SwitchProviderAndReportErrorsAsync(value.Id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The header ComboBox binds its selection here instead of to <see cref="SelectedProvider"/>
+    /// directly. A <c>SelectedItem</c> binding needs Avalonia to match the bound value against
+    /// <see cref="AvailableProviders"/> by <c>Equals</c> — and since that list is rebuilt with
+    /// brand-new <see cref="ProviderDescriptor"/> instances on every access, any mismatch between
+    /// two recomputations (even after making <see cref="ProviderDescriptor"/>'s equality Id-only)
+    /// left switching between two non-adjacent providers unreliable in practice
+    /// (docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2). An index is a plain <see cref="int"/> with no
+    /// such ambiguity — it can't fail to match itself — so it sidesteps the whole class of bug
+    /// rather than depending on getting the equality semantics exactly right.
+    /// </summary>
+    public int SelectedProviderIndex
+    {
+        get
+        {
+            var providers = AvailableProviders;
+            for (var i = 0; i < providers.Count; i++)
+            {
+                if (providers[i].Id == _provider.Id)
+                {
+                    return i;
+                }
+            }
+
+            return providers.Count > 0 ? 0 : -1;
+        }
+        set
+        {
+            var providers = AvailableProviders;
+            if (value < 0 || value >= providers.Count)
+            {
+                return;
+            }
+
+            var target = providers[value];
+            if (target.Id != _provider.Id)
+            {
+                _ = SwitchProviderAndReportErrorsAsync(target.Id);
             }
         }
     }
@@ -218,6 +289,12 @@ public sealed class MainWindowViewModel : ObservableObject
     public string OneDriveAccountLabel
         => _provider is OneDriveProvider oneDrive && oneDrive.Auth is GraphAuthenticator { AccountLabel: { } label }
             ? label
+            : "Not signed in.";
+
+    /// <summary>The signed-in Google Drive account's label (email/name), or a "not signed in" placeholder for the card.</summary>
+    public string GoogleDriveAccountLabel
+        => _provider is GoogleDriveProvider googleDrive && googleDrive.Auth is GoogleDriveAuthenticator { AccountLabel: { } googleLabel }
+            ? googleLabel
             : "Not signed in.";
 
     public MainWindowViewModel(
@@ -277,6 +354,8 @@ public sealed class MainWindowViewModel : ObservableObject
         var appSettings = settings.Load();
         _cliPath = appSettings.CliPath;
         _oneDriveClientId = appSettings.OneDriveClientId;
+        _googleDriveClientId = appSettings.GoogleDriveClientId;
+        _googleDriveClientSecret = appSettings.GoogleDriveClientSecret;
         // Which AppSettings field backs this VM's single IsAuthenticated flag depends on which
         // provider is active — the two providers have entirely different connection cards (CLI
         // path + version vs. sign-in/out), so there is one bool per provider in AppSettings but
@@ -320,6 +399,7 @@ public sealed class MainWindowViewModel : ObservableObject
         KindFilters = new ObservableCollection<KindFilterViewModel>();
         BreadcrumbItems = new ObservableCollection<BreadcrumbSegmentViewModel>();
         UpdateBreadcrumbs(_rootPath);
+        RefreshAvailableProviders();
 
         AuthenticateCommand = new AsyncCommand(AuthenticateAsync, CanAuthenticate, HandleUnexpectedError);
         LogoutCommand = new AsyncCommand(LogoutAsync, CanLogout, HandleUnexpectedError);
@@ -815,6 +895,32 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public string GoogleDriveClientId
+    {
+        get => _googleDriveClientId;
+        set
+        {
+            if (SetProperty(ref _googleDriveClientId, value))
+            {
+                _settings.Update(settings => settings.GoogleDriveClientId = value);
+                RaiseCommandStates();
+            }
+        }
+    }
+
+    public string GoogleDriveClientSecret
+    {
+        get => _googleDriveClientSecret;
+        set
+        {
+            if (SetProperty(ref _googleDriveClientSecret, value))
+            {
+                _settings.Update(settings => settings.GoogleDriveClientSecret = value);
+                RaiseCommandStates();
+            }
+        }
+    }
+
     public string RootPath => _rootPath;
 
     public string CurrentPath
@@ -1230,6 +1336,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool CanAuthenticate() => !IsLoading && !IsAuthenticated && _provider.Id switch
     {
         ProviderId.OneDrive => !string.IsNullOrWhiteSpace(OneDriveClientId),
+        ProviderId.GoogleDrive => !string.IsNullOrWhiteSpace(GoogleDriveClientId),
         ProviderId.Proton => !string.IsNullOrWhiteSpace(CliPath),
         _ => true,
     };
@@ -1364,6 +1471,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 var liveLabel = _provider switch
                 {
                     OneDriveProvider { Auth: GraphAuthenticator { AccountLabel: { } oneDriveLabel } } => oneDriveLabel,
+                    GoogleDriveProvider { Auth: GoogleDriveAuthenticator { AccountLabel: { } googleDriveLabel } } => googleDriveLabel,
                     GenericCloudDriveProvider { AccountIdentity: { } identity } => identity,
                     _ => null
                 };
@@ -1374,9 +1482,11 @@ public sealed class MainWindowViewModel : ObservableObject
             });
             UpdateConnectionTelemetry();
             UpdateQuotaMetrics();
-            OnPropertyChanged(nameof(AvailableProviders));
+            RefreshAvailableProviders();
             OnPropertyChanged(nameof(SelectedProvider));
+            OnPropertyChanged(nameof(SelectedProviderIndex));
             OnPropertyChanged(nameof(OneDriveAccountLabel));
+            OnPropertyChanged(nameof(GoogleDriveAccountLabel));
             await GoToRootAsync();
         }
         catch (InvalidOperationException ex)
@@ -1400,9 +1510,11 @@ public sealed class MainWindowViewModel : ObservableObject
             _settings.Update(settings => settings.SetProviderAuthenticated(_provider.Id, false));
             UpdateConnectionTelemetry();
             UpdateQuotaMetrics();
-            OnPropertyChanged(nameof(AvailableProviders));
+            RefreshAvailableProviders();
             OnPropertyChanged(nameof(SelectedProvider));
+            OnPropertyChanged(nameof(SelectedProviderIndex));
             OnPropertyChanged(nameof(OneDriveAccountLabel));
+            OnPropertyChanged(nameof(GoogleDriveAccountLabel));
             ResetBrowserState();
             StatusMessage = $"Logged out from {_provider.DisplayName}.";
         }
@@ -1453,6 +1565,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             StatusMessage = $"{id} isn't configured.";
             OnPropertyChanged(nameof(SelectedProvider));
+            OnPropertyChanged(nameof(SelectedProviderIndex));
             return;
         }
 
@@ -1495,8 +1608,9 @@ public sealed class MainWindowViewModel : ObservableObject
         UpdateQuotaMetrics();
         UpdateConnectionTelemetry();
 
-        OnPropertyChanged(nameof(AvailableProviders));
+        RefreshAvailableProviders();
         OnPropertyChanged(nameof(SelectedProvider));
+        OnPropertyChanged(nameof(SelectedProviderIndex));
         OnPropertyChanged(nameof(ActiveProviderDisplayName));
         OnPropertyChanged(nameof(BrowserHeaderTitle));
         OnPropertyChanged(nameof(BrowserHeaderSubtitle));
@@ -1507,6 +1621,7 @@ public sealed class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(IsS3Active));
         OnPropertyChanged(nameof(HasDiagnostics));
         OnPropertyChanged(nameof(OneDriveAccountLabel));
+        OnPropertyChanged(nameof(GoogleDriveAccountLabel));
         OnPropertyChanged(nameof(RootPath));
         RaiseCommandStates();
 

@@ -88,6 +88,8 @@ public class SyncPanelPairCreationTests : IDisposable
         var outer = Path.Combine(_root, "Docs");
         var inner = Path.Combine(outer, "Sub");
         Directory.CreateDirectory(inner);
+        var alerts = new List<string>();
+        panel.RequestAlertAsync = message => { alerts.Add(message); return Task.CompletedTask; };
 
         Answer(panel, "/my-files/Docs", outer);
         await panel.AddPairCommand.ExecuteAsync();
@@ -99,6 +101,10 @@ public class SyncPanelPairCreationTests : IDisposable
         Assert.Single(panel.Pairs);
         Assert.Single(await store.GetPairsAsync());
         Assert.Contains("overlaps", panel.StatusMessage);
+        // docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2: a rejected pair looked indistinguishable
+        // from a silently-failed save — the rejection must also surface as a blocking alert, not
+        // just a StatusMessage line that's easy to miss.
+        Assert.Contains(alerts, message => message.Contains("overlaps"));
     }
 
     [Fact]

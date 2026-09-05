@@ -10,7 +10,24 @@ public enum NodeSkipReason
     UnmappableName,
 
     /// <summary>The name collides with a sibling once the provider's comparison ignores case.</summary>
-    CaseCollision
+    CaseCollision,
+
+    /// <summary>
+    /// The name is an exact duplicate of a sibling's on a provider that allows two same-named
+    /// siblings distinguished only by an internal id (Google Drive —
+    /// <see cref="Providers.IProviderPathSyntax.AllowsDuplicateNamesInSameParent"/>,
+    /// docs/PLAN-CLOUD-PROVIDERS.md §8.2/G2). Distinct from <see cref="CaseCollision"/> only in
+    /// wording: the underlying "every member of the colliding group is dropped, first wins nothing"
+    /// handling is identical.
+    /// </summary>
+    DuplicateName,
+
+    /// <summary>
+    /// A remote-only node with no binary content to sync against — a Google-native file (Docs,
+    /// Sheets, Slides, Forms, Drawings), which has no checksum at all
+    /// (docs/PLAN-CLOUD-PROVIDERS.md §8.4/G4). See <see cref="Models.DriveItem.IsRemoteOnlyDocument"/>.
+    /// </summary>
+    GoogleNativeFile
 }
 
 /// <summary>The node <see cref="IRemoteScanner.NodeSkipped"/> reports, and why.</summary>
@@ -98,6 +115,16 @@ public sealed class RemoteScanner : IRemoteScanner
                 return false;
             }
 
+            // A Google-native file (Docs/Sheets/Slides/...) has no binary content and therefore no
+            // checksum to sync against at all — treated as a skip, same as an unmappable name,
+            // rather than attempting an export-to-binary conversion (docs/PLAN-CLOUD-PROVIDERS.md
+            // §8.4/G4, explicitly deferred past P10).
+            if (item.IsRemoteOnlyDocument)
+            {
+                NodeSkipped?.Invoke(this, new NodeSkip(item.Name, NodeSkipReason.GoogleNativeFile));
+                return false;
+            }
+
             var relativePath = pathMapper.ToRelativeFromRemote(item.Path);
             if (exclusions.IsExcluded(relativePath, item.IsFolder))
             {
@@ -108,9 +135,12 @@ public sealed class RemoteScanner : IRemoteScanner
                 item.ContentHash is null ? null : _provider.Capabilities.RemoteHash);
             return true;
         },
-        // Only exercised for a case-insensitive provider — a no-op passthrough for Proton
-        // (Comparison == Ordinal), so this costs nothing today.
-        filterSiblings: comparison == StringComparison.Ordinal ? null : siblings => DropCaseCollisions(siblings, comparison),
+        // Only exercised for a case-insensitive provider, or one that allows exact duplicate
+        // names in the same parent (Google Drive) — a no-op passthrough for Proton (Comparison ==
+        // Ordinal and no duplicate names allowed), so this costs nothing today.
+        filterSiblings: comparison == StringComparison.Ordinal && !_provider.Paths.AllowsDuplicateNamesInSameParent
+            ? null
+            : siblings => DropNameCollisions(siblings, comparison, _provider.Paths.AllowsDuplicateNamesInSameParent),
         cancellationToken: cancellationToken);
 
         return result;
@@ -132,8 +162,14 @@ public sealed class RemoteScanner : IRemoteScanner
     /// be queued to descend into, and retracting it from <c>result</c> doesn't stop that descent:
     /// its children still get walked and added, leaking part of a folder that was supposed to be
     /// entirely excluded.
+    ///
+    /// Extended for Google Drive (docs/PLAN-CLOUD-PROVIDERS.md §8.2/G2): a provider whose
+    /// <see cref="IProviderPathSyntax.AllowsDuplicateNamesInSameParent"/> is true can hold two
+    /// exact-same-named siblings distinguished only by an internal id — grouping by
+    /// <see cref="StringComparison.Ordinal"/> already detects that exact-duplicate case correctly;
+    /// only the reported <see cref="NodeSkipReason"/> differs from a case-insensitive collision.
     /// </summary>
-    private IReadOnlyList<DriveItem> DropCaseCollisions(IReadOnlyList<DriveItem> siblings, StringComparison comparison)
+    private IReadOnlyList<DriveItem> DropNameCollisions(IReadOnlyList<DriveItem> siblings, StringComparison comparison, bool isDuplicateNameProvider)
     {
         if (siblings.Count < 2)
         {
@@ -146,6 +182,7 @@ public sealed class RemoteScanner : IRemoteScanner
             return siblings;
         }
 
+        var reason = isDuplicateNameProvider ? NodeSkipReason.DuplicateName : NodeSkipReason.CaseCollision;
         var survivors = new List<DriveItem>(siblings.Count);
         foreach (var group in byFold)
         {
@@ -157,7 +194,7 @@ public sealed class RemoteScanner : IRemoteScanner
 
             foreach (var collided in group)
             {
-                NodeSkipped?.Invoke(this, new NodeSkip(collided.Name, NodeSkipReason.CaseCollision));
+                NodeSkipped?.Invoke(this, new NodeSkip(collided.Name, reason));
             }
         }
 

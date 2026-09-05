@@ -99,4 +99,39 @@ public class SyncPairEditTests : IDisposable
 
         Assert.Same(row, received);
     }
+
+    /// <summary>
+    /// docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2: switching a pair to a direction that would
+    /// start writing into a local folder another pair already uploads from (SyncPairValidator's
+    /// real, correct refusal) looked indistinguishable from a silently-failed save — the dialog
+    /// closed as if it worked, and only a StatusMessage line, easy to miss, actually explained why
+    /// nothing changed. This pins down that the rejection also reaches RequestAlertAsync.
+    /// </summary>
+    [Fact]
+    public async Task RejectingAnUnsafeDirectionChange_AlsoRaisesABlockingAlert_NotJustStatusText()
+    {
+        var cli = new FakeCliExecutor();
+        cli.RespondForPath(RemoteRoot, "[]");
+        var store = new SyncStateStore(_dbPath);
+        var provider = new ProtonDriveProvider(new ProtonDriveService(cli));
+        var executor = new SyncExecutor(provider.Operations, store, new LocalScanner(), new RemoteScanner(provider));
+        // Two pairs sharing one local folder, both upload-only — the one safe overlap shape
+        // (SyncPairValidator.FindOverlap's own doc comment) — so switching either to TwoWay would
+        // let it start writing into what the other uploads.
+        await store.CreatePairAsync(RemoteRoot, _localRoot, SyncDirection.LocalToRemote, ConflictPolicy.Ask);
+        await store.CreatePairAsync("/my-files/Other", _localRoot, SyncDirection.LocalToRemote, ConflictPolicy.Ask);
+
+        var panel = new SyncPanelViewModel(store, executor, new SyncCrashRecovery(store));
+        await panel.InitializeAsync();
+        var alerts = new List<string>();
+        panel.RequestAlertAsync = message => { alerts.Add(message); return Task.CompletedTask; };
+        var row = panel.Pairs.First(p => p.RemotePath == RemoteRoot);
+        row.RequestEditAsync = _ => Task.FromResult<EditSyncPairRequest?>(new EditSyncPairRequest(SyncDirection.TwoWay, ConflictPolicy.Ask));
+
+        await row.EditCommand.ExecuteAsync();
+
+        Assert.Equal(SyncDirection.LocalToRemote, row.Direction);
+        Assert.Contains("also synced (upload-only)", panel.StatusMessage);
+        Assert.Contains(alerts, message => message.Contains("also synced (upload-only)"));
+    }
 }

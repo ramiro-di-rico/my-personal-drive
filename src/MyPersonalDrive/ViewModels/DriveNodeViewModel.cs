@@ -28,9 +28,14 @@ public sealed class DriveNodeViewModel : ObservableObject
         _previewItemAsync = previewItemAsync;
         _syncActions = syncActions;
         SyncPair = syncActions?.FindSyncPair?.Invoke(item);
-        CanPreview = TextPreviewPolicy.CanPreview(item) || ImagePreviewPolicy.CanPreview(item) || PdfPreviewPolicy.CanPreview(item);
+        // A Google-native Doc/Sheet/Slide has no extension (so TextPreviewPolicy's "no extension at
+        // all" fallback would otherwise offer to preview it as plain text) and no binary content to
+        // actually read — the P10 live-verification pass hit exactly this: the preview button showed
+        // up and failed instead of never appearing (docs/PLAN-CLOUD-PROVIDERS.md §8.4/G4).
+        CanPreview = !item.IsRemoteOnlyDocument
+            && (TextPreviewPolicy.CanPreview(item) || ImagePreviewPolicy.CanPreview(item) || PdfPreviewPolicy.CanPreview(item));
         RowCommand = new AsyncCommand(HandleRowClickAsync, onError: onError);
-        DownloadCommand = new AsyncCommand(DownloadAsync, () => !Item.IsFolder, onError);
+        DownloadCommand = new AsyncCommand(DownloadAsync, () => CanDownload, onError);
         TrashCommand = new AsyncCommand(TrashAsync, onError: onError);
         RenameCommand = new AsyncCommand(RenameAsync, onError: onError);
         CopyCommand = new AsyncCommand(CopyAsync, onError: onError);
@@ -126,6 +131,20 @@ public sealed class DriveNodeViewModel : ObservableObject
     public string ShareLinkTooltip => CanShareLink
         ? "Copiar un enlace para compartir este elemento"
         : "Esta funcionalidad no está disponible para el proveedor actual";
+
+    /// <summary>
+    /// A Google-native Doc/Sheet/Slide has no binary content to fetch at all — Drive rejects a plain
+    /// content download for one with a 403 (only <c>files.export</c> works, and this app doesn't
+    /// implement export, docs/PLAN-CLOUD-PROVIDERS.md §8.4/G4). Gating this here means the button is
+    /// simply disabled instead of the user hitting a confusing "Permission denied"-shaped error from
+    /// a doomed download attempt — a real gap the P10 live-verification pass surfaced.
+    /// </summary>
+    public bool CanDownload => !Item.IsFolder && !Item.IsRemoteOnlyDocument;
+
+    /// <summary>Explains a disabled "Download" button/menu entry the same way <see cref="ShareLinkTooltip"/> does.</summary>
+    public string DownloadTooltip => Item.IsRemoteOnlyDocument
+        ? "Los documentos de Google (Docs/Sheets/Slides) no se pueden descargar directamente — abrilos en Google Drive."
+        : "Descargar este elemento";
 
     public AsyncCommand RowCommand { get; }
 

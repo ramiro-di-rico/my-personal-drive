@@ -1,3 +1,4 @@
+using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
@@ -275,5 +276,119 @@ public class RemoteScannerTests
         Assert.Equal(new HashSet<string> { "Photos", "photos" }, skipped.ToHashSet());
         // Only the root listing happened; "Photos"'s children were never listed at all.
         Assert.Single(executor.Calls);
+    }
+
+    // ---- Google Drive-shaped providers (docs/PLAN-CLOUD-PROVIDERS.md §8.2/G2, P10) ----
+    // Neither Proton nor a case-insensitive decorator can produce a remote-only-document item or a
+    // provider whose AllowsDuplicateNamesInSameParent is true, so these use a minimal fake
+    // ICloudDriveProvider that returns canned DriveItems directly, the same "smallest fake that
+    // exercises the real code path" shape DeltaRemoteScannerTests' own FakeCloudDriveProvider uses.
+
+    [Fact]
+    public async Task ARemoteOnlyDocument_IsSkippedAndReportedAsGoogleNativeFile()
+    {
+        var provider = new FakeItemsProvider();
+        provider.RespondForPath("/Docs",
+        [
+            new DriveItem("/Docs/ok.txt", "ok.txt", IsFolder: false, Size: 3, NodeId: "1", ContentHash: "hash"),
+            new DriveItem("/Docs/Quarterly Plan", "Quarterly Plan", IsFolder: false, NodeId: "2", IsRemoteOnlyDocument: true),
+        ]);
+        var scanner = new RemoteScanner(provider);
+        var skipped = new List<NodeSkip>();
+        scanner.NodeSkipped += (_, skip) => skipped.Add(skip);
+
+        var result = await scanner.ScanAsync("/Docs", new PathMapper("/Docs", "/tmp/x"), new ExclusionMatcher([]));
+
+        Assert.Equal(["ok.txt"], result.Keys);
+        var skip = Assert.Single(skipped);
+        Assert.Equal("Quarterly Plan", skip.Name);
+        Assert.Equal(NodeSkipReason.GoogleNativeFile, skip.Reason);
+    }
+
+    [Fact]
+    public async Task OnADuplicateNameAllowingProvider_TwoExactSameNamedSiblings_AreBothSkippedAndReportedAsDuplicateName()
+    {
+        var provider = new FakeItemsProvider(allowsDuplicateNames: true);
+        provider.RespondForPath("/Docs",
+        [
+            new DriveItem("/Docs/report.pdf", "report.pdf", IsFolder: false, Size: 3, NodeId: "1", ContentHash: "hash-1"),
+            new DriveItem("/Docs/report.pdf", "report.pdf", IsFolder: false, Size: 4, NodeId: "2", ContentHash: "hash-2"),
+        ]);
+        var scanner = new RemoteScanner(provider);
+        var skipped = new List<NodeSkip>();
+        scanner.NodeSkipped += (_, skip) => skipped.Add(skip);
+
+        var result = await scanner.ScanAsync("/Docs", new PathMapper("/Docs", "/tmp/x"), new ExclusionMatcher([]));
+
+        Assert.Empty(result);
+        Assert.Equal(2, skipped.Count);
+        Assert.All(skipped, skip =>
+        {
+            Assert.Equal("report.pdf", skip.Name);
+            Assert.Equal(NodeSkipReason.DuplicateName, skip.Reason);
+        });
+    }
+
+    [Fact]
+    public async Task OnADuplicateNameAllowingProvider_NamesThatDifferAreNotTreatedAsCollisions()
+    {
+        var provider = new FakeItemsProvider(allowsDuplicateNames: true);
+        provider.RespondForPath("/Docs",
+        [
+            new DriveItem("/Docs/a.txt", "a.txt", IsFolder: false, Size: 1, NodeId: "1", ContentHash: "hash-a"),
+            new DriveItem("/Docs/b.txt", "b.txt", IsFolder: false, Size: 2, NodeId: "2", ContentHash: "hash-b"),
+        ]);
+        var scanner = new RemoteScanner(provider);
+
+        var result = await scanner.ScanAsync("/Docs", new PathMapper("/Docs", "/tmp/x"), new ExclusionMatcher([]));
+
+        Assert.Equal(new HashSet<string> { "a.txt", "b.txt" }, result.Keys.ToHashSet());
+    }
+
+    /// <summary>A minimal <see cref="ICloudDriveProvider"/> that returns canned <see cref="DriveItem"/> lists directly — the only way to exercise <see cref="DriveItem.IsRemoteOnlyDocument"/> and <see cref="IProviderPathSyntax.AllowsDuplicateNamesInSameParent"/>, neither of which Proton's real parsing pipeline can ever produce.</summary>
+    private sealed class FakeItemsProvider(bool allowsDuplicateNames = false) : ICloudDriveProvider
+    {
+        private readonly Dictionary<string, IReadOnlyList<DriveItem>> _responses = new(StringComparer.Ordinal);
+
+        public void RespondForPath(string path, IReadOnlyList<DriveItem> items) => _responses[path] = items;
+
+        public ProviderId Id => ProviderId.GoogleDrive;
+        public string DisplayName => "Fake";
+        public ProviderCapabilities Capabilities { get; } = new(
+            RemoteHash: RemoteHashAlgorithm.Sha256, SupportsServerSideMove: true, SupportsServerSideCopy: true,
+            CopyIsAsynchronous: false, SupportsBatchMove: false, SupportsDelta: false, RequiresRemoteViewInvalidation: false,
+            MaxSingleShotUploadBytes: null, UploadChunkSizeBytes: null, MaxRecommendedConcurrency: 4, CanSetRemoteModificationTime: true,
+            SupportsShareLinks: true);
+        public IDriveOperations Operations => new FakeOperations(_responses);
+        public IDriveAuthenticator Auth => throw new NotSupportedException();
+        public IProviderPathSyntax Paths { get; } = new FakePathSyntax(allowsDuplicateNames);
+        public IRemoteViewInvalidator? RemoteView => null;
+        public IProviderDiagnostics? Diagnostics => null;
+        public IDeltaSource? DeltaSource => null;
+        public event EventHandler<ProviderActivity>? Activity;
+        public event EventHandler<string>? ListingParseWarning;
+
+        private sealed class FakeOperations(Dictionary<string, IReadOnlyList<DriveItem>> responses) : IDriveOperations
+        {
+            public Task<IReadOnlyList<DriveItem>> ListFolderAsync(string path, CancellationToken cancellationToken = default)
+                => Task.FromResult(responses.TryGetValue(path, out var items) ? items : (IReadOnlyList<DriveItem>)[]);
+            public Task DownloadFileAsync(string path, string localFolder, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task UploadFilesAsync(IReadOnlyList<string> localPaths, string parentPath, UploadConflictStrategy strategy = UploadConflictStrategy.None, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task TrashItemAsync(string path, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task RenameItemAsync(string path, string newName, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task CreateFolderAsync(string parentPath, string name, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task MoveItemsAsync(IReadOnlyList<string> paths, string targetParentPath, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task CopyItemAsync(string sourcePath, string targetParentPath, string? newName = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task<string> CreateShareLinkAsync(string path, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        }
+
+        private sealed class FakePathSyntax(bool allowsDuplicateNames) : IProviderPathSyntax
+        {
+            public StringComparison Comparison => StringComparison.Ordinal;
+            public bool AllowsDuplicateNamesInSameParent => allowsDuplicateNames;
+            public string Combine(string parentPath, string name) => string.IsNullOrEmpty(parentPath) || parentPath == "/" ? $"/{name}" : $"{parentPath}/{name}";
+            public bool IsRemoteNameMappableLocally(string name) => !name.Contains('/');
+            public bool IsLocalNameMappableRemotely(string name) => true;
+        }
     }
 }

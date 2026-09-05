@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using MyPersonalDrive.Models;
+using MyPersonalDrive.Services.Providers.GoogleDrive;
 using MyPersonalDrive.Services.Providers.OneDrive;
 
 namespace MyPersonalDrive.Services;
@@ -27,6 +28,18 @@ namespace MyPersonalDrive.Services;
 [JsonSerializable(typeof(GraphCreateUploadSessionRequest))]
 [JsonSerializable(typeof(GraphSharingLinkRequest))]
 [JsonSerializable(typeof(GraphPermission))]
+// Google Drive (docs/PLAN-CLOUD-PROVIDERS.md P10).
+[JsonSerializable(typeof(StoredGoogleDriveToken))]
+[JsonSerializable(typeof(GoogleDriveTokenResponse))]
+[JsonSerializable(typeof(GoogleDriveAboutResponse))]
+[JsonSerializable(typeof(GoogleDriveFilesPage))]
+[JsonSerializable(typeof(GoogleDriveFile))]
+[JsonSerializable(typeof(GoogleDriveErrorEnvelope))]
+[JsonSerializable(typeof(GoogleDriveRenameRequest))]
+[JsonSerializable(typeof(GoogleDriveTrashRequest))]
+[JsonSerializable(typeof(GoogleDriveCreateFileRequest))]
+[JsonSerializable(typeof(GoogleDriveCopyRequest))]
+[JsonSerializable(typeof(GoogleDrivePermissionRequest))]
 [JsonSourceGenerationOptions(WriteIndented = true)]
 internal partial class AppJsonContext : JsonSerializerContext
 {

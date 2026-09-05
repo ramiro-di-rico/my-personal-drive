@@ -566,6 +566,7 @@ public partial class MainWindow : Window
         viewModel.SyncPanel.RequestConflictResolutionsAsync = ShowConflictsAsync;
         viewModel.SyncPanel.RequestConfirmationAsync = AskAsync;
         viewModel.SyncPanel.RequestEditPairAsync = PromptForEditPairAsync;
+        viewModel.SyncPanel.RequestAlertAsync = ShowAlertAsync;
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -1531,6 +1532,45 @@ public partial class MainWindow : Window
 
         await dialog.ShowDialog(this);
         return confirmed;
+    }
+
+    /// <summary>
+    /// A blocking, single-button notice — for a rejection the user has to actually see, not a
+    /// <c>StatusMessage</c> line that can change again (or scroll away) before anyone reads it.
+    /// Mirrors <see cref="AskAsync"/>'s shape with the "Cancel" button dropped: there's nothing to
+    /// decide here, only something to acknowledge (docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2 —
+    /// a rejected sync-pair-direction change looked indistinguishable from a silently-failed save).
+    /// </summary>
+    private async Task ShowAlertAsync(string message)
+    {
+        var ok = new Button { Content = "OK", IsCancel = true, IsDefault = true, Width = 100 };
+
+        var dialog = new Window
+        {
+            Title = "Can't do that",
+            Width = 480,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Spacing = 16,
+                Margin = new Avalonia.Thickness(20),
+                Children =
+                {
+                    new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Children = { ok }
+                    }
+                }
+            }
+        };
+
+        ok.Click += (_, _) => dialog.Close();
+
+        await dialog.ShowDialog(this);
     }
 
     private static string DescribeReason(string? reason) => reason switch

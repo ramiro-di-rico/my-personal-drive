@@ -56,9 +56,9 @@ public sealed class SyncPairViewModel : ObservableObject
 
     public string DirectionText => _pair.Direction switch
     {
-        SyncDirection.RemoteToLocal => "Remote → Local",
-        SyncDirection.LocalToRemote => "Local → Remote",
-        _ => "Two-way",
+        SyncDirection.RemoteToLocal => "Remoto → Local",
+        SyncDirection.LocalToRemote => "Local → Remoto",
+        _ => "Bidireccional",
     };
 
     public SyncDirection Direction => _pair.Direction;
@@ -116,8 +116,8 @@ public sealed class SyncPairViewModel : ObservableObject
     public string PauseGlyph => IsPaused ? "▶️" : "⏸️";
 
     public string PauseTooltip => IsPaused
-        ? "Resume automatic syncing for this pair"
-        : "Pause automatic syncing for this pair (you can still sync it by hand)";
+        ? "Reanudar la sincronización automática de este par"
+        : "Pausar la sincronización automática de este par (igual podés sincronizarlo a mano)";
 
     public int ConflictCount
     {
@@ -166,7 +166,7 @@ public sealed class SyncPairViewModel : ObservableObject
 
             if (_pair.LastStatus == SyncPairStatus.PartialFailure)
             {
-                if (HasConflicts && _pair.LastError is not null && !_pair.LastError.Contains("failed") && !_pair.LastError.Contains("aborted"))
+                if (HasConflicts && _pair.LastError is not null && !_pair.LastError.Contains("fallaron") && !_pair.LastError.Contains("se detuvo"))
                 {
                     return false;
                 }
@@ -178,7 +178,7 @@ public sealed class SyncPairViewModel : ObservableObject
         }
     }
 
-    public string ConflictText => ConflictCount == 1 ? "⚠ 1 conflict" : $"⚠ {ConflictCount} conflicts";
+    public string ConflictText => ConflictCount == 1 ? "⚠ 1 conflicto" : $"⚠ {ConflictCount} conflictos";
 
     /// <summary>
     /// Shown a dry-run plan plus any warnings about carrying it out; returns true if the user chose
@@ -213,12 +213,12 @@ public sealed class SyncPairViewModel : ObservableObject
         var confirm = RequestPreviewConfirmationAsync;
         if (confirm is null)
         {
-            StatusText = "Preview is not available.";
+            StatusText = "La vista previa no está disponible.";
             return;
         }
 
         IsBusy = true;
-        StatusText = "Scanning...";
+        StatusText = "Analizando...";
         try
         {
             var plan = await _executor.PreviewAsync(_pair);
@@ -245,7 +245,7 @@ public sealed class SyncPairViewModel : ObservableObject
     private async Task RunAsync()
     {
         IsBusy = true;
-        StatusText = "Syncing...";
+        StatusText = "Sincronizando...";
 
         // Subscribed per run rather than for the object's lifetime: the executor is shared by every
         // pair and by the scheduler, so a permanent subscription would show one pair another's
@@ -284,7 +284,7 @@ public sealed class SyncPairViewModel : ObservableObject
         var requester = RequestConflictResolutionsAsync;
         if (requester is null)
         {
-            StatusText = "Resolving conflicts is not available.";
+            StatusText = "Resolver conflictos no está disponible.";
             return;
         }
 
@@ -316,7 +316,7 @@ public sealed class SyncPairViewModel : ObservableObject
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    OnError?.Invoke($"Could not resolve '{conflict.RelativePath}': {ex.Message}");
+                    OnError?.Invoke($"No se pudo resolver '{conflict.RelativePath}': {ex.Message}");
                 }
             }
         }
@@ -327,8 +327,8 @@ public sealed class SyncPairViewModel : ObservableObject
         }
 
         StatusText = resolved == conflicts.Count
-            ? $"Resolved {resolved} conflict(s)."
-            : $"Resolved {resolved} of {decisions.Count} chosen conflict(s); {ConflictCount} still parked.";
+            ? $"Se resolvieron {resolved} conflicto(s)."
+            : $"Se resolvieron {resolved} de {decisions.Count} conflicto(s) elegidos; quedan {ConflictCount} pendientes.";
     }
 
     private async Task RetryFailedAsync()
@@ -344,9 +344,9 @@ public sealed class SyncPairViewModel : ObservableObject
             }
 
             var msg = revived == 0
-                ? "Failed state reset — sync now or resume to sync."
-                : $"{revived} failed action(s) queued again — they'll run on the next sync.";
-            StatusText = _pair.IsPaused ? $"Paused — {msg}" : msg;
+                ? "Se reinició el estado de error — sincronizá ahora o reanudá para sincronizar."
+                : $"{revived} acción(es) con error volvieron a la cola — se ejecutarán en la próxima sincronización.";
+            StatusText = _pair.IsPaused ? $"En pausa — {msg}" : msg;
         }
         finally
         {
@@ -365,7 +365,7 @@ public sealed class SyncPairViewModel : ObservableObject
         var requester = RequestEditAsync;
         if (requester is null)
         {
-            StatusText = "Editing a pair is not available.";
+            StatusText = "Editar un par no está disponible.";
             return;
         }
 
@@ -428,26 +428,26 @@ public sealed class SyncPairViewModel : ObservableObject
     {
         var status = _pair.LastStatus switch
         {
-            SyncPairStatus.Never => "Never synced",
-            SyncPairStatus.Ok => $"Up to date ({FormatTime(_pair.LastSyncAt)})",
-            SyncPairStatus.PartialFailure => $"Partial failure ({FormatTime(_pair.LastSyncAt)}): {_pair.LastError}",
+            SyncPairStatus.Never => "Nunca sincronizado",
+            SyncPairStatus.Ok => $"Al día ({FormatTime(_pair.LastSyncAt)})",
+            SyncPairStatus.PartialFailure => $"Fallo parcial ({FormatTime(_pair.LastSyncAt)}): {_pair.LastError}",
             SyncPairStatus.Error => $"Error: {_pair.LastError}",
-            _ => "Unknown",
+            _ => "Desconocido",
         };
 
         // A paused pair saying only "Up to date" would be a lie the moment anything changes, so the
         // pause is stated first — it's the fact that decides whether the rest is still being kept true.
-        StatusText = _pair.IsPaused ? $"Paused — {status}" : status;
+        StatusText = _pair.IsPaused ? $"En pausa — {status}" : status;
         OnPropertyChanged(nameof(HasFailures));
         RetryFailedCommand.RaiseCanExecuteChanged();
     }
 
     private static string FormatTime(DateTimeOffset? timestamp)
-        => timestamp is { } t ? t.ToLocalTime().ToString("g") : "never";
+        => timestamp is { } t ? t.ToLocalTime().ToString("g") : "nunca";
 
     private void ReportError(Exception ex)
     {
-        StatusText = $"Unexpected error: {ex.Message}";
+        StatusText = $"Error inesperado: {ex.Message}";
         OnError?.Invoke(ex.Message);
     }
 }

@@ -82,7 +82,7 @@ public class SyncConflictFlowTests : IDisposable
 
         Assert.True(row.HasConflicts);
         Assert.Equal(2, row.ConflictCount);
-        Assert.Equal("⚠ 2 conflicts", row.ConflictText);
+        Assert.Equal("⚠ 2 conflictos", row.ConflictText);
         Assert.True(row.ResolveConflictsCommand.CanExecute(null));
     }
 
@@ -213,13 +213,13 @@ public class SyncConflictFlowTests : IDisposable
         await row.RefreshOutstandingAsync();
 
         Assert.True(row.HasFailures);
-        Assert.Contains("Partial failure", row.StatusText);
-        Assert.StartsWith("Paused —", row.StatusText);
+        Assert.Contains("Fallo parcial", row.StatusText);
+        Assert.StartsWith("En pausa —", row.StatusText);
 
         await row.RetryFailedCommand.ExecuteAsync();
 
         Assert.False(row.HasFailures);
-        Assert.StartsWith("Paused —", row.StatusText);
+        Assert.StartsWith("En pausa —", row.StatusText);
         var pending = Assert.Single(await store.GetPendingActionsAsync(1));
         Assert.Equal(0, pending.AttemptCount);
     }

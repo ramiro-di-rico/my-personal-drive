@@ -57,7 +57,7 @@ public class CliUpdateInstallerTests : IDisposable
         var ex = await Assert.ThrowsAsync<CliUpdateException>(
             () => InstallerServing("tampered payload").InstallAsync(Release(Sha512Of("what was promised")), target));
 
-        Assert.Contains("Checksum mismatch", ex.Message);
+        Assert.Contains("El checksum", ex.Message);
         Assert.Equal("old binary", await File.ReadAllTextAsync(target));
     }
 

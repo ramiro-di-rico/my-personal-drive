@@ -100,11 +100,11 @@ public class SyncPanelPairCreationTests : IDisposable
 
         Assert.Single(panel.Pairs);
         Assert.Single(await store.GetPairsAsync());
-        Assert.Contains("overlaps", panel.StatusMessage);
+        Assert.Contains("se superpone", panel.StatusMessage);
         // docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2: a rejected pair looked indistinguishable
         // from a silently-failed save — the rejection must also surface as a blocking alert, not
         // just a StatusMessage line that's easy to miss.
-        Assert.Contains(alerts, message => message.Contains("overlaps"));
+        Assert.Contains(alerts, message => message.Contains("se superpone"));
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public class SyncPanelPairCreationTests : IDisposable
         await panel.AddPairCommand.ExecuteAsync();
 
         Assert.Single(await store.GetPairsAsync());
-        Assert.Contains("remote folder overlaps", panel.StatusMessage);
+        Assert.Contains("carpeta remota se superpone", panel.StatusMessage);
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public class SyncPanelPairCreationTests : IDisposable
 
         Assert.Empty(panel.Pairs);
         Assert.Single(await store.GetPairsAsync());
-        Assert.Contains("overlaps", panel.StatusMessage);
+        Assert.Contains("se superpone", panel.StatusMessage);
     }
 
     [Fact]
@@ -176,7 +176,7 @@ public class SyncPanelPairCreationTests : IDisposable
             await panel.AddPairCommand.ExecuteAsync();
 
             Assert.Empty(await store.GetPairsAsync());
-            Assert.Contains("Can't write to", panel.StatusMessage);
+            Assert.Contains("No se puede escribir en", panel.StatusMessage);
         }
         finally
         {
@@ -207,9 +207,9 @@ public class SyncPanelPairCreationTests : IDisposable
         await panel.AddPairCommand.ExecuteAsync();
 
         Assert.Single(asked);
-        Assert.Contains("upload all of them", asked[0]);
+        Assert.Contains("va a subirlos todos", asked[0]);
         Assert.Empty(await store.GetPairsAsync());
-        Assert.Contains("Cancelled", panel.StatusMessage);
+        Assert.Contains("Cancelado", panel.StatusMessage);
     }
 
     [Fact]

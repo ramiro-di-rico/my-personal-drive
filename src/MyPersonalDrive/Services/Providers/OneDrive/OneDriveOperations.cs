@@ -43,7 +43,7 @@ public sealed class OneDriveOperations : IDriveOperations, IDeltaSource
         {
             using var response = await _http.SendAsync($"GET {DescribePath(path)}/children", () => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken);
             var page = await response.Content.ReadFromJsonAsync(AppJsonContext.Default.GraphItemsPage, cancellationToken)
-                ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, "OneDrive returned an empty listing page.", DriveErrorKind.Unknown);
+                ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, "OneDrive devolvió una página de listado vacía.", DriveErrorKind.Unknown);
 
             foreach (var item in page.Value)
             {
@@ -132,7 +132,7 @@ public sealed class OneDriveOperations : IDriveOperations, IDeltaSource
             },
             cancellationToken);
         var session = await sessionResponse.Content.ReadFromJsonAsync(AppJsonContext.Default.GraphUploadSession, cancellationToken)
-            ?? throw new DriveException(createSessionUrl, (int)sessionResponse.StatusCode, string.Empty, string.Empty, "OneDrive did not return an upload session.", DriveErrorKind.Unknown);
+            ?? throw new DriveException(createSessionUrl, (int)sessionResponse.StatusCode, string.Empty, string.Empty, "OneDrive no devolvió una sesión de subida.", DriveErrorKind.Unknown);
 
         await using var stream = File.OpenRead(localPath);
         var totalLength = stream.Length;
@@ -158,7 +158,7 @@ public sealed class OneDriveOperations : IDriveOperations, IDeltaSource
             {
                 var body = await chunkResponse.Content.ReadAsStringAsync(cancellationToken);
                 throw new DriveException(session.UploadUrl, (int)chunkResponse.StatusCode, string.Empty, body,
-                    $"Uploading {name} to OneDrive failed at byte {offset}.", GraphErrorClassifier.Classify(chunkResponse.StatusCode, body));
+                    $"La subida de {name} a OneDrive falló en el byte {offset}.", GraphErrorClassifier.Classify(chunkResponse.StatusCode, body));
             }
 
             offset += read;
@@ -270,14 +270,14 @@ public sealed class OneDriveOperations : IDriveOperations, IDeltaSource
 
             if (string.Equals(status.Status, "failed", StringComparison.OrdinalIgnoreCase))
             {
-                throw new DriveException(monitorUrl, 0, string.Empty, string.Empty, $"Copying {sourcePath} on OneDrive failed.", DriveErrorKind.Unknown);
+                throw new DriveException(monitorUrl, 0, string.Empty, string.Empty, $"Falló la copia de {sourcePath} en OneDrive.", DriveErrorKind.Unknown);
             }
 
             await Task.Delay(delay, cancellationToken);
             delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 1.5, 5000));
         }
 
-        throw new DriveException(monitorUrl, 0, string.Empty, string.Empty, $"Copying {sourcePath} on OneDrive did not finish in time.", DriveErrorKind.Timeout);
+        throw new DriveException(monitorUrl, 0, string.Empty, string.Empty, $"La copia de {sourcePath} en OneDrive no terminó a tiempo.", DriveErrorKind.Timeout);
     }
 
     public async Task<string> CreateShareLinkAsync(string path, CancellationToken cancellationToken = default)
@@ -294,7 +294,7 @@ public sealed class OneDriveOperations : IDriveOperations, IDeltaSource
         var permission = await response.Content.ReadFromJsonAsync(AppJsonContext.Default.GraphPermission, cancellationToken);
         return permission?.Link?.WebUrl is { Length: > 0 } webUrl
             ? webUrl
-            : throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"OneDrive did not return a share link for {path}.", DriveErrorKind.Unknown);
+            : throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"OneDrive no devolvió un enlace para compartir de {path}.", DriveErrorKind.Unknown);
     }
 
     private async Task<string> GetItemIdAsync(string path, CancellationToken cancellationToken)
@@ -307,7 +307,7 @@ public sealed class OneDriveOperations : IDriveOperations, IDeltaSource
         var url = $"{ItemSegment(path)}?$select=id";
         using var response = await _http.SendAsync($"GET {DescribePath(path)} (resolve id)", () => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken);
         var item = await response.Content.ReadFromJsonAsync(AppJsonContext.Default.GraphDriveItem, cancellationToken)
-            ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"OneDrive did not return an id for {path}.", DriveErrorKind.NotFound);
+            ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"OneDrive no devolvió un id para {path}.", DriveErrorKind.NotFound);
 
         _targetIdCache[path] = item.Id;
         return item.Id;
@@ -362,13 +362,13 @@ public sealed class OneDriveOperations : IDriveOperations, IDeltaSource
             if (pageNumber > MaxDeltaPages)
             {
                 throw new DriveException(url, 0, string.Empty, string.Empty,
-                    $"OneDrive's delta query did not terminate after {MaxDeltaPages} pages — aborting instead of looping forever.",
+                    $"La consulta delta de OneDrive no terminó después de {MaxDeltaPages} páginas — se aborta en vez de repetir para siempre.",
                     DriveErrorKind.Unknown);
             }
 
             using var response = await _http.SendAsync($"GET /root/delta (page {pageNumber})", () => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken);
             var page = await response.Content.ReadFromJsonAsync(AppJsonContext.Default.GraphDeltaPage, cancellationToken)
-                ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, "OneDrive returned an empty delta page.", DriveErrorKind.Unknown);
+                ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, "OneDrive devolvió una página de delta vacía.", DriveErrorKind.Unknown);
 
             foreach (var item in page.Value)
             {

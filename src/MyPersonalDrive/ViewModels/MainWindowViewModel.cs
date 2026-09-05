@@ -75,7 +75,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _googleDriveClientId;
     private string _googleDriveClientSecret;
     private string _currentPath;
-    private string _statusMessage = "Select a Proton Drive CLI executable to begin.";
+    private string _statusMessage = "Seleccioná un ejecutable de la CLI de Proton Drive para empezar.";
     private bool _isWarning;
     private bool _isLoading;
     private bool _isAuthenticated;
@@ -87,17 +87,17 @@ public sealed class MainWindowViewModel : ObservableObject
     private double _commandConsoleMaxHeight = 180;
     private double _commandConsoleOpacity = 1;
     private bool _commandConsoleHitTestVisible = true;
-    private string _activeCommand = "Idle";
-    private string _commandLogText = "No CLI command running.";
-    private string _commandConsoleToggleLabel = "Hide CLI activity";
+    private string _activeCommand = "Inactivo";
+    private string _commandLogText = "No hay ningún comando de la CLI en ejecución.";
+    private string _commandConsoleToggleLabel = "Ocultar la actividad de la CLI";
     private string _commandConsoleToggleGlyph = "▼";
-    private string _selectedName = "None";
-    private string _selectedKind = "None";
-    private string _selectedPath = "None";
-    private string _selectedSize = "None";
-    private string _selectedModified = "None";
-    private string _selectedOwner = "None";
-    private string _selectedShared = "None";
+    private string _selectedName = "Ninguno";
+    private string _selectedKind = "Ninguno";
+    private string _selectedPath = "Ninguno";
+    private string _selectedSize = "Ninguno";
+    private string _selectedModified = "Ninguno";
+    private string _selectedOwner = "Ninguno";
+    private string _selectedShared = "Ninguno";
     private bool _hasSelection;
     private bool _isSettingsView;
     private bool _isViewerVisible;
@@ -121,23 +121,23 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _searchText = string.Empty;
     private string _filterSummary = string.Empty;
     private bool _sortDescending;
-    private const string UnknownCliVersion = "Unknown";
+    private const string UnknownCliVersion = "Desconocida";
     private string _cliVersion = UnknownCliVersion;
     private bool _isCheckingCliVersion;
     private readonly ICliReleaseFeed? _releaseFeed;
     private readonly CliUpdateInstaller _updateInstaller;
     private readonly Func<bool> _isSyncInProgress;
     private CliReleaseCandidate? _availableRelease;
-    private string _cliUpdateStatus = "Not checked yet.";
+    private string _cliUpdateStatus = "Todavía no se verificó.";
     private bool _isCliUpdateAvailable;
     private bool _isCliUpdateBusy;
     private string _theme = "Default";
     private int _bandwidthLimitKbps;
     private double _viewerZoom;
     private string _defaultSyncFolder = string.Empty;
-    private string _connectionStatus = "Online";
+    private string _connectionStatus = "En línea";
     private string _connectionStatusKind = "Online";
-    private string _connectionStatusDescription = "Connected";
+    private string _connectionStatusDescription = "Conectado";
     private long _quotaUsedBytes;
     private long _quotaTotalBytes = 500L * 1024 * 1024 * 1024;
 
@@ -190,7 +190,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
             // OneDrive's account label lives on its live GraphAuthenticator, not settings, until
             // AuthenticateAsync persists it — settings can lag behind what's actually signed in.
-            var liveLabel = _provider is OneDriveProvider { Auth: GraphAuthenticator { AccountLabel: { } label } } && label != "Not signed in."
+            var liveLabel = _provider is OneDriveProvider { Auth: GraphAuthenticator { AccountLabel: { } label } } && label != "Sin sesión iniciada."
                 ? label
                 : null;
 
@@ -273,9 +273,9 @@ public sealed class MainWindowViewModel : ObservableObject
     /// gap: with OneDrive as the browsed account, a hardcoded "Proton Drive browser" header was
     /// actively misleading, not just cosmetically stale).
     /// </summary>
-    public string BrowserHeaderTitle => $"{_provider.DisplayName} browser";
+    public string BrowserHeaderTitle => $"Explorador de {_provider.DisplayName}";
 
-    public string BrowserHeaderSubtitle => $"Browsing {RootPath} on {_provider.DisplayName}.";
+    public string BrowserHeaderSubtitle => $"Explorando {RootPath} en {_provider.DisplayName}.";
 
     /// <summary>Which connection-card block the settings view shows — Proton's, OneDrive's, Google Drive's, Nextcloud's, or S3's.</summary>
     public bool IsProtonActive => _provider.Id == ProviderId.Proton;
@@ -295,13 +295,13 @@ public sealed class MainWindowViewModel : ObservableObject
     public string OneDriveAccountLabel
         => _provider is OneDriveProvider oneDrive && oneDrive.Auth is GraphAuthenticator { AccountLabel: { } label }
             ? label
-            : "Not signed in.";
+            : "Sin sesión iniciada.";
 
     /// <summary>The signed-in Google Drive account's label (email/name), or a "not signed in" placeholder for the card.</summary>
     public string GoogleDriveAccountLabel
         => _provider is GoogleDriveProvider googleDrive && googleDrive.Auth is GoogleDriveAuthenticator { AccountLabel: { } googleLabel }
             ? googleLabel
-            : "Not signed in.";
+            : "Sin sesión iniciada.";
 
     public MainWindowViewModel(
         ICloudDriveProvider provider,
@@ -389,7 +389,7 @@ public sealed class MainWindowViewModel : ObservableObject
             _commandConsoleMaxHeight = 0;
             _commandConsoleOpacity = 0;
             _commandConsoleHitTestVisible = false;
-            _commandConsoleToggleLabel = "Show CLI activity";
+            _commandConsoleToggleLabel = "Mostrar la actividad de la CLI";
             _commandConsoleToggleGlyph = "▲";
         }
         // The browsed provider's own activity is tagged like any other session's, so interleaved
@@ -961,7 +961,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 CliVersion = UnknownCliVersion;
                 _availableRelease = null;
                 IsCliUpdateAvailable = false;
-                CliUpdateStatus = "Not checked yet.";
+                CliUpdateStatus = "Todavía no se verificó.";
                 PersistSettings();
                 RaiseCommandStates();
             }
@@ -1319,7 +1319,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 CommandConsoleMaxHeight = value ? 180 : 0;
                 CommandConsoleOpacity = value ? 1 : 0;
                 CommandConsoleHitTestVisible = value;
-                CommandConsoleToggleLabel = value ? "Hide CLI activity" : "Show CLI activity";
+                CommandConsoleToggleLabel = value ? "Ocultar la actividad de la CLI" : "Mostrar la actividad de la CLI";
                 CommandConsoleToggleGlyph = value ? "▼" : "▲";
                 _settings.Update(s => s.ShowCommandConsole = value);
                 RaiseCommandStates();
@@ -1415,8 +1415,8 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         StatusMessage = needsCliPath && string.IsNullOrWhiteSpace(CliPath)
-            ? $"Select a {_provider.DisplayName} CLI executable to begin."
-            : $"Authenticate to load {RootPath}.";
+            ? $"Seleccioná un ejecutable de la CLI de {_provider.DisplayName} para empezar."
+            : $"Iniciá sesión para cargar {RootPath}.";
     }
 
     private bool CanAuthenticate() => !IsLoading && !IsAuthenticated && _provider.Id switch
@@ -1548,7 +1548,7 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Opening {_provider.DisplayName} authentication...";
+            StatusMessage = $"Abriendo la autenticación de {_provider.DisplayName}...";
             await _provider.Auth.AuthenticateAsync();
             IsAuthenticated = true;
             _settings.Update(settings =>
@@ -1590,7 +1590,7 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Logging out from {_provider.DisplayName}...";
+            StatusMessage = $"Cerrando la sesión de {_provider.DisplayName}...";
             await _provider.Auth.LogoutAsync();
             IsAuthenticated = false;
             _settings.Update(settings => settings.SetProviderAuthenticated(_provider.Id, false));
@@ -1602,7 +1602,7 @@ public sealed class MainWindowViewModel : ObservableObject
             OnPropertyChanged(nameof(OneDriveAccountLabel));
             OnPropertyChanged(nameof(GoogleDriveAccountLabel));
             ResetBrowserState();
-            StatusMessage = $"Logged out from {_provider.DisplayName}.";
+            StatusMessage = $"Se cerró la sesión de {_provider.DisplayName}.";
         }
         catch (InvalidOperationException ex)
         {
@@ -1649,7 +1649,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var session = _browserSessions.FirstOrDefault(candidate => candidate.Provider.Id == id);
         if (session is null)
         {
-            StatusMessage = $"{id} isn't configured.";
+            StatusMessage = $"{id} no está configurado.";
             OnPropertyChanged(nameof(SelectedProvider));
             OnPropertyChanged(nameof(SelectedProviderIndex));
             return;
@@ -1715,12 +1715,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
         if (!IsAuthenticated)
         {
-            StatusMessage = $"Authentication required for {_provider.DisplayName}. Please sign in to access files.";
+            StatusMessage = $"{_provider.DisplayName} requiere autenticación. Iniciá sesión para acceder a los archivos.";
             ResetBrowserState();
             return;
         }
 
-        StatusMessage = $"Switched to {_provider.DisplayName}.";
+        StatusMessage = $"Se cambió a {_provider.DisplayName}.";
 
         try
         {
@@ -1730,7 +1730,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsAuthenticated = false;
             UpdateConnectionTelemetry();
-            StatusMessage = $"Authentication required for {_provider.DisplayName}. Please sign in to access files.";
+            StatusMessage = $"{_provider.DisplayName} requiere autenticación. Iniciá sesión para acceder a los archivos.";
             ResetBrowserState();
         }
     }
@@ -1814,7 +1814,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var picker = RequestUploadFilesAsync;
         if (picker is null)
         {
-            StatusMessage = "Upload is not available.";
+            StatusMessage = "Subir no está disponible.";
             return;
         }
 
@@ -1827,16 +1827,16 @@ public sealed class MainWindowViewModel : ObservableObject
         var strategy = await ResolveUploadConflictStrategyAsync(files, CurrentPath);
         if (strategy is null)
         {
-            StatusMessage = "Upload cancelled.";
+            StatusMessage = "Subida cancelada.";
             return;
         }
 
         try
         {
             IsLoading = true;
-            StatusMessage = $"Uploading {files.Count} file(s) to {CurrentPath}...";
+            StatusMessage = $"Subiendo {files.Count} archivo(s) a {CurrentPath}...";
             await _provider.Operations.UploadFilesAsync(files, CurrentPath, strategy.Value);
-            StatusMessage = $"Uploaded {files.Count} file(s) to {CurrentPath}.";
+            StatusMessage = $"Se subieron {files.Count} archivo(s) a {CurrentPath}.";
             await InvalidateDeepMetricsAsync(CurrentPath);
 
             _ = RefreshAsync(); // Refresh in background
@@ -1904,7 +1904,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var strategy = await ResolveUploadConflictStrategyAsync(localPaths, targetPath);
         if (strategy is null)
         {
-            StatusMessage = "Upload cancelled.";
+            StatusMessage = "Subida cancelada.";
             return;
         }
 
@@ -1968,7 +1968,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 var strategy = await RequestConflictStrategyAsync(conflictingNames);
                 if (strategy == UploadConflictStrategy.None)
                 {
-                    StatusMessage = "Download cancelled.";
+                    StatusMessage = "Descarga cancelada.";
                     return;
                 }
 
@@ -2012,7 +2012,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var requester = RequestCreateFolderAsync;
         if (requester is null)
         {
-            StatusMessage = "Create folder is not available.";
+            StatusMessage = "Crear carpeta no está disponible.";
             return;
         }
 
@@ -2025,9 +2025,9 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Creating folder '{folderName}' in {CurrentPath}...";
+            StatusMessage = $"Creando la carpeta '{folderName}' en {CurrentPath}...";
             await _provider.Operations.CreateFolderAsync(CurrentPath, folderName);
-            StatusMessage = $"Created folder '{folderName}' in {CurrentPath}.";
+            StatusMessage = $"Se creó la carpeta '{folderName}' en {CurrentPath}.";
             
             // Update DB immediately
             var newFolderPath = _provider.Paths.Combine(CurrentPath, folderName);
@@ -2051,7 +2051,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var picker = RequestDownloadFolderAsync;
         if (picker is null)
         {
-            StatusMessage = "Download is not available.";
+            StatusMessage = "Descargar no está disponible.";
             return;
         }
 
@@ -2064,9 +2064,9 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Downloading {item.Name}...";
+            StatusMessage = $"Descargando {item.Name}...";
             await _provider.Operations.DownloadFileAsync(item.Path, folder);
-            StatusMessage = $"Downloaded {item.Name} to {folder}.";
+            StatusMessage = $"Se descargó {item.Name} a {folder}.";
         }
         catch (InvalidOperationException ex)
         {
@@ -2339,7 +2339,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var requester = RequestRenameAsync;
         if (requester is null)
         {
-            StatusMessage = "Rename is not available.";
+            StatusMessage = "Renombrar no está disponible.";
             return;
         }
 
@@ -2352,9 +2352,9 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Renaming {item.Name} to {newName}...";
+            StatusMessage = $"Renombrando {item.Name} a {newName}...";
             await _provider.Operations.RenameItemAsync(item.Path, newName);
-            StatusMessage = $"Renamed {item.Name} to {newName}.";
+            StatusMessage = $"Se renombró {item.Name} a {newName}.";
 
             // Update DB immediately
             var parentPath = GetParentPath(item.Path);
@@ -2383,7 +2383,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var requester = RequestCopyNameAsync;
         if (requester is null)
         {
-            StatusMessage = "Copy is not available.";
+            StatusMessage = "Copiar no está disponible.";
             return;
         }
 
@@ -2398,9 +2398,9 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Creating a copy of {item.Name} as {displayTarget} in {CurrentPath}...";
+            StatusMessage = $"Creando una copia de {item.Name} como {displayTarget} en {CurrentPath}...";
             await _provider.Operations.CopyItemAsync(item.Path, CurrentPath, string.IsNullOrEmpty(newName) ? null : newName);
-            StatusMessage = $"Copied {item.Name} successfully.";
+            StatusMessage = $"Se copió {item.Name} correctamente.";
             await InvalidateDeepMetricsAsync(CurrentPath);
             
             _ = RefreshAsync(); // Refresh in background
@@ -2421,9 +2421,9 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             var confirm = RequestConfirmationAsync;
             if (confirm is not null && !await confirm(
-                $"Move the folder \"{item.Name}\" and everything inside it to trash?"))
+                $"¿Mover la carpeta \"{item.Name}\" y todo su contenido a la papelera?"))
             {
-                StatusMessage = $"Cancelled: {item.Name} was not moved to trash.";
+                StatusMessage = $"Cancelado: no se movió {item.Name} a la papelera.";
                 return;
             }
         }
@@ -2431,9 +2431,9 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Moving {item.Name} to trash...";
+            StatusMessage = $"Moviendo {item.Name} a la papelera...";
             await _provider.Operations.TrashItemAsync(item.Path);
-            StatusMessage = $"Moved {item.Name} to trash.";
+            StatusMessage = $"Se movió {item.Name} a la papelera.";
 
             // Update DB immediately
             await _cacheService.RemoveItemAsync(item.Path);
@@ -2457,12 +2457,12 @@ public sealed class MainWindowViewModel : ObservableObject
         var copy = RequestCopyToClipboardAsync;
         if (copy is null)
         {
-            StatusMessage = "Copy is not available.";
+            StatusMessage = "Copiar no está disponible.";
             return;
         }
 
         await copy(item.Path);
-        StatusMessage = $"Copied path: {item.Path}";
+        StatusMessage = $"Ruta copiada: {item.Path}";
     }
 
     /// <summary>
@@ -2523,7 +2523,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var picker = RequestUploadFilesAsync;
         if (picker is null)
         {
-            StatusMessage = "Upload is not available.";
+            StatusMessage = "Subir no está disponible.";
             return;
         }
 
@@ -2536,16 +2536,16 @@ public sealed class MainWindowViewModel : ObservableObject
         var strategy = await ResolveUploadConflictStrategyAsync(files, folder.Path);
         if (strategy is null)
         {
-            StatusMessage = "Upload cancelled.";
+            StatusMessage = "Subida cancelada.";
             return;
         }
 
         try
         {
             IsLoading = true;
-            StatusMessage = $"Uploading {files.Count} file(s) to {folder.Path}...";
+            StatusMessage = $"Subiendo {files.Count} archivo(s) a {folder.Path}...";
             await _provider.Operations.UploadFilesAsync(files, folder.Path, strategy.Value);
-            StatusMessage = $"Uploaded {files.Count} file(s) to {folder.Path}.";
+            StatusMessage = $"Se subieron {files.Count} archivo(s) a {folder.Path}.";
             await InvalidateDeepMetricsAsync(folder.Path);
 
             if (string.Equals(folder.Path, CurrentPath, StringComparison.Ordinal))
@@ -2581,19 +2581,19 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var fields = new List<PropertyField>
         {
-            new("Name", item.Name),
-            new("Path", item.Path),
-            new("Type", item.IsFolder ? "Folder" : "File"),
+            new("Nombre", item.Name),
+            new("Ruta", item.Path),
+            new("Tipo", item.IsFolder ? "Carpeta" : "Archivo"),
         };
 
         if (item.Size is not null)
         {
-            fields.Add(new PropertyField("Size", $"{item.Size:n0} bytes"));
+            fields.Add(new PropertyField("Tamaño", $"{item.Size:n0} bytes"));
         }
 
         if (item.ModifiedAt is not null)
         {
-            fields.Add(new PropertyField("Modified", item.ModifiedAt.Value.ToLocalTime().ToString("g")));
+            fields.Add(new PropertyField("Modificado", item.ModifiedAt.Value.ToLocalTime().ToString("g")));
         }
 
         await show(item.Name, fields);
@@ -2706,7 +2706,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var picker = RequestDownloadFolderAsync;
         if (picker is null)
         {
-            StatusMessage = "Download is not available.";
+            StatusMessage = "Descargar no está disponible.";
             return;
         }
 
@@ -2724,7 +2724,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 try
                 {
-                    StatusMessage = $"Downloading {file.Name}...";
+                    StatusMessage = $"Descargando {file.Name}...";
                     await _provider.Operations.DownloadFileAsync(file.Path, folder);
                 }
                 catch (InvalidOperationException ex)
@@ -2739,8 +2739,8 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         StatusMessage = failed.Count == 0
-            ? $"Downloaded {files.Count} file(s) to {folder}."
-            : $"Downloaded {files.Count - failed.Count} of {files.Count} file(s). Failures: {string.Join("; ", failed)}";
+            ? $"Se descargaron {files.Count} archivo(s) a {folder}."
+            : $"Se descargaron {files.Count - failed.Count} de {files.Count} archivo(s). Fallos: {string.Join("; ", failed)}";
         IsWarning = failed.Count > 0;
     }
 
@@ -2756,9 +2756,9 @@ public sealed class MainWindowViewModel : ObservableObject
         if (selected.Any(item => item.IsFolder))
         {
             var confirm = RequestConfirmationAsync;
-            if (confirm is not null && !await confirm($"Move {selected.Count} selected item(s) to trash? Some are folders — everything inside them goes too."))
+            if (confirm is not null && !await confirm($"¿Mover {selected.Count} elemento(s) seleccionado(s) a la papelera? Algunos son carpetas — todo lo que contienen se va también."))
             {
-                StatusMessage = $"Cancelled: {selected.Count} item(s) were not moved to trash.";
+                StatusMessage = $"Cancelado: no se movieron {selected.Count} elemento(s) a la papelera.";
                 return;
             }
         }
@@ -2771,7 +2771,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 try
                 {
-                    StatusMessage = $"Moving {item.Name} to trash...";
+                    StatusMessage = $"Moviendo {item.Name} a la papelera...";
                     await _provider.Operations.TrashItemAsync(item.Path);
                     await _cacheService.RemoveItemAsync(item.Path);
                     await InvalidateDeepMetricsAsync(item.Path);
@@ -2788,8 +2788,8 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         StatusMessage = failed.Count == 0
-            ? $"Moved {selected.Count} item(s) to trash."
-            : $"Moved {selected.Count - failed.Count} of {selected.Count} item(s) to trash. Failures: {string.Join("; ", failed)}";
+            ? $"Se movieron {selected.Count} elemento(s) a la papelera."
+            : $"Se movieron {selected.Count - failed.Count} de {selected.Count} elemento(s) a la papelera. Fallos: {string.Join("; ", failed)}";
         IsWarning = failed.Count > 0;
 
         _ = RefreshAsync();
@@ -2804,7 +2804,7 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Loading {path}...";
+            StatusMessage = $"Cargando {path}...";
 
             // Always update current path and breadcrumbs immediately to show transition
             var previousPath = CurrentPath;
@@ -2823,7 +2823,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (hasCache)
             {
                 DisplayItems(cachedItems);
-                StatusMessage = $"Showing cached items for {path}. Fetching latest from CLI...";
+                StatusMessage = $"Mostrando los elementos en caché de {path}. Buscando lo último en la CLI...";
                 IsLoading = false;
 
                 // Fire and forget CLI fetch to keep UI responsive and command finished. (Tried
@@ -2897,7 +2897,7 @@ public sealed class MainWindowViewModel : ObservableObject
                         ClearSelection();
                     }
 
-                    StatusMessage = $"Loaded {RootItems.Count} items from {path}.";
+                    StatusMessage = $"Se cargaron {RootItems.Count} elementos de {path}.";
                     IsLoading = false;
                 }
             });
@@ -2920,7 +2920,7 @@ public sealed class MainWindowViewModel : ObservableObject
             // hanging, so it needs to actually say something.
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                StatusMessage = $"Loaded {path} but could not update the local cache: {ex.Message}";
+                StatusMessage = $"Se cargó {path} pero no se pudo actualizar la caché local: {ex.Message}";
                 IsWarning = true;
             });
         }
@@ -2933,7 +2933,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         if (kind == DriveErrorKind.NotFound)
         {
-            StatusMessage = $"Warning: The path '{path}' no longer exists.";
+            StatusMessage = $"Atención: la ruta '{path}' ya no existe.";
             IsWarning = true;
             return;
         }
@@ -3131,14 +3131,14 @@ public sealed class MainWindowViewModel : ObservableObject
     private void SelectItem(DriveItem item)
     {
         SelectedName = item.Name;
-        SelectedKind = item.IsFolder ? "Folder" : "File";
+        SelectedKind = item.IsFolder ? "Carpeta" : "Archivo";
         SelectedPath = item.Path;
-        SelectedSize = item.Size is null ? "None" : $"{item.Size:n0} bytes";
-        SelectedModified = item.ModifiedAt is { } modifiedAt ? modifiedAt.ToLocalTime().ToString("g") : "None";
-        SelectedOwner = item.Owner ?? "None";
-        SelectedShared = item.IsShared ? "Yes" : "No";
+        SelectedSize = item.Size is null ? "Ninguno" : $"{item.Size:n0} bytes";
+        SelectedModified = item.ModifiedAt is { } modifiedAt ? modifiedAt.ToLocalTime().ToString("g") : "Ninguno";
+        SelectedOwner = item.Owner ?? "Ninguno";
+        SelectedShared = item.IsShared ? "Sí" : "No";
         HasSelection = true;
-        StatusMessage = $"Selected {item.Name}.";
+        StatusMessage = $"Se seleccionó {item.Name}.";
     }
 
     private void ClearSelection()
@@ -3150,13 +3150,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
         _selectedNode = null;
         _selectionAnchorPath = null;
-        SelectedName = "None";
-        SelectedKind = "None";
-        SelectedPath = "None";
-        SelectedSize = "None";
-        SelectedModified = "None";
-        SelectedOwner = "None";
-        SelectedShared = "None";
+        SelectedName = "Ninguno";
+        SelectedKind = "Ninguno";
+        SelectedPath = "Ninguno";
+        SelectedSize = "Ninguno";
+        SelectedModified = "Ninguno";
+        SelectedOwner = "Ninguno";
+        SelectedShared = "Ninguno";
         HasSelection = false;
         ViewSelectedFileCommand.RaiseCanExecuteChanged();
         RaiseSelectionSummaryChanged();
@@ -3464,18 +3464,18 @@ public sealed class MainWindowViewModel : ObservableObject
                 ? await _provider.Diagnostics.GetVersionAsync()
                 : null;
             CliVersion = string.IsNullOrWhiteSpace(version)
-                ? "The CLI reported no version."
+                ? "La CLI no informó ninguna versión."
                 : version;
         }
         catch (InvalidOperationException ex)
         {
             // Includes DriveException. The CLI's own text is the most useful thing on screen here:
             // if `--version` is not the flag this build understands, the user sees exactly that.
-            CliVersion = $"Unavailable: {ex.Message}";
+            CliVersion = $"No disponible: {ex.Message}";
         }
         catch (FileNotFoundException ex)
         {
-            CliVersion = $"Unavailable: {ex.Message}";
+            CliVersion = $"No disponible: {ex.Message}";
         }
         finally
         {
@@ -3493,7 +3493,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (_releaseFeed is null)
         {
-            CliUpdateStatus = "Update checking is not available.";
+            CliUpdateStatus = "La verificación de actualizaciones no está disponible.";
             return;
         }
 
@@ -3512,7 +3512,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 _availableRelease = null;
                 IsCliUpdateAvailable = false;
-                CliUpdateStatus = "Proton publishes no Stable build for this platform.";
+                CliUpdateStatus = "Proton no publica una compilación Stable para esta plataforma.";
                 return;
             }
 
@@ -3521,13 +3521,13 @@ public sealed class MainWindowViewModel : ObservableObject
                 case CliUpdateAvailability.UpdateAvailable:
                     _availableRelease = release;
                     IsCliUpdateAvailable = true;
-                    CliUpdateStatus = $"Version {release.Version} is available ({release.ReleaseDate}).";
+                    CliUpdateStatus = $"La versión {release.Version} está disponible ({release.ReleaseDate}).";
                     break;
 
                 case CliUpdateAvailability.UpToDate:
                     _availableRelease = null;
                     IsCliUpdateAvailable = false;
-                    CliUpdateStatus = $"Up to date — {release.Version} is the current Stable release.";
+                    CliUpdateStatus = $"Al día — {release.Version} es la versión Stable actual.";
                     break;
 
                 default:
@@ -3536,7 +3536,7 @@ public sealed class MainWindowViewModel : ObservableObject
                     // than not updating.
                     _availableRelease = null;
                     IsCliUpdateAvailable = false;
-                    CliUpdateStatus = $"Stable is {release.Version}, but the installed version could not be read — not offering an update.";
+                    CliUpdateStatus = $"La versión Stable es {release.Version}, pero no se pudo leer la versión instalada — no se ofrece una actualización.";
                     break;
             }
         }
@@ -3544,7 +3544,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             _availableRelease = null;
             IsCliUpdateAvailable = false;
-            CliUpdateStatus = $"Could not reach Proton's release manifest: {ex.Message}";
+            CliUpdateStatus = $"No se pudo acceder al manifiesto de versiones de Proton: {ex.Message}";
         }
         finally
         {
@@ -3569,25 +3569,25 @@ public sealed class MainWindowViewModel : ObservableObject
         // mid-operation, which is not a state worth reasoning about.
         if (_isSyncInProgress())
         {
-            CliUpdateStatus = "A sync is running. Wait for it to finish, then update.";
+            CliUpdateStatus = "Hay una sincronización en curso. Esperá a que termine y actualizá.";
             return;
         }
 
         IsCliUpdateBusy = true;
         try
         {
-            CliUpdateStatus = $"Downloading {release.Version}…";
+            CliUpdateStatus = $"Descargando {release.Version}…";
             await _updateInstaller.InstallAsync(
                 release,
                 CliPath,
                 onProgress: bytes => Dispatcher.UIThread.Post(
-                    () => CliUpdateStatus = $"Downloading {release.Version}… {bytes / (1024 * 1024)} MB"));
+                    () => CliUpdateStatus = $"Descargando {release.Version}… {bytes / (1024 * 1024)} MB"));
 
             _availableRelease = null;
             IsCliUpdateAvailable = false;
             CliVersion = UnknownCliVersion;
             await CheckCliVersionAsync();
-            CliUpdateStatus = $"Updated to {release.Version}. Verified against the published SHA-512.";
+            CliUpdateStatus = $"Se actualizó a {release.Version}. Verificado contra el SHA-512 publicado.";
         }
         catch (CliUpdateException ex)
         {
@@ -3597,7 +3597,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or TaskCanceledException)
         {
-            CliUpdateStatus = $"Update failed, the existing CLI was kept: {ex.Message}";
+            CliUpdateStatus = $"La actualización falló, se conservó la CLI existente: {ex.Message}";
             IsWarning = true;
         }
         finally
@@ -3611,7 +3611,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var picker = RequestSaveActivityAsync;
         if (picker is null)
         {
-            StatusMessage = "Activity export is not available.";
+            StatusMessage = "Exportar la actividad no está disponible.";
             return;
         }
 
@@ -3624,11 +3624,11 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             await File.WriteAllTextAsync(path, CommandLogText);
-            StatusMessage = $"Saved CLI activity to {path}.";
+            StatusMessage = $"Se guardó la actividad de la CLI en {path}.";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            StatusMessage = $"Failed to save CLI activity to {path}: {ex.Message}";
+            StatusMessage = $"No se pudo guardar la actividad de la CLI en {path}: {ex.Message}";
             IsWarning = true;
         }
     }
@@ -3641,8 +3641,8 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         _commandLog.Clear();
-        CommandLogText = "No CLI command running.";
-        ActiveCommand = "Idle";
+        CommandLogText = "No hay ningún comando de la CLI en ejecución.";
+        ActiveCommand = "Inactivo";
         LastLogLine = null;
         RaiseCommandStates();
         await Task.CompletedTask;
@@ -3799,7 +3799,7 @@ public sealed class MainWindowViewModel : ObservableObject
         Dispatcher.UIThread.Post(() =>
         {
             CrashLog.Write(ex);
-            StatusMessage = $"Unexpected error: {ex.Message}";
+            StatusMessage = $"Error inesperado: {ex.Message}";
             IsWarning = true;
             QueueCommandLine($"[err] Unexpected error: {ex}");
             IsLoading = false;
@@ -3817,16 +3817,16 @@ public sealed class MainWindowViewModel : ObservableObject
         if (kind == DriveErrorKind.NotAuthenticated)
         {
             return path == "auth login"
-                ? "Authentication required. Use Authenticate to sign in."
-                : $"Authentication required to load {path}.";
+                ? "Se requiere autenticación. Usá Autenticar para iniciar sesión."
+                : $"Se requiere autenticación para cargar {path}.";
         }
 
         if (path == "auth logout")
         {
-            return $"Logout failed: {ex.Message}";
+            return $"No se pudo cerrar la sesión: {ex.Message}";
         }
 
-        return $"Failed to load {path}: {ex.Message}";
+        return $"No se pudo cargar {path}: {ex.Message}";
     }
 
     private static string? PlaceholderIdentity(ProviderId id) => id switch

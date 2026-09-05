@@ -26,7 +26,7 @@ public static class LocalFolderInspector
         {
             if (File.Exists(localPath))
             {
-                return $"'{localPath}' is a file, not a folder.";
+                return $"'{localPath}' es un archivo, no una carpeta.";
             }
 
             if (!Directory.Exists(localPath))
@@ -48,7 +48,7 @@ public static class LocalFolderInspector
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            return $"Can't write to '{localPath}': {ex.Message}";
+            return $"No se puede escribir en '{localPath}': {ex.Message}";
         }
     }
 
@@ -117,7 +117,7 @@ public static class LocalFolderInspector
         var needed = bytesToDownload + bytesToDownload / 10;
         return available >= needed
             ? null
-            : $"This would download {FormatBytes(bytesToDownload)} but only {FormatBytes(available)} is free on that drive.";
+            : $"Esto descargaría {FormatBytes(bytesToDownload)} pero solo hay {FormatBytes(available)} libres en ese disco.";
     }
 
     private static string FormatBytes(long bytes) => bytes switch

@@ -8,7 +8,7 @@ public sealed record ProviderDescriptor(
     bool IsAuthenticated = false)
 {
     public string AccountSummary => string.IsNullOrWhiteSpace(AccountIdentity)
-        ? (IsAuthenticated ? "Connected" : "Not signed in")
+        ? (IsAuthenticated ? "Con sesión iniciada" : "Sin sesión iniciada")
         : AccountIdentity;
 
     // Identity is Id alone, not the record's default all-property comparison. MainWindowViewModel's

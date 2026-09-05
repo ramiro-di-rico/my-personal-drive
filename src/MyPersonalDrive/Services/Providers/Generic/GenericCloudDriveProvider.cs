@@ -89,7 +89,7 @@ public sealed class GenericCloudDriveProvider : ICloudDriveProvider, IDriveOpera
         exitCode: -1,
         stdout: string.Empty,
         stderr: string.Empty,
-        message: $"{_displayName} isn't connected to a real backend yet — {operation} isn't implemented.",
+        message: $"{_displayName} todavía no está conectado a un backend real — {operation} no está implementado.",
         kind: DriveErrorKind.Unknown);
 
     private void EnsureAuthenticated()
@@ -101,7 +101,7 @@ public sealed class GenericCloudDriveProvider : ICloudDriveProvider, IDriveOpera
                 exitCode: -1,
                 stdout: string.Empty,
                 stderr: string.Empty,
-                message: $"Authentication required for {_displayName}. Please sign in to access files.",
+                message: $"{_displayName} requiere autenticación. Iniciá sesión para acceder a los archivos.",
                 kind: DriveErrorKind.NotAuthenticated);
         }
     }

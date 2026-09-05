@@ -58,7 +58,7 @@ public sealed class GoogleDriveOperations : IDriveOperations
             var url = BuildListUrl(parentId, nameFilter: null, pageToken, ListFields);
             using var response = await _http.SendAsync($"GET {DescribePath(path)}/children", () => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken);
             var page = await response.Content.ReadFromJsonAsync(AppJsonContext.Default.GoogleDriveFilesPage, cancellationToken)
-                ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, "Google Drive returned an empty listing page.", DriveErrorKind.Unknown);
+                ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, "Google Drive devolvió una página de listado vacía.", DriveErrorKind.Unknown);
 
             foreach (var file in page.Files)
             {
@@ -159,7 +159,7 @@ public sealed class GoogleDriveOperations : IDriveOperations
         }
 
         throw new DriveException($"POST files (create {name})", 0, string.Empty, string.Empty,
-            $"Could not find a free name for '{name}' on Google Drive after 1000 attempts.", DriveErrorKind.AlreadyExists);
+            $"No se encontró un nombre libre para '{name}' en Google Drive después de 1000 intentos.", DriveErrorKind.AlreadyExists);
     }
 
     private async Task<GoogleDriveFile> CreateAndUploadAsync(string localPath, string parentId, string name, string? existingId, CancellationToken cancellationToken)
@@ -192,7 +192,7 @@ public sealed class GoogleDriveOperations : IDriveOperations
             cancellationToken);
 
         return await response.Content.ReadFromJsonAsync(AppJsonContext.Default.GoogleDriveFile, cancellationToken)
-            ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"Google Drive did not return the uploaded file for {name}.", DriveErrorKind.Unknown);
+            ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"Google Drive no devolvió el archivo subido para {name}.", DriveErrorKind.Unknown);
     }
 
     private async Task<GoogleDriveFile> UploadResumableAsync(string localPath, FileInfo fileInfo, string parentId, string name, string? existingId, CancellationToken cancellationToken)
@@ -211,7 +211,7 @@ public sealed class GoogleDriveOperations : IDriveOperations
             },
             cancellationToken);
         var sessionUri = initiateResponse.Headers.Location?.ToString()
-            ?? throw new DriveException(initiateUrl, (int)initiateResponse.StatusCode, string.Empty, string.Empty, $"Google Drive did not return a resumable upload session for {name}.", DriveErrorKind.Unknown);
+            ?? throw new DriveException(initiateUrl, (int)initiateResponse.StatusCode, string.Empty, string.Empty, $"Google Drive no devolvió una sesión de subida reanudable para {name}.", DriveErrorKind.Unknown);
         initiateResponse.Content.Dispose();
 
         await using var stream = File.OpenRead(localPath);
@@ -241,7 +241,7 @@ public sealed class GoogleDriveOperations : IDriveOperations
                 {
                     var body = await lastResponse.Content.ReadAsStringAsync(cancellationToken);
                     throw new DriveException(sessionUri, (int)lastResponse.StatusCode, string.Empty, body,
-                        $"Uploading {name} to Google Drive failed at byte {offset}.", GoogleDriveErrorClassifier.Classify(lastResponse.StatusCode, body));
+                        $"La subida de {name} a Google Drive falló en el byte {offset}.", GoogleDriveErrorClassifier.Classify(lastResponse.StatusCode, body));
                 }
 
                 offset += read;
@@ -249,8 +249,8 @@ public sealed class GoogleDriveOperations : IDriveOperations
 
             return lastResponse is not null
                 ? await lastResponse.Content.ReadFromJsonAsync(AppJsonContext.Default.GoogleDriveFile, cancellationToken)
-                    ?? throw new DriveException(sessionUri, 0, string.Empty, string.Empty, $"Google Drive did not return the uploaded file for {name}.", DriveErrorKind.Unknown)
-                : throw new DriveException(sessionUri, 0, string.Empty, string.Empty, $"'{name}' was empty; no chunk was ever uploaded.", DriveErrorKind.Unknown);
+                    ?? throw new DriveException(sessionUri, 0, string.Empty, string.Empty, $"Google Drive no devolvió el archivo subido para {name}.", DriveErrorKind.Unknown)
+                : throw new DriveException(sessionUri, 0, string.Empty, string.Empty, $"'{name}' estaba vacío; nunca se subió ningún fragmento.", DriveErrorKind.Unknown);
         }
         finally
         {
@@ -315,7 +315,7 @@ public sealed class GoogleDriveOperations : IDriveOperations
             () => new HttpRequestMessage(HttpMethod.Post, url) { Content = JsonContent.Create(body, AppJsonContext.Default.GoogleDriveCreateFileRequest) },
             cancellationToken);
         var created = await response.Content.ReadFromJsonAsync(AppJsonContext.Default.GoogleDriveFile, cancellationToken)
-            ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"Google Drive did not return the created folder {name}.", DriveErrorKind.Unknown);
+            ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"Google Drive no devolvió la carpeta creada {name}.", DriveErrorKind.Unknown);
 
         _idCache[_paths.Combine(NormalizePath(parentPath), name)] = created.Id;
     }
@@ -358,7 +358,7 @@ public sealed class GoogleDriveOperations : IDriveOperations
             () => new HttpRequestMessage(HttpMethod.Post, url) { Content = JsonContent.Create(body, AppJsonContext.Default.GoogleDriveCopyRequest) },
             cancellationToken);
         var copied = await response.Content.ReadFromJsonAsync(AppJsonContext.Default.GoogleDriveFile, cancellationToken)
-            ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"Google Drive did not return the copy of {sourcePath}.", DriveErrorKind.Unknown);
+            ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"Google Drive no devolvió la copia de {sourcePath}.", DriveErrorKind.Unknown);
 
         _idCache[_paths.Combine(NormalizePath(targetParentPath), copied.Name)] = copied.Id;
     }
@@ -379,7 +379,7 @@ public sealed class GoogleDriveOperations : IDriveOperations
 
         return file?.WebViewLink is { Length: > 0 } webViewLink
             ? webViewLink
-            : throw new DriveException(fileUrl, (int)fileResponse.StatusCode, string.Empty, string.Empty, $"Google Drive did not return a share link for {path}.", DriveErrorKind.Unknown);
+            : throw new DriveException(fileUrl, (int)fileResponse.StatusCode, string.Empty, string.Empty, $"Google Drive no devolvió un enlace para compartir de {path}.", DriveErrorKind.Unknown);
     }
 
     private async Task<string> GetCurrentParentIdAsync(string id, CancellationToken cancellationToken)
@@ -392,7 +392,7 @@ public sealed class GoogleDriveOperations : IDriveOperations
         // parent per file.
         return file?.Parents is { Count: > 0 } parents
             ? parents[0]
-            : throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"Google Drive did not return a parent for item {id}.", DriveErrorKind.Unknown);
+            : throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"Google Drive no devolvió un padre para el elemento {id}.", DriveErrorKind.Unknown);
     }
 
     /// <summary>
@@ -428,7 +428,7 @@ public sealed class GoogleDriveOperations : IDriveOperations
             // First match wins deterministically when the parent holds duplicate-named siblings —
             // same accepted, documented limitation as FindExistingByExactNameAsync above.
             var match = page?.Files.FirstOrDefault()
-                ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"'{segment}' was not found on Google Drive under {currentPath}.", DriveErrorKind.NotFound);
+                ?? throw new DriveException(url, (int)response.StatusCode, string.Empty, string.Empty, $"No se encontró '{segment}' en Google Drive dentro de {currentPath}.", DriveErrorKind.NotFound);
 
             _idCache[childPath] = match.Id;
             currentId = match.Id;

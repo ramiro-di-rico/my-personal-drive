@@ -52,7 +52,7 @@ public class SyncPairEditTests : IDisposable
 
         await row.EditCommand.ExecuteAsync();
 
-        Assert.Equal("Editing a pair is not available.", row.StatusText);
+        Assert.Equal("Editar un par no está disponible.", row.StatusText);
         Assert.Equal(SyncDirection.RemoteToLocal, Assert.Single(await store.GetPairsAsync()).Direction);
     }
 
@@ -66,7 +66,7 @@ public class SyncPairEditTests : IDisposable
 
         Assert.Equal(SyncDirection.TwoWay, row.Direction);
         Assert.Equal(ConflictPolicy.PreferRemote, row.ConflictPolicy);
-        Assert.Equal("Two-way", row.DirectionText);
+        Assert.Equal("Bidireccional", row.DirectionText);
         var persisted = Assert.Single(await store.GetPairsAsync());
         Assert.Equal(SyncDirection.TwoWay, persisted.Direction);
         Assert.Equal(ConflictPolicy.PreferRemote, persisted.ConflictPolicy);
@@ -131,7 +131,7 @@ public class SyncPairEditTests : IDisposable
         await row.EditCommand.ExecuteAsync();
 
         Assert.Equal(SyncDirection.LocalToRemote, row.Direction);
-        Assert.Contains("also synced (upload-only)", panel.StatusMessage);
-        Assert.Contains(alerts, message => message.Contains("also synced (upload-only)"));
+        Assert.Contains("también está sincronizada (solo subida)", panel.StatusMessage);
+        Assert.Contains(alerts, message => message.Contains("también está sincronizada (solo subida)"));
     }
 }

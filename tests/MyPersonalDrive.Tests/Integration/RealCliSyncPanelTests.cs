@@ -97,14 +97,14 @@ public sealed class RealCliSyncPanelTests : IDisposable
             new NewSyncPairRequest("my-files/no-leading-slash", _localRoot, SyncDirection.RemoteToLocal, ConflictPolicy.Ask));
         await panel.AddPairCommand.ExecuteAsync();
         Assert.Empty(panel.Pairs);
-        Assert.Contains("absolute path", panel.StatusMessage);
+        Assert.Contains("ruta absoluta", panel.StatusMessage);
 
         // ---------- refusing to sync the home directory
         panel.RequestNewPairAsync = _ => Task.FromResult<NewSyncPairRequest?>(
             new NewSyncPairRequest(_remoteRoot, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), SyncDirection.RemoteToLocal, ConflictPolicy.Ask));
         await panel.AddPairCommand.ExecuteAsync();
         Assert.Empty(panel.Pairs);
-        Assert.Contains("home directory", panel.StatusMessage);
+        Assert.Contains("carpeta personal", panel.StatusMessage);
 
         // ---------- cancelling the dialog is a no-op
         panel.RequestNewPairAsync = _ => Task.FromResult<NewSyncPairRequest?>(null);
@@ -118,8 +118,8 @@ public sealed class RealCliSyncPanelTests : IDisposable
 
         var row = Assert.Single(panel.Pairs);
         Assert.Equal(_remoteRoot, row.RemotePath);
-        Assert.Equal("Remote → Local", row.DirectionText);
-        Assert.Equal("Never synced", row.StatusText);
+        Assert.Equal("Remoto → Local", row.DirectionText);
+        Assert.Equal("Nunca sincronizado", row.StatusText);
         _output.WriteLine($"pair row: {row.RemotePath} | {row.DirectionText} | {row.StatusText}");
 
         // ---------- adding the same pair again is refused, naming what it clashes with. The §12
@@ -128,7 +128,7 @@ public sealed class RealCliSyncPanelTests : IDisposable
         // there as the backstop for a race between two windows).
         await panel.AddPairCommand.ExecuteAsync();
         Assert.Single(panel.Pairs);
-        Assert.Contains("already synced", panel.StatusMessage);
+        Assert.Contains("ya está sincronizada", panel.StatusMessage);
 
         // ---------- Preview, declining to run: the plan is real, and nothing is touched
         SyncPlan? previewed = null;
@@ -145,7 +145,7 @@ public sealed class RealCliSyncPanelTests : IDisposable
         Assert.Equal(1, previewed.Stats.FilesToDownload);
         Assert.Equal(1, previewed.Stats.FoldersToCreateLocally);
         Assert.Empty(Directory.GetFileSystemEntries(_localRoot)); // dry run really is dry
-        Assert.Equal("Never synced", row.StatusText);
+        Assert.Equal("Nunca sincronizado", row.StatusText);
 
         // ---------- Preview again, this time accepting: "Run now" performs the sync
         row.RequestPreviewConfirmationAsync = (_, _) => Task.FromResult(true);
@@ -153,13 +153,13 @@ public sealed class RealCliSyncPanelTests : IDisposable
 
         Assert.Equal("hello from the panel test", await File.ReadAllTextAsync(Path.Combine(_localRoot, "seed.txt")));
         Assert.True(Directory.Exists(Path.Combine(_localRoot, "nested")));
-        Assert.StartsWith("Up to date", row.StatusText);
+        Assert.StartsWith("Al día", row.StatusText);
         _output.WriteLine($"after run: {row.StatusText}");
 
         // ---------- and the row survives a panel reload, as it would on reopening the window
         await panel.InitializeAsync();
         var reloaded = Assert.Single(panel.Pairs);
-        Assert.StartsWith("Up to date", reloaded.StatusText);
+        Assert.StartsWith("Al día", reloaded.StatusText);
 
         // ---------- Remove takes it out of both the list and the database
         await reloaded.RemoveCommand.ExecuteAsync();

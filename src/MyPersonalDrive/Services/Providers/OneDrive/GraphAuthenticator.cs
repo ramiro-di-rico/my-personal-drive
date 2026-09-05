@@ -49,7 +49,7 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
     {
         if (string.IsNullOrWhiteSpace(_clientId))
         {
-            throw new InvalidOperationException("No OneDrive client ID configured. Enter one in Settings before signing in.");
+            throw new InvalidOperationException("No hay un client ID de OneDrive configurado. Cargá uno en Configuración antes de iniciar sesión.");
         }
 
         var verifier = GeneratePkceVerifier();
@@ -120,7 +120,7 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
         var stored = _tokenStore.Load();
         if (stored is null)
         {
-            throw NotAuthenticated("No stored OneDrive session.");
+            throw NotAuthenticated("No hay una sesión de OneDrive guardada.");
         }
 
         if (stored.ExpiresAt - DateTimeOffset.UtcNow > RefreshMargin)
@@ -134,7 +134,7 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
     /// <summary>Forces a refresh regardless of cached expiry — the 401-retry-once path in <see cref="GraphHttpClient"/>.</summary>
     public async Task<string> ForceRefreshAsync(CancellationToken cancellationToken = default)
     {
-        var stored = _tokenStore.Load() ?? throw NotAuthenticated("No stored OneDrive session.");
+        var stored = _tokenStore.Load() ?? throw NotAuthenticated("No hay una sesión de OneDrive guardada.");
         return await RefreshAsync(stored, cancellationToken);
     }
 
@@ -159,7 +159,7 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
 
             if (string.IsNullOrEmpty(stored.RefreshToken))
             {
-                throw NotAuthenticated("No refresh token stored; sign in again.");
+                throw NotAuthenticated("No hay un refresh token guardado; iniciá sesión de nuevo.");
             }
 
             using var request = new HttpRequestMessage(HttpMethod.Post, TokenEndpoint)
@@ -192,7 +192,7 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
         }
         catch (HttpRequestException ex)
         {
-            throw NotAuthenticated($"Could not refresh the OneDrive session: {ex.Message}");
+            throw NotAuthenticated($"No se pudo renovar la sesión de OneDrive: {ex.Message}");
         }
         finally
         {
@@ -229,13 +229,13 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
         }
         catch (JsonException)
         {
-            throw NotAuthenticated("The token endpoint returned a response that couldn't be parsed.");
+            throw NotAuthenticated("El endpoint de tokens devolvió una respuesta que no se pudo interpretar.");
         }
 
         if (token is null || !wasSuccessStatus || string.IsNullOrEmpty(token.AccessToken))
         {
             var reason = token?.ErrorDescription ?? token?.Error ?? "unknown error";
-            throw NotAuthenticated($"OneDrive sign-in failed: {reason}");
+            throw NotAuthenticated($"Falló el inicio de sesión de OneDrive: {reason}");
         }
 
         return token;
@@ -321,12 +321,12 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
 
         if (error is not null)
         {
-            throw NotAuthenticated($"OneDrive sign-in was cancelled or failed: {query["error_description"] ?? error}");
+            throw NotAuthenticated($"El inicio de sesión de OneDrive se canceló o falló: {query["error_description"] ?? error}");
         }
 
         if (string.IsNullOrEmpty(code) || !string.Equals(state, expectedState, StringComparison.Ordinal))
         {
-            throw NotAuthenticated("The sign-in redirect was missing its code or had an unexpected state — possible CSRF, refusing to continue.");
+            throw NotAuthenticated("A la redirección de inicio de sesión le faltaba el código o traía un estado inesperado — posible CSRF, no se continúa.");
         }
 
         return code;

@@ -31,7 +31,7 @@ public sealed class AccountSyncToggleViewModel : ObservableObject
 
     public bool IsRunning => _scheduler?.IsRunning ?? false;
 
-    public string Label => IsRunning ? $"⏸ {DisplayName}: on" : $"▶ {DisplayName}: off";
+    public string Label => IsRunning ? $"⏸ {DisplayName}: activada" : $"▶ {DisplayName}: desactivada";
 
     public AsyncCommand ToggleCommand { get; }
 

@@ -80,7 +80,7 @@ public sealed class GraphHttpClient : IDisposable
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new DriveException("Graph request", exitCode: 1, stdout: string.Empty, stderr: ex.Message, "The request to OneDrive timed out.", DriveErrorKind.Timeout);
+            throw new DriveException("Graph request", exitCode: 1, stdout: string.Empty, stderr: ex.Message, "La solicitud a OneDrive superó el tiempo de espera.", DriveErrorKind.Timeout);
         }
 
         if (response.StatusCode == HttpStatusCode.Unauthorized && !retriedAuth)

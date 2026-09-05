@@ -93,7 +93,7 @@ public class ProviderContextSwitcherTests : IDisposable
         Assert.True(google.IsAuthenticated);
 
         var nextcloud = providers.First(p => p.Id == ProviderId.Nextcloud);
-        Assert.Equal("Not signed in", nextcloud.AccountSummary);
+        Assert.Equal("Sin sesión iniciada", nextcloud.AccountSummary);
         Assert.False(nextcloud.IsAuthenticated);
     }
 
@@ -177,6 +177,6 @@ public class ProviderContextSwitcherTests : IDisposable
         await vm.SwitchToNextcloudCommand.ExecuteAsync();
 
         Assert.False(vm.IsAuthenticated);
-        Assert.Contains("Authentication required", vm.StatusMessage);
+        Assert.Contains("requiere autenticación", vm.StatusMessage);
     }
 }

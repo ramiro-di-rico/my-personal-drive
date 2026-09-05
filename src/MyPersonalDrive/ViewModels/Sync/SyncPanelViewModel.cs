@@ -59,7 +59,7 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// </param>
     public SyncPanelViewModel(SyncStateStore stateStore, SyncExecutor executor, SyncCrashRecovery crashRecovery, SyncScheduler? scheduler = null, string providerDisplayName = "Proton Drive")
     {
-        _statusMessage = $"Add a folder to start syncing it from {providerDisplayName}.";
+        _statusMessage = $"Agregá una carpeta para empezar a sincronizarla desde {providerDisplayName}.";
         Pairs = new ObservableCollection<SyncPairViewModel>();
         Pairs.CollectionChanged += (_, _) => RebuildProviderFilters();
         AccountSyncToggles = new ObservableCollection<AccountSyncToggleViewModel>();
@@ -147,7 +147,7 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// </summary>
     public bool IsSyncInProgress => IsBusy || Pairs.Any(pair => pair.IsBusy);
 
-    public string AutomaticSyncLabel => IsAutomaticSyncRunning ? "⏸ Automatic sync: on" : "▶ Automatic sync: off";
+    public string AutomaticSyncLabel => IsAutomaticSyncRunning ? "⏸ Sincronización automática: activada" : "▶ Sincronización automática: desactivada";
 
     public string StatusMessage
     {
@@ -244,7 +244,7 @@ public sealed class SyncPanelViewModel : ObservableObject
             var cleared = await slot.CrashRecovery.RecoverAsync();
             if (cleared > 0)
             {
-                clearedMessages.Add($"{slot.DisplayName}: cleared {cleared} leftover download folder(s).");
+                clearedMessages.Add($"{slot.DisplayName}: se limpiaron {cleared} carpeta(s) de descarga sobrantes.");
             }
 
             // Only after recovery: starting the loop first could hand a cycle a queue whose
@@ -258,7 +258,7 @@ public sealed class SyncPanelViewModel : ObservableObject
 
         if (clearedMessages.Count > 0)
         {
-            StatusMessage = "Recovered from a previous run: " + string.Join(" ", clearedMessages);
+            StatusMessage = "Se recuperó de una ejecución anterior: " + string.Join(" ", clearedMessages);
         }
 
         RaiseAutomaticSyncState();
@@ -280,13 +280,13 @@ public sealed class SyncPanelViewModel : ObservableObject
         {
             await scheduler.StopAsync();
             await Primary.StateStore.SetAutomaticSyncEnabledAsync(false);
-            StatusMessage = "Automatic sync paused. Local changes won't be picked up until you resume it.";
+            StatusMessage = "Sincronización automática en pausa. Los cambios locales no se van a tomar hasta que la reanudes.";
         }
         else
         {
             scheduler.Start();
             await Primary.StateStore.SetAutomaticSyncEnabledAsync(true);
-            StatusMessage = "Automatic sync resumed.";
+            StatusMessage = "Sincronización automática reanudada.";
         }
 
         RaiseAutomaticSyncState();
@@ -416,7 +416,7 @@ public sealed class SyncPanelViewModel : ObservableObject
         var requester = RequestNewPairAsync;
         if (requester is null)
         {
-            StatusMessage = "Adding a sync pair is not available.";
+            StatusMessage = "Agregar un par de sincronización no está disponible.";
             return;
         }
 
@@ -447,17 +447,17 @@ public sealed class SyncPanelViewModel : ObservableObject
 
             if (!await ConfirmBusyFolderAsync(request, targetSlot))
             {
-                StatusMessage = "Cancelled — no pair was created.";
+                StatusMessage = "Cancelado — no se creó ningún par.";
                 return;
             }
 
             var pair = await targetSlot.StateStore.CreatePairAsync(request.RemotePath, request.LocalPath, request.Direction, request.ConflictPolicy, mirrorDeletes: request.MirrorDeletes);
             AddPairViewModel(pair, targetSlot);
-            StatusMessage = $"Added: {pair.RemotePath} {DirectionArrow(pair.Direction)} {pair.LocalPath}";
+            StatusMessage = $"Agregado: {pair.RemotePath} {DirectionArrow(pair.Direction)} {pair.LocalPath}";
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 19) // SQLITE_CONSTRAINT (the pair's UNIQUE(RemotePath, LocalPath))
         {
-            StatusMessage = "That remote/local combination is already a sync pair.";
+            StatusMessage = "Esa combinación remoto/local ya es un par de sincronización.";
         }
         finally
         {
@@ -492,8 +492,8 @@ public sealed class SyncPanelViewModel : ObservableObject
         }
 
         return await confirm(
-            $"'{request.LocalPath}' already contains more than {LocalFolderInspector.BusyFolderThreshold} items. " +
-            $"Syncing it in this direction will upload all of them to {targetSlot.DisplayName}. Continue?");
+            $"'{request.LocalPath}' ya contiene más de {LocalFolderInspector.BusyFolderThreshold} elementos. " +
+            $"Sincronizarla en esta dirección va a subirlos todos a {targetSlot.DisplayName}. ¿Continuar?");
     }
 
     /// <summary>
@@ -530,5 +530,5 @@ public sealed class SyncPanelViewModel : ObservableObject
         _ => "↔",
     };
 
-    private void ReportError(Exception ex) => StatusMessage = $"Unexpected error: {ex.Message}";
+    private void ReportError(Exception ex) => StatusMessage = $"Error inesperado: {ex.Message}";
 }

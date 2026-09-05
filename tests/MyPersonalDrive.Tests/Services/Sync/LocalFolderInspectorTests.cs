@@ -41,7 +41,7 @@ public class LocalFolderInspectorTests : IDisposable
         var asFile = Path.Combine(_root, "actually-a-file.txt");
         File.WriteAllText(asFile, "not a folder");
 
-        Assert.Contains("is a file, not a folder", LocalFolderInspector.CheckWritable(asFile));
+        Assert.Contains("es un archivo, no una carpeta", LocalFolderInspector.CheckWritable(asFile));
     }
 
     [PosixFact]
@@ -55,7 +55,7 @@ public class LocalFolderInspectorTests : IDisposable
 
         try
         {
-            Assert.Contains("Can't write to", LocalFolderInspector.CheckWritable(readOnly));
+            Assert.Contains("No se puede escribir en", LocalFolderInspector.CheckWritable(readOnly));
         }
         finally
         {
@@ -102,8 +102,8 @@ public class LocalFolderInspectorTests : IDisposable
         var warning = LocalFolderInspector.CheckFreeSpace(_root, bytesToDownload: long.MaxValue / 2);
 
         Assert.NotNull(warning);
-        Assert.Contains("would download", warning);
-        Assert.Contains("is free", warning);
+        Assert.Contains("Esto descargaría", warning);
+        Assert.Contains("libres en ese disco", warning);
     }
 
     [Fact]

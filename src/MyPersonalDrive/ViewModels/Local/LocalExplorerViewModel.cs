@@ -180,7 +180,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
         {
-            StatusMessage = $"Can't open '{path}': {ex.Message}";
+            StatusMessage = $"No se pudo abrir '{path}': {ex.Message}";
         }
         finally
         {
@@ -313,12 +313,12 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
         var confirm = RequestConfirmationAsync;
         var question = selected.Count == 1
-            ? $"Delete '{selected[0].DisplayName}'? This cannot be undone."
-            : $"Delete {selected.Count} selected items? This cannot be undone.";
+            ? $"¿Eliminar '{selected[0].DisplayName}'? Esta acción no se puede deshacer."
+            : $"¿Eliminar {selected.Count} elementos seleccionados? Esta acción no se puede deshacer.";
 
         if (confirm is not null && !await confirm(question))
         {
-            StatusMessage = "Cancelled — nothing was deleted.";
+            StatusMessage = "Cancelado — no se eliminó nada.";
             return;
         }
 
@@ -336,8 +336,8 @@ public sealed class LocalExplorerViewModel : ObservableObject
         }
 
         StatusMessage = failures.Count == 0
-            ? $"Deleted {selected.Count} item(s)."
-            : $"Deleted {selected.Count - failures.Count} of {selected.Count} item(s). Failures: {string.Join("; ", failures)}";
+            ? $"Se eliminaron {selected.Count} elemento(s)."
+            : $"Se eliminaron {selected.Count - failures.Count} de {selected.Count} elemento(s). Fallos: {string.Join("; ", failures)}";
 
         await NavigateAsync(CurrentPath);
     }
@@ -390,24 +390,24 @@ public sealed class LocalExplorerViewModel : ObservableObject
     {
         var confirm = RequestConfirmationAsync;
         var question = item.IsFolder
-            ? $"Delete the folder '{item.Name}' and everything inside it? This cannot be undone."
-            : $"Delete '{item.Name}'? This cannot be undone.";
+            ? $"¿Eliminar la carpeta '{item.Name}' y todo su contenido? Esta acción no se puede deshacer."
+            : $"¿Eliminar '{item.Name}'? Esta acción no se puede deshacer.";
 
         if (confirm is not null && !await confirm(question))
         {
-            StatusMessage = $"Cancelled: {item.Name} was not deleted.";
+            StatusMessage = $"Cancelado: no se eliminó {item.Name}.";
             return;
         }
 
         try
         {
             _service.Delete(item.Path);
-            StatusMessage = $"Deleted {item.Name}.";
+            StatusMessage = $"Se eliminó {item.Name}.";
             await NavigateAsync(CurrentPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            StatusMessage = $"Could not delete '{item.Name}': {ex.Message}";
+            StatusMessage = $"No se pudo eliminar '{item.Name}': {ex.Message}";
         }
     }
 
@@ -416,7 +416,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         var requester = RequestRenameAsync;
         if (requester is null)
         {
-            StatusMessage = "Rename is not available.";
+            StatusMessage = "Renombrar no está disponible.";
             return;
         }
 
@@ -429,12 +429,12 @@ public sealed class LocalExplorerViewModel : ObservableObject
         try
         {
             _service.Rename(item.Path, newName);
-            StatusMessage = $"Renamed {item.Name} to {newName}.";
+            StatusMessage = $"Se renombró {item.Name} a {newName}.";
             await NavigateAsync(CurrentPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            StatusMessage = $"Could not rename '{item.Name}': {ex.Message}";
+            StatusMessage = $"No se pudo renombrar '{item.Name}': {ex.Message}";
         }
     }
 
@@ -443,12 +443,12 @@ public sealed class LocalExplorerViewModel : ObservableObject
         var copy = RequestCopyToClipboardAsync;
         if (copy is null)
         {
-            StatusMessage = "Copy is not available.";
+            StatusMessage = "Copiar no está disponible.";
             return;
         }
 
         await copy(item.Path);
-        StatusMessage = $"Copied path: {item.Path}";
+        StatusMessage = $"Ruta copiada: {item.Path}";
     }
 
     public async Task SyncSelectedPathAsync(DriveItem item)
@@ -461,7 +461,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         var handler = RequestSyncSelectedPathAsync;
         if (handler is null)
         {
-            StatusMessage = "Sync is not available.";
+            StatusMessage = "La sincronización no está disponible.";
             return;
         }
 
@@ -478,19 +478,19 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
         var fields = new List<PropertyField>
         {
-            new("Name", item.Name),
-            new("Path", item.Path),
-            new("Type", item.IsFolder ? "Folder" : "File"),
+            new("Nombre", item.Name),
+            new("Ruta", item.Path),
+            new("Tipo", item.IsFolder ? "Carpeta" : "Archivo"),
         };
 
         if (item.Size is not null)
         {
-            fields.Add(new PropertyField("Size", ByteSize.Format(item.Size.Value)));
+            fields.Add(new PropertyField("Tamaño", ByteSize.Format(item.Size.Value)));
         }
 
         if (item.ModifiedAt is not null)
         {
-            fields.Add(new PropertyField("Modified", item.ModifiedAt.Value.ToLocalTime().ToString("g")));
+            fields.Add(new PropertyField("Modificado", item.ModifiedAt.Value.ToLocalTime().ToString("g")));
         }
 
         await show(item.Name, fields);

@@ -213,7 +213,7 @@ public sealed class SyncScheduler : IAsyncDisposable
         {
             runtime.ConsecutiveErrors++;
             await SafeLogAsync(runtime.Pair.Id, SyncLogLevel.Error,
-                $"Automatic sync failed (attempt {runtime.ConsecutiveErrors}, next try in " +
+                $"La sincronización automática falló (intento {runtime.ConsecutiveErrors}, próximo intento en " +
                 $"{SyncSchedulePolicy.ErrorBackoff(runtime.ConsecutiveErrors).TotalMinutes:0} min): {ex.Message}",
                 cancellationToken);
         }

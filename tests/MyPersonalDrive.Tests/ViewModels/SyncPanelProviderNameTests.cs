@@ -45,7 +45,7 @@ public class SyncPanelProviderNameTests : IDisposable
     {
         var sut = Build(providerDisplayName: null);
 
-        Assert.Equal("Add a folder to start syncing it from Proton Drive.", sut.StatusMessage);
+        Assert.Equal("Agregá una carpeta para empezar a sincronizarla desde Proton Drive.", sut.StatusMessage);
     }
 
     [Fact]
@@ -53,6 +53,6 @@ public class SyncPanelProviderNameTests : IDisposable
     {
         var sut = Build("OneDrive");
 
-        Assert.Equal("Add a folder to start syncing it from OneDrive.", sut.StatusMessage);
+        Assert.Equal("Agregá una carpeta para empezar a sincronizarla desde OneDrive.", sut.StatusMessage);
     }
 }

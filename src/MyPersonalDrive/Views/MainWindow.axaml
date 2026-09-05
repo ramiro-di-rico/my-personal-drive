@@ -370,13 +370,13 @@
           </StackPanel>
         </Border>
 
-        <Button Grid.Column="1" ToolTip.Tip="Go back" Command="{Binding BackCommand}">
+        <Button Grid.Column="1" ToolTip.Tip="Volver atrás" Command="{Binding BackCommand}">
           <Path Classes="icon" Data="{StaticResource IconArrowLeft}" />
         </Button>
-        <Button Grid.Column="2" ToolTip.Tip="Create folder" Command="{Binding CreateFolderCommand}">
+        <Button Grid.Column="2" ToolTip.Tip="Crear una carpeta" Command="{Binding CreateFolderCommand}">
           <Path Classes="icon" Data="{StaticResource IconFolderPlus}" />
         </Button>
-        <Button Grid.Column="3" ToolTip.Tip="Upload files" Command="{Binding UploadCommand}">
+        <Button Grid.Column="3" ToolTip.Tip="Subir archivos" Command="{Binding UploadCommand}">
           <Path Classes="icon" Data="{StaticResource IconUpload}" />
         </Button>
 
@@ -582,7 +582,7 @@
                   </Grid.ContextMenu>
                   <Button Grid.Column="0"
                           Command="{Binding RowCommand}"
-                          ToolTip.Tip="Select item or open folder"
+                          ToolTip.Tip="Seleccionar el elemento o abrir la carpeta"
                           HorizontalAlignment="Stretch"
                           HorizontalContentAlignment="Left"
                           Focusable="False">
@@ -618,7 +618,7 @@
 
                   <Button Grid.Column="3"
                           Classes="rowAction"
-                          ToolTip.Tip="Create a copy"
+                          ToolTip.Tip="Crear una copia"
                           Margin="8,0,0,0"
                           Command="{Binding CopyCommand}">
                     <Path Classes="icon" Data="{StaticResource IconCopy}" />
@@ -626,7 +626,7 @@
 
                   <Button Grid.Column="4"
                           Classes="rowAction"
-                          ToolTip.Tip="Rename item"
+                          ToolTip.Tip="Renombrar el elemento"
                           Margin="8,0,0,0"
                           Command="{Binding RenameCommand}">
                     <Path Classes="icon" Data="{StaticResource IconPencil}" />
@@ -643,7 +643,7 @@
 
                   <Button Grid.Column="6"
                           Classes="rowAction"
-                          ToolTip.Tip="Move to trash"
+                          ToolTip.Tip="Mover a la papelera"
                           Margin="8,0,0,0"
                           Command="{Binding TrashCommand}">
                     <Path Classes="icon" Data="{StaticResource IconTrash}" />
@@ -852,7 +852,7 @@
                       ResizeDirection="Columns"
                       DoubleTapped="ExplorerSplitter_DoubleTapped"
                       IsVisible="{Binding IsLocalExplorerPanelVisible}"
-                      ToolTip.Tip="Drag to resize · double-click to reset" />
+                      ToolTip.Tip="Arrastrá para redimensionar · doble clic para restablecer" />
 
         <!-- Local pane: read-only browsing only (navigate, breadcrumb, home, hidden-files toggle,
              free space). File operations and drag-and-drop transfer are separate plan tasks.
@@ -904,17 +904,17 @@
               </StackPanel>
             </Border>
 
-            <Button Grid.Column="1" ToolTip.Tip="Go to home folder" Command="{Binding GoHomeCommand}">
+            <Button Grid.Column="1" ToolTip.Tip="Ir a la carpeta personal" Command="{Binding GoHomeCommand}">
               <Path Classes="icon" Data="{StaticResource IconHome}" />
             </Button>
             <Button Grid.Column="2"
                     Classes="viewMode"
                     Classes.active="{Binding ShowHiddenFiles}"
-                    ToolTip.Tip="Toggle hidden files"
+                    ToolTip.Tip="Mostrar u ocultar los archivos ocultos"
                     Command="{Binding ToggleHiddenFilesCommand}">
               <Path Classes="icon" Data="{StaticResource IconEyeOff}" />
             </Button>
-            <Button Grid.Column="3" ToolTip.Tip="Refresh" Command="{Binding RefreshCommand}">
+            <Button Grid.Column="3" ToolTip.Tip="Actualizar" Command="{Binding RefreshCommand}">
               <Path Classes="icon" Data="{StaticResource IconRefresh}" />
             </Button>
             <TextBlock Grid.Column="4"
@@ -1047,7 +1047,7 @@
                than the panel on a short window, and a clipped histogram is worse than a scrollbar. -->
           <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
           <StackPanel Spacing="10">
-            <TextBlock FontSize="18" Text="Status" />
+            <TextBlock FontSize="18" Text="Estado" />
 
             <!-- Drag-and-drop transfer queue (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5). Only
                  status text and a Cancel button — no progress bar/ETA, since nothing in the CLI
@@ -1131,7 +1131,7 @@
 
             <TextBlock Opacity="0.7"
                        TextWrapping="Wrap"
-                       Text="Select a file or folder to see its details."
+                       Text="Seleccioná un archivo o una carpeta para ver sus detalles."
                        IsVisible="{Binding !HasSelection}" />
 
             <!-- Multi-select summary (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) replaces the
@@ -1143,19 +1143,19 @@
             </StackPanel>
 
             <StackPanel Spacing="10" IsVisible="{Binding IsSingleSelected}">
-              <TextBlock FontWeight="Bold" Text="Selected item" />
+              <TextBlock FontWeight="Bold" Text="Elemento seleccionado" />
               <TextBlock Text="{Binding SelectedName}" />
-              <TextBlock FontWeight="Bold" Text="Type" />
+              <TextBlock FontWeight="Bold" Text="Tipo" />
               <TextBlock Text="{Binding SelectedKind}" />
-              <TextBlock FontWeight="Bold" Text="Path" />
+              <TextBlock FontWeight="Bold" Text="Ruta" />
               <TextBlock TextWrapping="Wrap" Text="{Binding SelectedPath}" />
-              <TextBlock FontWeight="Bold" Text="Size" />
+              <TextBlock FontWeight="Bold" Text="Tamaño" />
               <TextBlock Text="{Binding SelectedSize}" />
-              <TextBlock FontWeight="Bold" Text="Modified" />
+              <TextBlock FontWeight="Bold" Text="Modificado" />
               <TextBlock TextWrapping="Wrap" Text="{Binding SelectedModified}" />
-              <TextBlock FontWeight="Bold" Text="Owner" />
+              <TextBlock FontWeight="Bold" Text="Propietario" />
               <TextBlock TextWrapping="Wrap" Text="{Binding SelectedOwner}" />
-              <TextBlock FontWeight="Bold" Text="Shared" />
+              <TextBlock FontWeight="Bold" Text="Compartido" />
               <TextBlock Text="{Binding SelectedShared}" />
             </StackPanel>
 
@@ -1255,9 +1255,9 @@
               </Grid>
             </StackPanel>
 
-            <TextBlock FontWeight="Bold" Text="Current folder" />
+            <TextBlock FontWeight="Bold" Text="Carpeta actual" />
             <TextBlock TextWrapping="Wrap" Text="{Binding CurrentPath}" />
-            <TextBlock FontWeight="Bold" Text="Root" />
+            <TextBlock FontWeight="Bold" Text="Raíz" />
             <TextBlock Text="{Binding RootPath}" />
           </StackPanel>
           </ScrollViewer>
@@ -1268,7 +1268,7 @@
         <StackPanel Spacing="8">
           <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsLoading}">
             <ProgressBar Width="120" IsIndeterminate="True" />
-            <TextBlock VerticalAlignment="Center" Text="Loading..." />
+            <TextBlock VerticalAlignment="Center" Text="Cargando…" />
           </StackPanel>
 
           <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
@@ -1278,7 +1278,7 @@
                 <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
               </Style>
             </Grid.Styles>
-            <TextBlock FontSize="16" FontWeight="Bold" Text="CLI activity" />
+            <TextBlock FontSize="16" FontWeight="Bold" Text="Actividad del CLI" />
             <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding ActiveCommand}" />
             <TextBox Grid.Column="2"
                       Width="160"
@@ -1298,12 +1298,12 @@
             </Button>
             <Button Grid.Column="5"
                     Command="{Binding DownloadActivityCommand}"
-                    ToolTip.Tip="Download activity log">
+                    ToolTip.Tip="Descargar el registro de actividad">
               <Path Classes="icon" Data="{StaticResource IconSave}" />
             </Button>
             <Button Grid.Column="6"
                     Command="{Binding ClearActivityCommand}"
-                    ToolTip.Tip="Clear activity log">
+                    ToolTip.Tip="Limpiar el registro de actividad">
               <Path Classes="icon" Data="{StaticResource IconClear}" />
             </Button>
           </Grid>
@@ -1537,9 +1537,9 @@
 
         <!-- User Settings: app-level UI preferences that aren't tied to any provider or CLI. -->
         <StackPanel Spacing="10">
-          <TextBlock FontSize="18" FontWeight="Bold" Text="User Settings" />
+          <TextBlock FontSize="18" FontWeight="Bold" Text="Preferencias del panel" />
           <Border Padding="16" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
-            <CheckBox Content="Status Visible" IsChecked="{Binding IsStatusPanelVisible, Mode=TwoWay}" />
+            <CheckBox Content="Mostrar el panel de estado" IsChecked="{Binding IsStatusPanelVisible, Mode=TwoWay}" />
           </Border>
         </StackPanel>
 
@@ -1565,18 +1565,18 @@
               <TextBlock Text="Ruta al ejecutable de proton-drive:" />
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBox Width="420"
-                         PlaceholderText="Path to proton-drive executable"
+                         PlaceholderText="Ruta al ejecutable de proton-drive"
                          Text="{Binding CliPath, Mode=TwoWay}" />
-                <Button ToolTip.Tip="Select proton-drive executable" Click="BrowseCliPath">
+                <Button ToolTip.Tip="Seleccionar el ejecutable de proton-drive" Click="BrowseCliPath">
                   <Path Classes="icon" Data="{StaticResource IconFolder}" />
                 </Button>
-                <Button Classes="primary" ToolTip.Tip="Authenticate to Proton Drive" Command="{Binding AuthenticateCommand}">
+                <Button Classes="primary" ToolTip.Tip="Iniciar sesión en Proton Drive" Command="{Binding AuthenticateCommand}">
                   <Path Classes="icon" Data="{StaticResource IconKey}" />
                 </Button>
-                <Button ToolTip.Tip="Logout from Proton Drive" Command="{Binding LogoutCommand}">
+                <Button ToolTip.Tip="Cerrar la sesión de Proton Drive" Command="{Binding LogoutCommand}">
                   <Path Classes="icon" Data="{StaticResource IconLogout}" />
                 </Button>
-                <Button ToolTip.Tip="Refresh folder content" Command="{Binding RefreshCommand}">
+                <Button ToolTip.Tip="Actualizar el contenido de la carpeta" Command="{Binding RefreshCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
               </StackPanel>
@@ -1592,7 +1592,7 @@
                            TextWrapping="Wrap"
                            Opacity="0.8"
                            Text="{Binding CliVersion}" />
-                <Button ToolTip.Tip="Re-read the CLI version" Command="{Binding CheckCliVersionCommand}">
+                <Button ToolTip.Tip="Volver a leer la versión del CLI" Command="{Binding CheckCliVersionCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
               </StackPanel>
@@ -1604,14 +1604,14 @@
                            TextWrapping="Wrap"
                            Opacity="0.8"
                            Text="{Binding CliUpdateStatus}" />
-                <Button ToolTip.Tip="Check Proton's published releases"
+                <Button ToolTip.Tip="Consultar las versiones publicadas por Proton"
                         Command="{Binding CheckForCliUpdateCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
                 <Button Classes="primary"
                         Content="Actualizar el CLI"
                         IsVisible="{Binding IsCliUpdateAvailable}"
-                        ToolTip.Tip="Download, verify the published SHA-512, and replace the executable"
+                        ToolTip.Tip="Descargar, verificar el SHA-512 publicado y reemplazar el ejecutable"
                         Command="{Binding InstallCliUpdateCommand}" />
               </StackPanel>
             </StackPanel>
@@ -1625,22 +1625,22 @@
                   IsVisible="{Binding IsOneDriveActive}">
             <StackPanel Spacing="10">
               <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
-              <TextBlock Text="Azure app registration client ID:" />
+              <TextBlock Text="Client ID del registro de Azure:" />
               <TextBlock Opacity="0.6"
                          FontSize="12"
                          TextWrapping="Wrap"
-                         Text="Needs its own Azure app registration with the &quot;Mobile and desktop applications&quot; platform and a http://localhost redirect URI — see README.md § OneDrive setup." />
+                         Text="Requiere su propio registro de aplicación en Azure con la plataforma &quot;Mobile and desktop applications&quot; y una URI de redirección http://localhost — ver README.md § OneDrive setup." />
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBox Width="420"
-                         PlaceholderText="Public client application (client) ID"
+                         PlaceholderText="ID de aplicación cliente pública (client ID)"
                          Text="{Binding OneDriveClientId, Mode=TwoWay}" />
-                <Button Classes="primary" ToolTip.Tip="Sign in to OneDrive" Command="{Binding AuthenticateCommand}">
+                <Button Classes="primary" ToolTip.Tip="Iniciar sesión en OneDrive" Command="{Binding AuthenticateCommand}">
                   <Path Classes="icon" Data="{StaticResource IconKey}" />
                 </Button>
-                <Button ToolTip.Tip="Sign out of OneDrive" Command="{Binding LogoutCommand}">
+                <Button ToolTip.Tip="Cerrar la sesión de OneDrive" Command="{Binding LogoutCommand}">
                   <Path Classes="icon" Data="{StaticResource IconLogout}" />
                 </Button>
-                <Button ToolTip.Tip="Refresh folder content" Command="{Binding RefreshCommand}">
+                <Button ToolTip.Tip="Actualizar el contenido de la carpeta" Command="{Binding RefreshCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
               </StackPanel>
@@ -1664,28 +1664,28 @@
                   IsVisible="{Binding IsGoogleDriveActive}">
             <StackPanel Spacing="10">
               <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
-              <TextBlock Text="Google Workspace &amp; Drive Account Connection" FontWeight="SemiBold" />
+              <TextBlock Text="Conexión con la cuenta de Google Workspace y Drive" FontWeight="SemiBold" />
               <TextBlock Opacity="0.6"
                          FontSize="12"
                          TextWrapping="Wrap"
-                         Text="Needs a Google Cloud Console OAuth client (Desktop app) with the Drive API enabled — see README.md § Google Drive setup." />
-              <TextBlock Text="OAuth client ID:" />
+                         Text="Requiere un cliente OAuth de Google Cloud Console (aplicación de escritorio) con la API de Drive habilitada — ver README.md § Google Drive setup." />
+              <TextBlock Text="Client ID de OAuth:" />
               <TextBox Width="420"
-                       PlaceholderText="OAuth 2.0 client ID"
+                       PlaceholderText="Client ID de OAuth 2.0"
                        Text="{Binding GoogleDriveClientId, Mode=TwoWay}" />
-              <TextBlock Text="OAuth client secret:" />
+              <TextBlock Text="Client secret de OAuth:" />
               <TextBox Width="420"
-                       PlaceholderText="OAuth 2.0 client secret"
+                       PlaceholderText="Client secret de OAuth 2.0"
                        PasswordChar="*"
                        Text="{Binding GoogleDriveClientSecret, Mode=TwoWay}" />
               <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button Classes="primary" ToolTip.Tip="Sign in to Google Drive" Command="{Binding AuthenticateCommand}">
+                <Button Classes="primary" ToolTip.Tip="Iniciar sesión en Google Drive" Command="{Binding AuthenticateCommand}">
                   <Path Classes="icon" Data="{StaticResource IconKey}" />
                 </Button>
-                <Button ToolTip.Tip="Sign out of Google Drive" Command="{Binding LogoutCommand}">
+                <Button ToolTip.Tip="Cerrar la sesión de Google Drive" Command="{Binding LogoutCommand}">
                   <Path Classes="icon" Data="{StaticResource IconLogout}" />
                 </Button>
-                <Button ToolTip.Tip="Refresh folder content" Command="{Binding RefreshCommand}">
+                <Button ToolTip.Tip="Actualizar el contenido de la carpeta" Command="{Binding RefreshCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
               </StackPanel>
@@ -1708,9 +1708,9 @@
                   IsVisible="{Binding IsNextcloudActive}">
             <StackPanel Spacing="10">
               <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
-              <TextBlock Text="Nextcloud Server Connection (WebDAV)" FontWeight="SemiBold" />
+              <TextBlock Text="Conexión con el servidor Nextcloud (WebDAV)" FontWeight="SemiBold" />
               <TextBlock Opacity="0.6" FontSize="12" TextWrapping="Wrap"
-                         Text="Self-hosted Nextcloud instance connectivity and user credentials." />
+                         Text="Datos de conexión y credenciales de una instancia propia de Nextcloud." />
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Classes.primary="{Binding !IsAuthenticated}" Content="Conectar Nextcloud" Command="{Binding AuthenticateCommand}">
                   <StackPanel Orientation="Horizontal" Spacing="6">
@@ -1735,9 +1735,9 @@
                   IsVisible="{Binding IsS3Active}">
             <StackPanel Spacing="10">
               <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
-              <TextBlock Text="Custom S3 / MinIO Object Storage" FontWeight="SemiBold" />
+              <TextBlock Text="Almacenamiento de objetos S3 / MinIO" FontWeight="SemiBold" />
               <TextBlock Opacity="0.6" FontSize="12" TextWrapping="Wrap"
-                         Text="Amazon S3, Cloudflare R2, Wasabi, or MinIO bucket endpoint and access keys." />
+                         Text="Endpoint del bucket y claves de acceso para Amazon S3, Cloudflare R2, Wasabi o MinIO." />
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Classes.primary="{Binding !IsAuthenticated}" Content="Conectar Bucket S3" Command="{Binding AuthenticateCommand}">
                   <StackPanel Orientation="Horizontal" Spacing="6">
@@ -1762,19 +1762,19 @@
             <StackPanel Spacing="12">
               <TextBlock Opacity="0.8"
                          TextWrapping="Wrap"
-                         Text="Keeps a Proton Drive folder and a local folder in step — download only, upload only, or two-way. It runs on its own: local edits are picked up within seconds, and Proton Drive is re-checked periodically, less often for pairs that take longer to scan. &quot;Sync now&quot; is only for skipping the wait." />
+                         Text="Mantiene sincronizadas una carpeta remota y una local — solo descarga, solo subida, o en ambos sentidos. Funciona sola: los cambios locales se detectan en segundos, y el proveedor se vuelve a consultar cada tanto, con menos frecuencia para los pares que tardan más en analizarse. &quot;Sincronizar ahora&quot; sirve únicamente para saltear esa espera." />
 
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Classes="primary" Command="{Binding AddPairCommand}">
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <Path Classes="icon" Data="{StaticResource IconPlus}" />
-                    <TextBlock Text="Add pair" />
+                    <TextBlock Text="Agregar par" />
                   </StackPanel>
                 </Button>
                 <Button Command="{Binding RefreshCommand}">
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <Path Classes="icon" Data="{StaticResource IconRefresh}" />
-                    <TextBlock Text="Refresh" />
+                    <TextBlock Text="Actualizar" />
                   </StackPanel>
                 </Button>
                 <!-- One toggle per active account (P7 Phase A) — pausing OneDrive's automatic
@@ -1790,7 +1790,7 @@
                     <DataTemplate x:DataType="syncVm:AccountSyncToggleViewModel">
                       <Button Content="{Binding Label}"
                               Command="{Binding ToggleCommand}"
-                              ToolTip.Tip="Watch local folders and poll this account automatically" />
+                              ToolTip.Tip="Vigilar las carpetas locales y consultar esta cuenta automáticamente" />
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -1850,22 +1850,22 @@
                                   Command="{Binding ResolveConflictsCommand}"
                                   HorizontalAlignment="Left"
                                   Foreground="#F5C451"
-                                  ToolTip.Tip="Decide what to do with each conflicting file" />
-                          <Button Content="↻ Retry failed actions"
+                                  ToolTip.Tip="Decidir qué hacer con cada archivo en conflicto" />
+                          <Button Content="↻ Reintentar las acciones fallidas"
                                   IsVisible="{Binding HasFailures}"
                                   Command="{Binding RetryFailedCommand}"
                                   HorizontalAlignment="Left"
-                                  ToolTip.Tip="Queue the actions that gave up, to run on the next sync" />
+                                  ToolTip.Tip="Volver a encolar las acciones que fallaron, para el próximo ciclo de sincronización" />
                         </StackPanel>
 
                         <StackPanel Grid.Column="1" Grid.Row="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
-                          <Button Classes="rowAction" ToolTip.Tip="Preview changes before syncing" Command="{Binding PreviewCommand}">
+                          <Button Classes="rowAction" ToolTip.Tip="Previsualizar los cambios antes de sincronizar" Command="{Binding PreviewCommand}">
                             <Path Classes="icon" Data="{StaticResource IconEye}" />
                           </Button>
-                          <Button Classes="rowAction" ToolTip.Tip="Edit direction / conflict policy" Command="{Binding EditCommand}">
+                          <Button Classes="rowAction" ToolTip.Tip="Editar el sentido y la política de conflictos" Command="{Binding EditCommand}">
                             <Path Classes="icon" Data="{StaticResource IconPencil}" />
                           </Button>
-                          <Button Classes="rowAction" ToolTip.Tip="Sync now" Command="{Binding SyncNowCommand}">
+                          <Button Classes="rowAction" ToolTip.Tip="Sincronizar ahora" Command="{Binding SyncNowCommand}">
                             <Path Classes="icon" Data="{StaticResource IconPlay}" />
                           </Button>
                           <Button Classes="rowAction" ToolTip.Tip="{Binding PauseTooltip}" Command="{Binding TogglePauseCommand}">
@@ -1874,7 +1874,7 @@
                               <Path Classes="icon" Data="{StaticResource IconPause}" IsVisible="{Binding !IsPaused}" />
                             </Panel>
                           </Button>
-                          <Button Classes="rowAction" ToolTip.Tip="Remove this pair" Command="{Binding RemoveCommand}">
+                          <Button Classes="rowAction" ToolTip.Tip="Eliminar este par" Command="{Binding RemoveCommand}">
                             <Path Classes="icon" Data="{StaticResource IconTrash}" />
                           </Button>
                         </StackPanel>

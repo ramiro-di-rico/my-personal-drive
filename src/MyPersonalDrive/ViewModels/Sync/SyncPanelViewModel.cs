@@ -49,7 +49,13 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// label (falls back to <see cref="Primary"/> via <see cref="ActiveSlot"/>).
     /// </summary>
     public void SetActiveAccount(string displayName)
-        => _activeSlotOverride = _slots.FirstOrDefault(slot => slot.DisplayName == displayName);
+    {
+        _activeSlotOverride = _slots.FirstOrDefault(slot => slot.DisplayName == displayName);
+
+        // The empty-state prompt names the account a new pair would target, so it has to follow
+        // this (docs/PLAN-UX-ROUND-2.md §13).
+        OnPropertyChanged(nameof(EmptyStateMessage));
+    }
 
     /// <param name="providerDisplayName">
     /// Named in a couple of user-facing strings ("Add a folder to start syncing it from…").
@@ -59,9 +65,13 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// </param>
     public SyncPanelViewModel(SyncStateStore stateStore, SyncExecutor executor, SyncCrashRecovery crashRecovery, SyncScheduler? scheduler = null, string providerDisplayName = "Proton Drive")
     {
-        _statusMessage = $"Agregá una carpeta para empezar a sincronizarla desde {providerDisplayName}.";
+        _statusMessage = string.Empty;
         Pairs = new ObservableCollection<SyncPairViewModel>();
-        Pairs.CollectionChanged += (_, _) => RebuildProviderFilters();
+        Pairs.CollectionChanged += (_, _) =>
+        {
+            RebuildProviderFilters();
+            OnPropertyChanged(nameof(HasNoPairs));
+        };
         AccountSyncToggles = new ObservableCollection<AccountSyncToggleViewModel>();
         ProviderFilters = new ObservableCollection<ProviderFilterViewModel>();
 
@@ -175,6 +185,19 @@ public sealed class SyncPanelViewModel : ObservableObject
         get => _statusMessage;
         private set => SetProperty(ref _statusMessage, value);
     }
+
+    /// <summary>
+    /// Shown only while there are no pairs at all. It used to be the panel's initial
+    /// <see cref="StatusMessage"/>, which meant it was still on screen underneath three configured
+    /// pairs, and still named whichever account happened to be primary at startup even after the
+    /// header switched to another one — while "Agregar par" really would have created a pair on
+    /// that other account (docs/PLAN-UX-ROUND-2.md §13).
+    /// </summary>
+    public string EmptyStateMessage
+        => $"Agregá una carpeta para empezar a sincronizarla desde {ActiveSlot.DisplayName}.";
+
+    /// <summary>Whether <see cref="EmptyStateMessage"/> is worth showing.</summary>
+    public bool HasNoPairs => Pairs.Count == 0;
 
     public bool IsBusy
     {

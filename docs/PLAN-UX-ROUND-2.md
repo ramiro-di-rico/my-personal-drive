@@ -536,6 +536,53 @@ untouched tests belongs in its own change.
 
 ---
 
+## 13. Is the sync view supposed to ignore the provider dropdown?
+
+Asked by the repo owner after switching the header dropdown to Google Drive while standing on
+Sincronización and still seeing three Proton Drive pairs — noting that the *settings* view does
+follow that dropdown, since each provider's connection card shows its own auth mechanism.
+
+**Yes, and both halves are correct.** The sync view is deliberately account-agnostic: P7 Phase A
+merged every account's pairs into one list so Proton and OneDrive can sync at once and be seen
+together, with each row labelled by its own account (`SyncPairViewModel.AccountLabel`). The header
+dropdown selects **which account the Explorer browses**, not a global context. Settings differs
+because its Conexión section genuinely is per-provider. Different questions, different answers.
+
+**But the dropdown is not as inert here as it looks, and that exposed a real bug.**
+`SwitchBrowserAccountAsync` calls `SyncPanel.SetActiveAccount`, and `AddPairAsync` creates the pair
+on `ActiveSlot` — so switching the dropdown silently changes which account "Agregar par" targets.
+Meanwhile the panel's prompt read *"Agregá una carpeta para empezar a sincronizarla desde **Proton
+Drive**"* while the dropdown said Google Drive, because that sentence was the panel's initial
+`StatusMessage`, interpolated once at construction with whichever account was primary at startup.
+
+It was wrong twice over: it named the wrong provider (the one thing on that screen that *had*
+changed), and it was still on screen underneath three configured pairs, telling the user to add
+their first one.
+
+Now `EmptyStateMessage` derives the name from `ActiveSlot` — the same slot `AddPairAsync` actually
+uses, so the sentence cannot promise one provider and create a pair on another — and it renders
+only while `HasNoPairs`. `SyncPanelProviderNameTests` moved to the new property; what it guards
+(the name is interpolated, not hardcoded) is unchanged.
+
+### Left as a decision, not fixed
+
+**The header dropdown reads as global and is not.** It governs the Explorer, and invisibly the
+target account for a new pair, but not the pair list. Nothing on screen says so. Options, none of
+them free:
+
+1. Leave it. The per-row account labels already disambiguate, and merging every account's pairs is
+   the feature, not a bug.
+2. Filter the sync list by the dropdown. Loses the single-pane multi-account view P7 built on
+   purpose.
+3. Say it explicitly — a line on the sync view naming the account a new pair would target.
+
+Worth noting that [§11.4](#114-filter-chips-for-accounts-with-no-pairs) made this slightly less
+visible: with only one account holding pairs the filter chips now collapse, so there is no longer
+even a control hinting the list spans accounts. That was the right call for its own reason and it
+does cost something here.
+
+---
+
 ## Appendix A — Claims checked against the source
 
 The initial screenshot review made eleven claims. Each was checked before being written up here.

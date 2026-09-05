@@ -198,6 +198,16 @@
           </ItemsControl.ItemTemplate>
         </ItemsControl>
 
+        <!-- Only with no pairs at all. This prompt used to be the panel's initial StatusMessage,
+             so it sat underneath three configured pairs telling the user to add their first one
+             (docs/PLAN-UX-ROUND-2.md §13). -->
+        <Border Padding="10"
+                Background="{DynamicResource ConsoleBackgroundBrush}"
+                CornerRadius="6"
+                IsVisible="{Binding HasNoPairs}">
+          <TextBlock TextWrapping="Wrap" Text="{Binding EmptyStateMessage}" Opacity="0.8" />
+        </Border>
+
         <Border Padding="10"
                 Background="{DynamicResource ConsoleBackgroundBrush}"
                 CornerRadius="6"

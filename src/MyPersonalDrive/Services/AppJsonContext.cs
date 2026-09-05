@@ -8,6 +8,10 @@ namespace MyPersonalDrive.Services;
 [JsonSerializable(typeof(AppSettings))]
 [JsonSerializable(typeof(SyncActionPayload))]
 [JsonSerializable(typeof(CliReleaseManifest))]
+// One interface locale, Locales/<code>.json (docs/PLAN-I18N.md §2.2). Flat string->string on
+// purpose: it keeps the serialized type to something the source generator already handles, with
+// no custom converter to go wrong under AOT.
+[JsonSerializable(typeof(Dictionary<string, string>))]
 // The FolderMetrics.BucketsJson column (docs/PLAN-BROWSER-VIEWS.md M4). Native AOT: every
 // serialized type has to be declared here, there is no reflection fallback.
 [JsonSerializable(typeof(List<FolderKindBucket>))]

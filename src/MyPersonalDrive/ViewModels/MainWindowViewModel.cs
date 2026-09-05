@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Text.Json;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Localization;
 using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Services.Providers.Proton;
@@ -531,6 +532,11 @@ public sealed class MainWindowViewModel : ObservableObject
         UpdateQuotaMetrics();
 
         _browserSessions.Add(new BrowserAccountSession(_provider, _cacheService, _metricsStore, _statsScanner, _previewLoader, _imagePreviewLoader, _pdfPreviewLoader));
+
+        // Every derived label on this view model reads through Loc at get time, so a language
+        // change only has to tell the bindings to re-read (docs/PLAN-I18N.md §3). The view model
+        // outlives the window, so there is nothing to unsubscribe from.
+        Loc.LanguageChanged += (_, _) => OnAllPropertiesChanged();
     }
 
     /// <summary>
@@ -703,6 +709,42 @@ public sealed class MainWindowViewModel : ObservableObject
     public bool IsLightTheme => string.Equals(_theme, "Light", StringComparison.OrdinalIgnoreCase);
 
     public bool IsDarkTheme => string.Equals(_theme, "Dark", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The languages the Settings picker offers. A fixed list from
+    /// <see cref="LanguageCatalog"/> — adding one is a row there plus a locale file, and this
+    /// property needs no change (docs/PLAN-I18N.md, Appendix B).
+    /// </summary>
+    public IReadOnlyList<Language> Languages => LanguageCatalog.Available;
+
+    /// <summary>
+    /// The interface language. Mirrors <see cref="ThemePreference"/> deliberately: apply first,
+    /// then persist, so a failed write leaves the user looking at what they picked rather than
+    /// silently reverting.
+    /// </summary>
+    public Language SelectedLanguage
+    {
+        get => Loc.Current;
+        set
+        {
+            if (value is null || value.Code == Loc.Current.Code)
+            {
+                return;
+            }
+
+            Loc.SetLanguage(value.Code);
+            _settings.Update(s => s.Language = value.Code);
+        }
+    }
+
+    /// <summary>
+    /// The provider cards' sign-in/out tooltips. One key each, taking the provider's name, instead
+    /// of a near-duplicate literal per provider — and the card these sit on is only visible while
+    /// its own provider is active, so the active name is always the right one.
+    /// </summary>
+    public string SignInTooltip => Loc.F(StringKeys.Settings.SignInTooltip, ActiveProviderDisplayName);
+
+    public string SignOutTooltip => Loc.F(StringKeys.Settings.SignOutTooltip, ActiveProviderDisplayName);
 
     public int BandwidthLimitKbps
     {
@@ -3368,6 +3410,7 @@ public sealed class MainWindowViewModel : ObservableObject
             settings.SortKey = SortKey.ToString();
             settings.SortDescending = SortDescending;
             settings.Theme = _theme;
+            settings.Language = Loc.Current.Code;
             settings.BandwidthLimitKbps = _bandwidthLimitKbps;
             settings.DefaultSyncFolder = _defaultSyncFolder;
         });

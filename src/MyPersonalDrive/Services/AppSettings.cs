@@ -85,6 +85,21 @@ public sealed class AppSettings
     public string Theme { get; set; } = "Default";
 
     /// <summary>
+    /// The interface language, as a <see cref="Localization.Language.Code"/> ("en", "es"). Same
+    /// string-not-enum reasoning as <see cref="ActiveProvider"/>: a code written by a newer build
+    /// must degrade to English rather than throw at startup. Read it through
+    /// <see cref="LanguageOrDefault"/>.
+    ///
+    /// The default is English, and there is deliberately no migration for a settings file written
+    /// before this field existed — such a file deserializes to "en" and the interface switches
+    /// language once, which is a visit to Settings rather than a one-shot migration branch that
+    /// would outlive its usefulness (docs/PLAN-I18N.md §2.6, option A).
+    /// </summary>
+    public string Language { get; set; } = Localization.LanguageCatalog.DefaultCode;
+
+    public string LanguageOrDefault() => Localization.LanguageCatalog.ResolveOrDefault(Language).Code;
+
+    /// <summary>
     /// Network bandwidth throttle limit in KB/s (0 = unlimited).
     /// </summary>
     public int BandwidthLimitKbps { get; set; }

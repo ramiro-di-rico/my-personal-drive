@@ -16,9 +16,28 @@
 
 ## Status
 
-- [ ] **L0 — Live-switch spike.** Not started. Gates L2; see [§3](#3-l0--the-live-switch-spike).
-- [ ] **L1 — Localization infrastructure.** Not started.
-- [ ] **L2 — Settings view + the language picker.** Not started.
+> **L0-L2 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
+> passing (from 1001). The AOT publish is clean — only the five warnings that predate this work —
+> and both locales are verifiably embedded in the single-file binary. **Not visually verified: this
+> environment has no working screenshot tool** (GNOME refuses `ScreenshotWindow` over D-Bus), so
+> the Settings layout with the picker, and the language actually changing on screen, are both
+> unconfirmed by eye and want a human pass. The counts in §0.1 were taken on `feature/ux-round-2`
+> and are slightly low against the merged `main`, which added the per-pane toolbars.
+
+- [x] **L0 — Live-switch spike (partial).** The markup half is proven; the ViewModel half is wired
+      but unobserved. See [§3](#3-l0--the-live-switch-spike) for what was and was not shown.
+- [x] **L1 — Localization infrastructure.** `Services/Localization/` — `Language`,
+      `LanguageCatalog`, `StringKeys`, `LocaleCatalogLoader`, `Localizer`, and `Locales/en.json` /
+      `es.json` (45 keys) globbed as embedded resources. `AppSettings.Language` +
+      `LanguageOrDefault`, applied in `App.OnFrameworkInitializationCompleted` beside `ApplyTheme`.
+      `ObservableObject` gained `Loc` and `OnAllPropertiesChanged`. Nine locale-integrity tests and
+      seventeen behaviour tests in `tests/.../Services/Localization/`.
+- [x] **L2 — Settings view + the language picker.** The whole Settings `ScrollViewer` reads through
+      `{Binding Loc[...]}`; a `ComboBox` over `LanguageCatalog.Available` is the first row of
+      General preferences. Three near-duplicate sign-in/sign-out literals per provider collapsed
+      into `SignInTooltip` / `SignOutTooltip` taking the provider name. Found in passing: the S3
+      button's `Content` said "Conectar Bucket S3" while its own inner label said "Conectar S3" —
+      one key now covers both.
 - [ ] **L3 — Shell and Explorer markup.** Not started.
 - [ ] **L4 — Code-built dialogs (`MainWindow.axaml.cs`).** Not started.
 - [ ] **L5 — `MainWindowViewModel`.** Not started.
@@ -268,6 +287,10 @@ Three options, decide before L1 lands:
 | **B** | On first run *with no settings file at all*, seed from `CultureInfo.CurrentUICulture` if it matches a known language, else `en`. On an *existing* file with no `Language`, write `"es"` once. | ~20 lines and a migration test; preserves what today's user sees. |
 | **C** | Seed from OS culture on first run only; existing files get `en`. | Middle. Still flips today's user. |
 
+**Decided: A**, on `feature/i18n`. `AppSettings.Language` defaults to `"en"` with no migration
+branch, and `AppSettingsLanguageTests` pins that a settings file predating the field reads as
+English. The rest of this section is kept as the record of what was weighed.
+
 **A** unless the app already has users beyond the author. B's "existing file ⇒ es" branch is the
 only thing that actually prevents the flip, and it is the kind of one-shot migration that outlives
 its usefulness.
@@ -319,6 +342,35 @@ keeps L5 from becoming 292 hand-written `OnPropertyChanged` calls.
 clean AOT publish. **If either fails**, fall back to: apply on next launch, with an inline
 "Restart to apply" note beside the picker — and then §6.3's `LocalizedText` machinery is
 unnecessary and L5 gets substantially cheaper. Record the outcome in this section before L1.
+
+### Outcome, 2026-09-05
+
+**(a) Markup — proven, and cheaper than this section assumed.** No markup extension was needed at
+all. `ObservableObject` exposes `Loc`, so every ViewModel is already a valid binding source and the
+markup writes `{Binding Loc[settings.general.title]}` — a plain **compiled** binding that the
+Avalonia XAML compiler resolves statically against `Localizer`'s indexer. No reflection binding, no
+`InstancedBinding`/`IObservable` plumbing, no departure from
+`AvaloniaUseCompiledBindingsByDefault`. The open question this section flagged — whether the
+compiled-binding path parser tolerates dotted keys inside `[...]` — is answered: **it does**, which
+is why the dotted convention in §8 survives. Verified by:
+
+- the XAML compiler accepting all 45 bindings (a bad path is a build error, not a runtime one);
+- `./scripts/publish-linux.sh` producing **zero** new trim/AOT warnings;
+- both `en.json` and `es.json` string content being present in the published single-file binary,
+  so the embedded-resource glob survives AOT;
+- the published binary running for 25s with no crash and an empty `crash.log`.
+
+**(b) ViewModels — wired, not observed.** `ObservableObject.OnAllPropertiesChanged()` raises
+`PropertyChangedEventArgs(string.Empty)`, and `MainWindowViewModel` subscribes to
+`Localizer.LanguageChanged`. `LocalizerTests.SetLanguageRaisesTheIndexerChangeThenLanguageChanged`
+pins the notification order. **What is not proven is that Avalonia re-reads on an empty property
+name** — that needs a running window and an eye on it, and this environment has no screenshot tool.
+
+**Consequence for the phases after this one.** Treat the restart fallback as still live until
+someone watches the picker change a ViewModel-derived label. If it turns out Avalonia ignores the
+empty name, the fix is local — enumerate the affected property names in `OnAllPropertiesChanged`,
+or re-raise per view model — and does **not** invalidate (a) or anything in L1/L2, because the
+markup path does not go through it.
 
 ## 4. L2 — Settings view and the language picker
 

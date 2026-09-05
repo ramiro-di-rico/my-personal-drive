@@ -3,6 +3,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Localization;
 using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.OneDrive;
 using MyPersonalDrive.Services.Providers.Proton;
@@ -22,7 +23,11 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var settings = new AppSettingsService();
-            ApplyTheme(settings.Load().ThemeOrDefault());
+            var startupSettings = settings.Load();
+            ApplyTheme(startupSettings.ThemeOrDefault());
+            // Before any ViewModel is constructed, so the first labels they compute are already in
+            // the right language (docs/PLAN-I18N.md §2.5).
+            Localizer.Instance.SetLanguage(startupSettings.LanguageOrDefault());
             var catalog = new ProviderCatalog();
 
             // P7 Phase A (docs/PLAN-CLOUD-PROVIDERS.md): a session per provider *type*, not just

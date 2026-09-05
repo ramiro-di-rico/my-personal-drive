@@ -207,9 +207,9 @@ public class SyncPanelPairCreationTests : IDisposable
         await panel.AddPairCommand.ExecuteAsync();
 
         Assert.Single(asked);
-        Assert.Contains("va a subirlos todos", asked[0]);
+        Assert.Contains("will upload all of them", asked[0]);
         Assert.Empty(await store.GetPairsAsync());
-        Assert.Contains("Cancelado", panel.StatusMessage);
+        Assert.Contains("Cancelled", panel.StatusMessage);
     }
 
     [Fact]

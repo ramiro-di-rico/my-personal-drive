@@ -1,5 +1,7 @@
 using MyPersonalDrive.Services.Sync;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.ViewModels.Sync;
 
 /// <summary>
@@ -48,11 +50,11 @@ public sealed class AccountSyncToggleViewModel : ObservableObject
     /// </summary>
     public string Label => DisplayName;
 
-    public string StateText => IsRunning ? "activada" : "pausada";
+    public string StateText => Loc.T(IsRunning ? StringKeys.Sync.AutoSyncStateOn : StringKeys.Sync.AutoSyncStateOff);
 
     public string ActionTooltip => IsRunning
-        ? $"Pausar la sincronización automática de {DisplayName}"
-        : $"Activar la sincronización automática de {DisplayName}";
+        ? Loc.F(StringKeys.Sync.AccountPauseTooltip, DisplayName)
+        : Loc.F(StringKeys.Sync.AccountResumeTooltip, DisplayName);
 
     public AsyncCommand ToggleCommand { get; }
 

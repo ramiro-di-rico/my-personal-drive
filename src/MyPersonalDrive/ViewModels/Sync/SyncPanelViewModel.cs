@@ -4,6 +4,8 @@ using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Sync;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.ViewModels.Sync;
 
 /// <summary>
@@ -23,6 +25,7 @@ public sealed class SyncPanelViewModel : ObservableObject
     private sealed record AccountSlot(string DisplayName, SyncStateStore StateStore, SyncExecutor Executor, SyncCrashRecovery CrashRecovery, SyncScheduler? Scheduler);
 
     private readonly List<AccountSlot> _slots = new();
+    private LocalizedText _status = LocalizedText.None;
     private string _statusMessage;
     private bool _isBusy;
     private bool _hasRecovered;
@@ -113,7 +116,7 @@ public sealed class SyncPanelViewModel : ObservableObject
             // A cycle the scheduler ran on its own still has to be reflected in the row the user
             // is looking at, or the panel would show stale "Up to date" times.
             slot.Scheduler.PairSynced += (_, _) => Dispatcher.UIThread.Post(() => _ = LoadPairsAsync());
-            slot.Scheduler.WatcherDegraded += (_, reason) => Dispatcher.UIThread.Post(() => StatusMessage = $"{slot.DisplayName}: {reason}");
+            slot.Scheduler.WatcherDegraded += (_, reason) => Dispatcher.UIThread.Post(() => SetStatus(LocalizedText.Verbatim($"{slot.DisplayName}: {reason}")));
         }
     }
 
@@ -178,13 +181,21 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// </summary>
     public bool IsSyncInProgress => IsBusy || Pairs.Any(pair => pair.IsBusy);
 
-    public string AutomaticSyncLabel => IsAutomaticSyncRunning ? "⏸ Sincronización automática: activada" : "▶ Sincronización automática: desactivada";
+    public string AutomaticSyncLabel => Loc.T(IsAutomaticSyncRunning ? StringKeys.Sync.AutoSyncOn : StringKeys.Sync.AutoSyncOff);
 
-    public string StatusMessage
+    /// <summary>The panel's status line — deferred, like every other one (docs/PLAN-I18N.md §6.3).</summary>
+    public string StatusMessage => _statusMessage;
+
+    /// <summary>The unrendered form, so tests can assert on a key instead of on prose.</summary>
+    internal LocalizedText StatusText => _status;
+
+    private void SetStatus(LocalizedText text)
     {
-        get => _statusMessage;
-        private set => SetProperty(ref _statusMessage, value);
+        _status = text;
+        SetProperty(ref _statusMessage, text.Render(), nameof(StatusMessage));
     }
+
+    private void SetStatus(string key, params object?[] args) => SetStatus(LocalizedText.Of(key, args));
 
     /// <summary>
     /// Shown only while there are no pairs at all. It used to be the panel's initial
@@ -194,7 +205,7 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// that other account (docs/PLAN-UX-ROUND-2.md §13).
     /// </summary>
     public string EmptyStateMessage
-        => $"Agregá una carpeta para empezar a sincronizarla desde {ActiveSlot.DisplayName}.";
+        => Loc.F(StringKeys.Sync.EmptyState, ActiveSlot.DisplayName);
 
     /// <summary>Whether <see cref="EmptyStateMessage"/> is worth showing.</summary>
     public bool HasNoPairs => Pairs.Count == 0;
@@ -259,7 +270,9 @@ public sealed class SyncPanelViewModel : ObservableObject
 
     private async Task AlertAsync(string message)
     {
-        StatusMessage = message;
+        // Already-final text: the validator produced this sentence, and §7's typed-reason work
+        // (docs/PLAN-I18N.md L7) is what will let it carry a key instead.
+        SetStatus(LocalizedText.Verbatim(message));
         if (RequestAlertAsync is { } alert)
         {
             await alert(message);
@@ -291,7 +304,7 @@ public sealed class SyncPanelViewModel : ObservableObject
             var cleared = await slot.CrashRecovery.RecoverAsync();
             if (cleared > 0)
             {
-                clearedMessages.Add($"{slot.DisplayName}: se limpiaron {cleared} carpeta(s) de descarga sobrantes.");
+                clearedMessages.Add(Loc.Plural(StringKeys.Sync.RecoveryCleared, cleared, slot.DisplayName));
             }
 
             // Only after recovery: starting the loop first could hand a cycle a queue whose
@@ -305,7 +318,7 @@ public sealed class SyncPanelViewModel : ObservableObject
 
         if (clearedMessages.Count > 0)
         {
-            StatusMessage = "Se recuperó de una ejecución anterior: " + string.Join(" ", clearedMessages);
+            SetStatus(StringKeys.Sync.RecoveryPrefix, string.Join(" ", clearedMessages));
         }
 
         RaiseAutomaticSyncState();
@@ -331,13 +344,13 @@ public sealed class SyncPanelViewModel : ObservableObject
         {
             await scheduler.StopAsync();
             await Primary.StateStore.SetAutomaticSyncEnabledAsync(false);
-            StatusMessage = "Sincronización automática en pausa. Los cambios locales no se van a tomar hasta que la reanudes.";
+            SetStatus(StringKeys.Sync.AutoSyncPaused);
         }
         else
         {
             scheduler.Start();
             await Primary.StateStore.SetAutomaticSyncEnabledAsync(true);
-            StatusMessage = "Sincronización automática reanudada.";
+            SetStatus(StringKeys.Sync.AutoSyncResumed);
         }
 
         RaiseAutomaticSyncState();
@@ -503,7 +516,7 @@ public sealed class SyncPanelViewModel : ObservableObject
         var requester = RequestNewPairAsync;
         if (requester is null)
         {
-            StatusMessage = "Agregar un par de sincronización no está disponible.";
+            SetStatus(StringKeys.Sync.AddPairUnavailable);
             return;
         }
 
@@ -534,17 +547,17 @@ public sealed class SyncPanelViewModel : ObservableObject
 
             if (!await ConfirmBusyFolderAsync(request, targetSlot))
             {
-                StatusMessage = "Cancelado — no se creó ningún par.";
+                SetStatus(StringKeys.Sync.AddPairCancelled);
                 return;
             }
 
             var pair = await targetSlot.StateStore.CreatePairAsync(request.RemotePath, request.LocalPath, request.Direction, request.ConflictPolicy, mirrorDeletes: request.MirrorDeletes);
             AddPairViewModel(pair, targetSlot);
-            StatusMessage = $"Agregado: {pair.RemotePath} {DirectionArrow(pair.Direction)} {pair.LocalPath}";
+            SetStatus(StringKeys.Sync.AddPairAdded, pair.RemotePath, DirectionArrow(pair.Direction), pair.LocalPath);
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 19) // SQLITE_CONSTRAINT (the pair's UNIQUE(RemotePath, LocalPath))
         {
-            StatusMessage = "Esa combinación remoto/local ya es un par de sincronización.";
+            SetStatus(StringKeys.Sync.AddPairDuplicate);
         }
         finally
         {
@@ -578,9 +591,11 @@ public sealed class SyncPanelViewModel : ObservableObject
             return true; // no way to ask; creating the pair is still gated by the preview
         }
 
-        return await confirm(
-            $"'{request.LocalPath}' ya contiene más de {LocalFolderInspector.BusyFolderThreshold} elementos. " +
-            $"Sincronizarla en esta dirección va a subirlos todos a {targetSlot.DisplayName}. ¿Continuar?");
+        return await confirm(Loc.F(
+            StringKeys.Sync.BusyFolderConfirm,
+            request.LocalPath,
+            LocalFolderInspector.BusyFolderThreshold,
+            targetSlot.DisplayName));
     }
 
     /// <summary>
@@ -656,5 +671,5 @@ public sealed class SyncPanelViewModel : ObservableObject
         _ => "↔",
     };
 
-    private void ReportError(Exception ex) => StatusMessage = $"Error inesperado: {ex.Message}";
+    private void ReportError(Exception ex) => SetStatus(StringKeys.Status.UnexpectedError, ex.Message);
 }

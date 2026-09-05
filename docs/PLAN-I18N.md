@@ -16,7 +16,7 @@
 
 ## Status
 
-> **L0-L5 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
+> **L0-L6 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
 > passing (from 1001). The AOT publish is clean — only the five warnings that predate this work —
 > and both locales are verifiably embedded in the single-file binary. **Not visually verified: this
 > environment has no working screenshot tool** (GNOME refuses `ScreenshotWindow` over D-Bus), so
@@ -69,7 +69,14 @@
       `ProviderDescriptor.AccountSummary`. §6.3's three cases were applied as written; the machinery
       is `Services/Localization/LocalizedText.cs` — see
       [§6.5](#65-l5-what-actually-happened-to-the-three-cases).
-- [ ] **L6 — Sync surface.** Not started.
+- [x] **L6 — Sync surface.** `SyncPanelView.axaml`, `SyncPanelViewModel`, `SyncPairViewModel`,
+      `SyncFailureViewModel`, `AccountSyncToggleViewModel`, `ProviderFilterViewModel`. Both status
+      lines here are `LocalizedText` too, so a pair row reading "Up to date (…)" — which sits
+      untouched for as long as nothing changes, the worst case for a frozen string — follows the
+      picker. The plural work this phase was supposed to exercise landed as expected: conflicts,
+      failures, retried/discarded actions, attempts, and recovered download folders all go through
+      `Plural`. One thing is deliberately still `Verbatim`: `SyncPanelViewModel.AlertAsync`'s
+      message, which comes from `SyncPairValidator` — that is L7's typed-reason work.
 - [ ] **L7 — Service-layer messages → typed reasons.** Not started.
 - [ ] **L8 — Culture-aware formatting, and the invariant-culture audit.** Not started.
 - [ ] **L9 — The no-literals lint gate.** Not started.

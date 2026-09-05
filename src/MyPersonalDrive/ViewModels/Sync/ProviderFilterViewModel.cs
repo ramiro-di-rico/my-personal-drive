@@ -1,3 +1,5 @@
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.ViewModels.Sync;
 
 /// <summary>
@@ -26,7 +28,7 @@ public sealed class ProviderFilterViewModel : ObservableObject
 
     public string Label { get; }
 
-    public string LabelWithCount => $"{Label} ({Count:n0})";
+    public string LabelWithCount => Loc.F(StringKeys.Sync.FilterLabel, Label, Count.ToString("n0", Loc.Culture));
 
     public bool IsActive
     {

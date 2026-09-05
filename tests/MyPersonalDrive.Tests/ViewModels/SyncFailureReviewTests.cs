@@ -83,7 +83,7 @@ public class SyncFailureReviewTests : IDisposable
 
         Assert.Equal(2, shown.Count);
         var informe = shown.Single(f => f.RelativePath == "informe.pdf");
-        Assert.Equal("Descargar", informe.OperationText);
+        Assert.Equal("Download", informe.OperationText);
         // Verbatim: paraphrasing the provider's sentence is how the actionable detail gets lost.
         Assert.Equal("insufficient disk space", informe.ReasonText);
         Assert.Contains("permission denied", shown.Single(f => f.RelativePath == "notas.txt").ReasonText);
@@ -191,7 +191,7 @@ public class SyncFailureReviewTests : IDisposable
 
         await h.Row.ReviewFailuresCommand.ExecuteAsync();
 
-        Assert.Contains("no está disponible", h.Row.StatusText);
+        Assert.Contains("not available", h.Row.StatusText);
         Assert.Equal(1, h.Row.FailedCount);
     }
 

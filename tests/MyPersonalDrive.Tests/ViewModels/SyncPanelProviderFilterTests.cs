@@ -102,15 +102,15 @@ public class SyncPanelProviderFilterTests : IDisposable
         Assert.Equal("Account A", toggle.Label);
         Assert.DoesNotContain(":", toggle.Label);
         // No scheduler was passed, so automatic sync is not running.
-        Assert.Equal("pausada", toggle.StateText);
-        Assert.Contains("Activar", toggle.ActionTooltip);
+        Assert.Equal("paused", toggle.StateText);
+        Assert.Contains("Enable", toggle.ActionTooltip);
         Assert.Contains("Account A", toggle.ActionTooltip);
     }
 
     // Regression, reported live (docs/PLAN-UX-ROUND-2.md §11): every configured provider gets a
     // scheduler at startup and every scheduler is started, so the panel showed five accounts as
-    // "activada" when only one was signed in. The loop was indeed running; it just skipped every
-    // cycle, which is not what "activada" says to a user.
+    // "on" when only one was signed in. The loop was indeed running; it just skipped every
+    // cycle, which is not what "on" says to a user.
     [Fact]
     public async Task OnlySignedInAccounts_GetAnAutomaticSyncToggle()
     {

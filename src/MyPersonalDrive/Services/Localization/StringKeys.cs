@@ -379,6 +379,91 @@ public static class StringKeys
         public const string ZoomLabel = "viewer.zoom.label";
     }
 
+    /// <summary>The sync view: pair rows, the panel around them, and their status lines.</summary>
+    public static class Sync
+    {
+        public const string AccountPauseTooltip = "sync.account.pause.tooltip";
+        public const string AccountResumeTooltip = "sync.account.resume.tooltip";
+        public const string AddPair = "sync.addpair";
+        public const string AddPairAdded = "sync.addpair.added";
+        public const string AddPairCancelled = "sync.addpair.cancelled";
+        public const string AddPairDuplicate = "sync.addpair.duplicate";
+        public const string AddPairUnavailable = "sync.addpair.unavailable";
+        public const string Analyzing = "sync.analyzing";
+        public const string AutoSyncLabel = "sync.autosync.label";
+        public const string AutoSyncOff = "sync.autosync.off";
+        public const string AutoSyncOn = "sync.autosync.on";
+        public const string AutoSyncPaused = "sync.autosync.paused";
+        public const string AutoSyncResumed = "sync.autosync.resumed";
+        public const string AutoSyncStateOff = "sync.autosync.state.off";
+        public const string AutoSyncStateOn = "sync.autosync.state.on";
+        public const string BusyFolderConfirm = "sync.busyfolder.confirm";
+        /// <summary>Plural prefix.</summary>
+        public const string ConflictsCount = "sync.conflicts.count";
+        public const string ConflictsResolveFailed = "sync.conflicts.resolvefailed";
+        /// <summary>Plural prefix.</summary>
+        public const string ConflictsResolved = "sync.conflicts.resolved";
+        public const string ConflictsResolvedPartial = "sync.conflicts.resolvedpartial";
+        public const string ConflictsTooltip = "sync.conflicts.tooltip";
+        public const string ConflictsUnavailable = "sync.conflicts.unavailable";
+        public const string DirectionLocalToRemote = "sync.direction.localtoremote";
+        public const string DirectionRemoteToLocal = "sync.direction.remotetolocal";
+        public const string DirectionTwoWay = "sync.direction.twoway";
+        public const string EditTooltip = "sync.edit.tooltip";
+        public const string EditUnavailable = "sync.edit.unavailable";
+        public const string EmptyState = "sync.emptystate";
+        /// <summary>Plural prefix.</summary>
+        public const string FailureAttempts = "sync.failure.attempts";
+        public const string FailureNoReason = "sync.failure.noreason";
+        public const string FailureSummary = "sync.failure.summary";
+        /// <summary>Plural prefix.</summary>
+        public const string FailuresDiscarded = "sync.failures.discarded";
+        public const string FailuresNoChange = "sync.failures.nochange";
+        /// <summary>Plural prefix.</summary>
+        public const string FailuresRetried = "sync.failures.retried";
+        /// <summary>Plural prefix.</summary>
+        public const string FailuresSummary = "sync.failures.summary";
+        public const string FailuresTooltip = "sync.failures.tooltip";
+        public const string FailuresUnavailable = "sync.failures.unavailable";
+        public const string FilterAccountTooltip = "sync.filter.account.tooltip";
+        public const string FilterLabel = "sync.filter.label";
+        public const string Intro = "sync.intro";
+        public const string OpCreateLocalFolder = "sync.op.createlocalfolder";
+        public const string OpCreateRemoteFolder = "sync.op.createremotefolder";
+        public const string OpDeleteLocal = "sync.op.deletelocal";
+        public const string OpDownload = "sync.op.download";
+        public const string OpKeepBoth = "sync.op.keepboth";
+        public const string OpRenameLocal = "sync.op.renamelocal";
+        public const string OpRenameRemote = "sync.op.renameremote";
+        public const string OpTrashRemote = "sync.op.trashremote";
+        public const string OpUpdateBaseline = "sync.op.updatebaseline";
+        public const string OpUpload = "sync.op.upload";
+        public const string PausePauseTooltip = "sync.pause.pause.tooltip";
+        public const string PauseResumeTooltip = "sync.pause.resume.tooltip";
+        public const string PausedPrefix = "sync.paused.prefix";
+        public const string PreviewTooltip = "sync.preview.tooltip";
+        public const string PreviewUnavailable = "sync.preview.unavailable";
+        public const string Progress = "sync.progress";
+        /// <summary>Plural prefix.</summary>
+        public const string RecoveryCleared = "sync.recovery.cleared";
+        public const string RecoveryPrefix = "sync.recovery.prefix";
+        public const string RemoveTooltip = "sync.remove.tooltip";
+        public const string RetryFailed = "sync.retryfailed";
+        public const string RetryFailedTooltip = "sync.retryfailed.tooltip";
+        /// <summary>Plural prefix.</summary>
+        public const string RetryRequeued = "sync.retry.requeued";
+        public const string RetryReset = "sync.retry.reset";
+        public const string ShowLabel = "sync.show.label";
+        public const string StatusError = "sync.status.error";
+        public const string StatusNever = "sync.status.never";
+        public const string StatusPartialFailure = "sync.status.partialfailure";
+        public const string StatusUnknown = "sync.status.unknown";
+        public const string StatusUpToDate = "sync.status.uptodate";
+        public const string Syncing = "sync.syncing";
+        public const string TimeNever = "sync.time.never";
+        public const string Title = "sync.title";
+    }
+
     /// <summary>The settings view.</summary>
     public static class Settings
     {

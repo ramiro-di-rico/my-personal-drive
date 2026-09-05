@@ -190,10 +190,10 @@ public sealed class ProtonDriveService
                 return ParseTextListing(output, parentPath);
 
             case ListingParseOutcome.NotJson:
-                throw new InvalidOperationException($"Expected JSON output for '{parentPath}' but got non-JSON text. First line: {FirstLine(output)}");
+                throw new InvalidOperationException($"Se esperaba salida JSON para '{parentPath}' pero llegó texto que no es JSON. Primera línea: {FirstLine(output)}");
 
             default:
-                throw new InvalidOperationException($"Could not interpret the Proton Drive CLI listing for '{parentPath}': unrecognized JSON shape.");
+                throw new InvalidOperationException($"No se pudo interpretar el listado de la CLI de Proton Drive para '{parentPath}': forma de JSON no reconocida.");
         }
     }
 

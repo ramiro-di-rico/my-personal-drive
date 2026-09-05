@@ -586,7 +586,7 @@ public class SyncExecutorTests : IDisposable
         var logs = await stateStore.GetRecentLogsAsync(pair.Id, 50);
         var warning = Assert.Single(logs, l => l.Level == SyncLogLevel.Warning);
         Assert.Contains("in/voice.pdf", warning.Message);
-        Assert.Contains("rename it there", warning.Message);
+        Assert.Contains("renombralo ahí", warning.Message);
     }
 
     /// <summary>
@@ -612,8 +612,8 @@ public class SyncExecutorTests : IDisposable
         var logs = await stateStore.GetRecentLogsAsync(pair.Id, 50);
         var warnings = logs.Where(l => l.Level == SyncLogLevel.Warning).ToList();
         Assert.NotEmpty(warnings);
-        Assert.All(warnings, w => Assert.DoesNotContain("contains '/'", w.Message));
-        Assert.Contains(warnings, w => w.Message.Contains("collides", StringComparison.Ordinal));
+        Assert.All(warnings, w => Assert.DoesNotContain("contiene '/'", w.Message));
+        Assert.Contains(warnings, w => w.Message.Contains("choca", StringComparison.Ordinal));
     }
 
     // ------------------------------------------------------------------ F4: progress (§12)
@@ -1218,7 +1218,7 @@ public class SyncExecutorTests : IDisposable
         var stillPending = await stateStore.GetPendingActionsAsync(pair.Id, clock.GetUtcNow().AddDays(1));
         Assert.Equal("b.txt", Assert.Single(stillPending).RelativePath);
         var updated = await stateStore.GetPairAsync(pair.Id);
-        Assert.Contains("stopped early", updated!.LastError!);
+        Assert.Contains("se detuvo antes de tiempo", updated!.LastError!);
     }
 
     [Fact]

@@ -56,6 +56,14 @@ public sealed class SyncScheduler : IAsyncDisposable
 
     public bool IsRunning => _loop is { IsCompleted: false };
 
+    /// <summary>
+    /// Whether this account has a session at all. The loop is started for every configured
+    /// provider and gates each cycle on this (see <c>RunAsync</c>), so "running" on its own says
+    /// nothing about whether anything can actually sync — which is why the panel showed five
+    /// accounts as "activada" when only one was signed in (docs/PLAN-UX-ROUND-2.md §11).
+    /// </summary>
+    public bool IsAccountAuthenticated => _isAuthenticated();
+
     /// <summary>Raised after every automatic cycle, for the UI to refresh a row.</summary>
     public event EventHandler<int>? PairSynced;
 
@@ -213,7 +221,7 @@ public sealed class SyncScheduler : IAsyncDisposable
         {
             runtime.ConsecutiveErrors++;
             await SafeLogAsync(runtime.Pair.Id, SyncLogLevel.Error,
-                $"Automatic sync failed (attempt {runtime.ConsecutiveErrors}, next try in " +
+                $"La sincronización automática falló (intento {runtime.ConsecutiveErrors}, próximo intento en " +
                 $"{SyncSchedulePolicy.ErrorBackoff(runtime.ConsecutiveErrors).TotalMinutes:0} min): {ex.Message}",
                 cancellationToken);
         }

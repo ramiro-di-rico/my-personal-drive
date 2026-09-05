@@ -75,7 +75,7 @@ public sealed class DriveNodeViewModel : ObservableObject
     /// </summary>
     public bool CanPreview { get; }
 
-    public string Kind => Item.IsFolder ? "Folder" : "File";
+    public string Kind => Item.IsFolder ? "Carpeta" : "Archivo";
 
     /// <summary>
     /// What the row is, for the icon the item templates draw (via

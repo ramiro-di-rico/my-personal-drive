@@ -110,7 +110,7 @@ public class MainWindowDragDropUploadTests : IDisposable
         await sut.HandleLocalFilesDroppedAsync(["/home/user/report.pdf"], sut.CurrentPath);
 
         Assert.Empty(sut.TransferQueue.Items);
-        Assert.Equal("Upload cancelled.", sut.StatusMessage);
+        Assert.Equal("Subida cancelada.", sut.StatusMessage);
     }
 
     [Fact]

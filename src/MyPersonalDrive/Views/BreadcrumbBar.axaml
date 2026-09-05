@@ -1,0 +1,45 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:MyPersonalDrive.ViewModels"
+             xmlns:views="clr-namespace:MyPersonalDrive.Views"
+             x:Class="MyPersonalDrive.Views.BreadcrumbBar">
+
+  <!-- One breadcrumb bar for both panes (docs/PLAN-UX-ROUND-2.md §10). The remote and local bars
+       were duplicated markup sharing only BreadcrumbSegmentViewModel, which is why they had drifted
+       apart visually despite being mirror images of each other. Consolidating them also gives the
+       local pane the scroll-to-current-folder behaviour only the remote one had. -->
+  <StackPanel Spacing="4">
+    <!-- Which pane this is, for a first-time user: the provider dropdown up in the header is easy
+         to miss as "this is what the left pane shows." -->
+    <StackPanel Orientation="Horizontal" Spacing="6">
+      <Path Classes="icon"
+            Data="{Binding Icon, RelativeSource={RelativeSource AncestorType=views:BreadcrumbBar}}"
+            Width="12"
+            Height="12"
+            Opacity="0.7" />
+      <TextBlock Text="{Binding Label, RelativeSource={RelativeSource AncestorType=views:BreadcrumbBar}}"
+                 FontSize="11"
+                 FontWeight="Bold"
+                 Opacity="0.7" />
+    </StackPanel>
+    <ScrollViewer x:Name="SegmentScroll"
+                  HorizontalScrollBarVisibility="Auto"
+                  VerticalScrollBarVisibility="Disabled">
+      <ItemsControl ItemsSource="{Binding ItemsSource, RelativeSource={RelativeSource AncestorType=views:BreadcrumbBar}}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Orientation="Horizontal" Spacing="8" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:BreadcrumbSegmentViewModel">
+            <Button Command="{Binding OpenCommand}"
+                    Content="{Binding Label}"
+                    ToolTip.Tip="{Binding Label}"
+                    IsEnabled="{Binding CanNavigate}" />
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+  </StackPanel>
+</UserControl>

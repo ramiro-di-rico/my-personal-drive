@@ -94,7 +94,7 @@ public sealed class ProtonDriveProvider : ICloudDriveProvider, IDriveOperations,
     /// <summary>Proton's CLI has no command to generate a share link — Capabilities.SupportsShareLinks is false, so the UI never lets this actually be called; this exists only to satisfy the interface.</summary>
     Task<string> IDriveOperations.CreateShareLinkAsync(string path, CancellationToken cancellationToken)
         => throw new DriveException(nameof(ProtonDriveProvider), -1, string.Empty, string.Empty,
-            "Proton Drive's CLI has no command to generate a share link.", DriveErrorKind.Unknown);
+            "La CLI de Proton Drive no tiene un comando para generar un enlace para compartir.", DriveErrorKind.Unknown);
 
     Task IDriveAuthenticator.AuthenticateAsync(CancellationToken cancellationToken)
         => _service.AuthenticateAsync(cancellationToken);

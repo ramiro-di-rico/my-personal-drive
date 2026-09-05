@@ -312,7 +312,7 @@ public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
 
         if (!process.Start())
         {
-            throw new InvalidOperationException("Failed to start the Proton Drive CLI.");
+            throw new InvalidOperationException("No se pudo iniciar la CLI de Proton Drive.");
         }
 
         var stdout = new StringBuilder();

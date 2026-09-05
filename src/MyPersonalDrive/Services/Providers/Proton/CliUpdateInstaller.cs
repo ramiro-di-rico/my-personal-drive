@@ -69,8 +69,8 @@ public sealed class CliUpdateInstaller
             if (!HashesMatch(actualHash, release.Sha512CheckSum))
             {
                 throw new CliUpdateException(
-                    $"Checksum mismatch for {release.Url}. Expected {Shorten(release.Sha512CheckSum)}, " +
-                    $"got {Shorten(actualHash)}. The existing CLI was left untouched.");
+                    $"El checksum de {release.Url} no coincide. Se esperaba {Shorten(release.Sha512CheckSum)}, " +
+                    $"llegó {Shorten(actualHash)}. La CLI existente quedó intacta.");
             }
 
             if (!OperatingSystem.IsWindows())

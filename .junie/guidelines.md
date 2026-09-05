@@ -16,10 +16,18 @@ plain Markdown procedures, not Claude-specific — they apply to you unchanged.
 | Add/change a `proton-drive` command | [`.claude/skills/cli-command/SKILL.md`](../.claude/skills/cli-command/SKILL.md) |
 | Add a UI feature (MVVM) | [`.claude/skills/add-feature/SKILL.md`](../.claude/skills/add-feature/SKILL.md) |
 | Add a new cloud storage provider | [`.claude/skills/add-cloud-provider/SKILL.md`](../.claude/skills/add-cloud-provider/SKILL.md) |
+| Change the local-sync engine | [`.claude/skills/sync-change/SKILL.md`](../.claude/skills/sync-change/SKILL.md) |
+| Provider sign-in / tokens | [`.claude/skills/provider-auth/SKILL.md`](../.claude/skills/provider-auth/SKILL.md) |
+| Capture or debug real CLI output | [`.claude/skills/debug-cli/SKILL.md`](../.claude/skills/debug-cli/SKILL.md) |
+| Add a UI language, or refresh a locale | [`.claude/skills/add-language/SKILL.md`](../.claude/skills/add-language/SKILL.md) |
 | Cut a Linux release | [`.claude/skills/release-linux/SKILL.md`](../.claude/skills/release-linux/SKILL.md) |
+| Add or change CI | [`.claude/skills/ci-setup/SKILL.md`](../.claude/skills/ci-setup/SKILL.md) |
 | Check Native AOT / trim safety | [`.claude/skills/aot-check/SKILL.md`](../.claude/skills/aot-check/SKILL.md) |
+| Bump a dependency or the SDK | [`.claude/skills/upgrade-deps/SKILL.md`](../.claude/skills/upgrade-deps/SKILL.md) |
 | Run the app locally | [`.claude/skills/run-app/SKILL.md`](../.claude/skills/run-app/SKILL.md) |
 | Manual smoke pass | [`.claude/skills/smoke-test/SKILL.md`](../.claude/skills/smoke-test/SKILL.md) |
+| UI review of a visual change | [`.claude/skills/ui-review/SKILL.md`](../.claude/skills/ui-review/SKILL.md) |
+| Accessibility and theming | [`.claude/skills/a11y-theming/SKILL.md`](../.claude/skills/a11y-theming/SKILL.md) |
 | Write/update a plan doc | [`.claude/skills/plan-doc/SKILL.md`](../.claude/skills/plan-doc/SKILL.md) |
 | Park an out-of-scope finding | [`.claude/skills/debt/SKILL.md`](../.claude/skills/debt/SKILL.md) |
 | Create a git commit | [`.claude/skills/commit/SKILL.md`](../.claude/skills/commit/SKILL.md) |

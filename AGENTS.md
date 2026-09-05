@@ -27,10 +27,18 @@ one-line description.
 | [`cli-command`](.claude/skills/cli-command/SKILL.md) | Adding or changing a `proton-drive` command: service method, parsing, error kind, tests |
 | [`add-feature`](.claude/skills/add-feature/SKILL.md) | Adding UI: view, panel, button, or any user-facing action (MVVM rules) |
 | [`add-cloud-provider`](.claude/skills/add-cloud-provider/SKILL.md) | Planning and implementing a new cloud storage backend behind `ICloudDriveProvider` |
+| [`sync-change`](.claude/skills/sync-change/SKILL.md) | Touching `Services/Sync/` — reconciler, executor, scanners, queue, echo, crash recovery |
+| [`provider-auth`](.claude/skills/provider-auth/SKILL.md) | Sign-in, token refresh, token storage or sign-out for any provider |
+| [`debug-cli`](.claude/skills/debug-cli/SKILL.md) | Capturing real CLI output for a fixture or Appendix A, or debugging a CLI call |
+| [`add-language`](.claude/skills/add-language/SKILL.md) | Adding a UI language, or filling in a locale that fell behind English |
 | [`release-linux`](.claude/skills/release-linux/SKILL.md) | Cutting a Linux release or producing an installable artifact |
+| [`ci-setup`](.claude/skills/ci-setup/SKILL.md) | Adding or changing the automated CI checks |
 | [`aot-check`](.claude/skills/aot-check/SKILL.md) | After touching serialization, reflection, packages, or bindings; before a release |
+| [`upgrade-deps`](.claude/skills/upgrade-deps/SKILL.md) | Bumping a NuGet package, Avalonia, or the SDK — publish-date rule and the deliberate pins |
 | [`run-app`](.claude/skills/run-app/SKILL.md) | Running the app for real, with the real CLI or a stub |
 | [`smoke-test`](.claude/skills/smoke-test/SKILL.md) | Before a PR or release — the manual pass unit tests can't do |
+| [`ui-review`](.claude/skills/ui-review/SKILL.md) | Reviewing a visual change against the UX plans, with real screenshots |
+| [`a11y-theming`](.claude/skills/a11y-theming/SKILL.md) | Adding or restyling a control: theme brushes, keyboard reach, accessible names |
 | [`plan-doc`](.claude/skills/plan-doc/SKILL.md) | Writing or refreshing a `docs/PLAN-*.md` or `ARCHITECTURE.md` |
 | [`debt`](.claude/skills/debt/SKILL.md) | Parking an out-of-scope finding instead of widening the diff |
 | [`commit`](.claude/skills/commit/SKILL.md) | Creating a git commit — no AI co-author trailer in this repo |

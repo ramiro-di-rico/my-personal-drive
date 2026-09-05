@@ -17,19 +17,19 @@ public static class SyncPairValidator
     {
         if (string.IsNullOrWhiteSpace(remotePath) || !remotePath.StartsWith('/'))
         {
-            return "The remote path must be an absolute path starting with '/'.";
+            return "La ruta remota tiene que ser una ruta absoluta que empiece con '/'.";
         }
 
         if (string.IsNullOrWhiteSpace(localPath))
         {
-            return "Choose a local folder.";
+            return "Elegí una carpeta local.";
         }
 
         var trimmedLocal = localPath.TrimEnd('/', '\\');
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (trimmedLocal.Length == 0 || trimmedLocal == "/" || string.Equals(trimmedLocal, home.TrimEnd('/', '\\'), StringComparison.Ordinal))
         {
-            return "Refusing to sync your entire home directory or the filesystem root — pick a specific subfolder.";
+            return "No se sincroniza tu carpeta personal entera ni la raíz del sistema de archivos — elegí una subcarpeta específica.";
         }
 
         return FindOverlap(remotePath, localPath, direction, sameAccountPairs, allAccountPairs ?? sameAccountPairs);
@@ -66,9 +66,9 @@ public static class SyncPairValidator
             var otherLocal = NormalizeLocal(other.LocalPath);
             if (Overlaps(thisLocal, otherLocal, Path.DirectorySeparatorChar))
             {
-                return $"'{pair.LocalPath}' is also synced (upload-only) with '{other.RemotePath}'. " +
-                       "Switching this pair to a direction that writes to the local folder could delete or " +
-                       "overwrite what that pair uploads. Remove or change the other pair first.";
+                return $"'{pair.LocalPath}' también está sincronizada (solo subida) con '{other.RemotePath}'. " +
+                       "Cambiar este par a una dirección que escribe en la carpeta local podría borrar o " +
+                       "sobrescribir lo que ese par sube. Eliminá o cambiá el otro par primero.";
             }
         }
 
@@ -117,10 +117,10 @@ public static class SyncPairValidator
             }
 
             return string.Equals(newLocal, existingLocal, StringComparison.Ordinal)
-                ? $"'{pair.LocalPath}' is already synced with '{pair.RemotePath}'."
-                : $"That local folder overlaps '{pair.LocalPath}', which is already synced with " +
-                  $"'{pair.RemotePath}'. Two pairs sharing a folder would each treat the other's files as " +
-                  "deletions. Pick a folder outside it.";
+                ? $"'{pair.LocalPath}' ya está sincronizada con '{pair.RemotePath}'."
+                : $"Esa carpeta local se superpone con '{pair.LocalPath}', que ya está sincronizada con " +
+                  $"'{pair.RemotePath}'. Dos pares compartiendo una carpeta tratarían los archivos del otro como " +
+                  "eliminaciones. Elegí una carpeta fuera de ella.";
         }
 
         foreach (var pair in sameAccountPairs)
@@ -129,10 +129,10 @@ public static class SyncPairValidator
             if (Overlaps(newRemote, existingRemote, '/'))
             {
                 return string.Equals(newRemote, existingRemote, StringComparison.Ordinal)
-                    ? $"'{pair.RemotePath}' is already synced with '{pair.LocalPath}'."
-                    : $"That remote folder overlaps '{pair.RemotePath}', which is already synced with " +
-                      $"'{pair.LocalPath}'. Two pairs covering the same remote subtree can undo each other's " +
-                      "deletions. Pick a folder outside it.";
+                    ? $"'{pair.RemotePath}' ya está sincronizada con '{pair.LocalPath}'."
+                    : $"Esa carpeta remota se superpone con '{pair.RemotePath}', que ya está sincronizada con " +
+                      $"'{pair.LocalPath}'. Dos pares cubriendo el mismo subárbol remoto pueden deshacer las " +
+                      "eliminaciones del otro. Elegí una carpeta fuera de ella.";
             }
         }
 

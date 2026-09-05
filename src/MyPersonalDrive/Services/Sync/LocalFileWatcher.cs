@@ -93,10 +93,10 @@ public sealed class LocalFileWatcher : IDisposable
             // expected to surface DegradedReason, including the sysctl to raise the limit.
             IsDegraded = true;
             DegradedReason = OperatingSystem.IsLinux()
-                ? $"Could not watch '{_pair.LocalPath}' for changes ({ex.Message}). Falling back to " +
-                  "periodic scanning. If this is the inotify watch limit, raise it with: " +
+                ? $"No se pudieron vigilar los cambios de '{_pair.LocalPath}' ({ex.Message}). Se pasa a " +
+                  "análisis periódico. Si es el límite de watches de inotify, subilo con: " +
                   "sudo sysctl fs.inotify.max_user_watches=524288"
-                : $"Could not watch '{_pair.LocalPath}' for changes ({ex.Message}). Falling back to periodic scanning.";
+                : $"No se pudieron vigilar los cambios de '{_pair.LocalPath}' ({ex.Message}). Se pasa a análisis periódico.";
             _watcher = null;
         }
     }

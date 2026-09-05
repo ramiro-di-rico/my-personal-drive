@@ -377,9 +377,9 @@ public class LocalExplorerViewModelTests : IDisposable
         await sut.Items.Single(i => i.DisplayName == "note.txt").PropertiesCommand.ExecuteAsync();
 
         Assert.NotNull(shownFields);
-        Assert.Contains(shownFields!, f => f.Label == "Name" && f.Value == "note.txt");
-        Assert.Contains(shownFields!, f => f.Label == "Type" && f.Value == "File");
-        Assert.Contains(shownFields!, f => f.Label == "Size");
+        Assert.Contains(shownFields!, f => f.Label == "Nombre" && f.Value == "note.txt");
+        Assert.Contains(shownFields!, f => f.Label == "Tipo" && f.Value == "Archivo");
+        Assert.Contains(shownFields!, f => f.Label == "Tamaño");
     }
 
     /// <summary>Points <see cref="LocalFileSystemService.GetHomeDirectory"/> at a temp folder rather than the real OS home, so tests stay hermetic.</summary>

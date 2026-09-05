@@ -27,7 +27,7 @@ public sealed class ProtonDriveCliLocator : IProtonDriveCliLocator
             }
         }
 
-        throw new FileNotFoundException("Could not locate the Proton Drive CLI. Save the executable path first.");
+        throw new FileNotFoundException("No se pudo ubicar la CLI de Proton Drive. Guardá primero la ruta del ejecutable.");
     }
 
     private static IEnumerable<string> EnumeratePathCandidates(string executableName)

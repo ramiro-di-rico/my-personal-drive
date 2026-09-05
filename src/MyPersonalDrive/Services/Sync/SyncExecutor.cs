@@ -107,7 +107,7 @@ public sealed class SyncExecutor
     public sealed record SyncProgress(int Completed, int Total, SyncOperation? Operation, string? RelativePath)
     {
         public string Describe() => Operation is null
-            ? $"Scanning… ({Total} action(s) queued)"
+            ? $"Analizando… ({Total} acción(es) en cola)"
             : $"{Completed}/{Total}  {Operation}  {RelativePath}";
     }
 
@@ -168,17 +168,17 @@ public sealed class SyncExecutor
         var parts = new List<string>();
         if (failureCount > 0)
         {
-            parts.Add($"{failureCount} action(s) failed");
+            parts.Add($"{failureCount} acción(es) fallaron");
         }
 
         if (conflictCount > 0)
         {
-            parts.Add($"{conflictCount} conflict(s) awaiting your decision");
+            parts.Add($"{conflictCount} conflicto(s) esperando tu decisión");
         }
 
         if (aborted)
         {
-            parts.Add("run stopped early (sign in again, or free up space, then retry)");
+            parts.Add("la ejecución se detuvo antes de tiempo (iniciá sesión de nuevo, o liberá espacio, y reintentá)");
         }
 
         return parts.Count == 0 ? null : string.Join("; ", parts);
@@ -359,18 +359,18 @@ public sealed class SyncExecutor
         => skip.Reason switch
         {
             NodeSkipReason.UnmappableName =>
-                $"Skipped '{skip.Name}': its name contains '/', which can't be used in a local filename. " +
-                "It stays on Proton Drive but won't be synced — rename it there to include it.",
+                $"Se omitió '{skip.Name}': su nombre contiene '/', que no se puede usar en un nombre de archivo local. " +
+                "Queda en Proton Drive pero no se va a sincronizar — renombralo ahí para incluirlo.",
             NodeSkipReason.CaseCollision =>
-                $"Skipped '{skip.Name}': its name collides with a sibling once case is ignored. " +
-                "Both stay on Proton Drive but won't be synced — rename one of them there to include it.",
+                $"Se omitió '{skip.Name}': su nombre choca con el de un hermano si se ignoran mayúsculas y minúsculas. " +
+                "Los dos quedan en Proton Drive pero no se van a sincronizar — renombrá uno ahí para incluirlo.",
             NodeSkipReason.DuplicateName =>
-                $"Skipped '{skip.Name}': more than one item shares this exact name in the same folder. " +
-                "All of them stay on the remote drive but won't be synced — rename all but one to include it.",
+                $"Se omitió '{skip.Name}': más de un elemento comparte exactamente este nombre en la misma carpeta. " +
+                "Todos quedan en el drive remoto pero no se van a sincronizar — renombrá todos menos uno para incluirlo.",
             NodeSkipReason.GoogleNativeFile =>
-                $"Skipped '{skip.Name}': it's a Google Docs/Sheets/Slides file with no downloadable content. " +
-                "It stays on Google Drive but won't be synced.",
-            _ => $"Skipped '{skip.Name}': it can't be represented locally."
+                $"Se omitió '{skip.Name}': es un archivo de Google Docs/Sheets/Slides sin contenido descargable. " +
+                "Queda en Google Drive pero no se va a sincronizar.",
+            _ => $"Se omitió '{skip.Name}': no se puede representar localmente."
         };
 
     private async Task<(IReadOnlyDictionary<string, NodeFingerprint> Local, IReadOnlyDictionary<string, NodeFingerprint> Remote, PathMapper Mapper)> ScanBothSidesAsync(
@@ -690,7 +690,7 @@ public sealed class SyncExecutor
         var localAbsolutePath = context.Mapper.ToLocalAbsolute(relativePath);
         if (!File.Exists(localAbsolutePath))
         {
-            throw new FileNotFoundException($"'{relativePath}' disappeared locally before it could be uploaded.", localAbsolutePath);
+            throw new FileNotFoundException($"'{relativePath}' desapareció localmente antes de poder subirse.", localAbsolutePath);
         }
 
         await _operations.UploadFilesAsync([localAbsolutePath], context.Mapper.ToRemoteAbsolute(parent),
@@ -708,7 +708,7 @@ public sealed class SyncExecutor
     {
         if (action.SecondaryPath is null)
         {
-            throw new InvalidOperationException($"A KeepBoth resolution for '{action.RelativePath}' has no conflict-copy path.");
+            throw new InvalidOperationException($"Una resolución KeepBoth para '{action.RelativePath}' no tiene ruta de copia de conflicto.");
         }
 
         var originalLocalPath = context.Mapper.ToLocalAbsolute(action.RelativePath);
@@ -745,7 +745,7 @@ public sealed class SyncExecutor
     {
         if (action.SecondaryPath is null)
         {
-            throw new InvalidOperationException($"A local rename of '{action.RelativePath}' has no destination path.");
+            throw new InvalidOperationException($"Un renombrado local de '{action.RelativePath}' no tiene ruta de destino.");
         }
 
         var source = context.Mapper.ToLocalAbsolute(action.RelativePath);
@@ -755,12 +755,12 @@ public sealed class SyncExecutor
         {
             // It vanished between the scan and now. Failing would be wrong: the next cycle rescans
             // and will download it at the new path, which is the correct outcome anyway.
-            throw new FileNotFoundException($"'{action.RelativePath}' disappeared locally before it could be moved.", source);
+            throw new FileNotFoundException($"'{action.RelativePath}' desapareció localmente antes de poder moverse.", source);
         }
 
         if (File.Exists(destination))
         {
-            throw new IOException($"Refusing to move '{action.RelativePath}' onto the existing file '{action.SecondaryPath}'.");
+            throw new IOException($"No se mueve '{action.RelativePath}' encima del archivo existente '{action.SecondaryPath}'.");
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
@@ -796,7 +796,7 @@ public sealed class SyncExecutor
     {
         if (action.SecondaryPath is null)
         {
-            throw new InvalidOperationException($"A remote move of '{action.RelativePath}' has no destination path.");
+            throw new InvalidOperationException($"Un movimiento remoto de '{action.RelativePath}' no tiene ruta de destino.");
         }
 
         var oldParent = ParentOf(action.RelativePath);
@@ -862,7 +862,7 @@ public sealed class SyncExecutor
             var downloadedPath = Path.Combine(tempDirectory, fileName);
             if (!File.Exists(downloadedPath))
             {
-                throw new IOException($"Expected the CLI to download '{fileName}' into the temp folder, but it wasn't there.");
+                throw new IOException($"Se esperaba que la CLI descargara '{fileName}' en la carpeta temporal, pero no estaba ahí.");
             }
 
             File.Move(downloadedPath, localAbsolutePath, overwrite: true);

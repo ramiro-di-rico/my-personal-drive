@@ -45,6 +45,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         ToggleHiddenFilesCommand = new AsyncCommand(ToggleHiddenFilesAsync, () => !IsLoading, onError);
         SelectAllCommand = new AsyncCommand(SelectAllAsync, () => Items.Count > 0, onError);
         DeleteSelectedCommand = new AsyncCommand(DeleteSelectedAsync, () => SelectedCount > 0, onError);
+        ClearSearchCommand = new AsyncCommand(ClearSearchAsync, () => HasSearchText, onError);
     }
 
     public ObservableCollection<LocalNodeViewModel> Items { get; }
@@ -97,6 +98,9 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
     public AsyncCommand DeleteSelectedCommand { get; }
 
+    /// <summary>Empties this pane's search box (docs/PLAN-UX-ROUND-2.md §9).</summary>
+    public AsyncCommand ClearSearchCommand { get; }
+
     /// <summary>How many rows are currently selected — docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2.</summary>
     public int SelectedCount => Items.Count(i => i.IsSelected);
 
@@ -126,6 +130,13 @@ public sealed class LocalExplorerViewModel : ObservableObject
     public Func<string, SyncPairViewModel?>? FindSyncPairByPath { get; set; }
 
     /// <summary>
+    /// The remote path a local path maps to, or null when it is outside every sync pair. Supplied
+    /// by <c>MainWindowViewModel</c> so this pane needs no reference to the sync panel or to
+    /// <c>PathMapper</c> (docs/PLAN-UX-ROUND-2.md §12).
+    /// </summary>
+    public Func<string, string?>? FindRemotePathFor { get; set; }
+
+    /// <summary>
     /// A quick filter over the current folder's file/folder names (case-insensitive substring,
     /// same rule as the cloud pane's own search — docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1's "Global
     /// Quick Search"). Reset on navigation: a search term belongs to the folder it was typed in, the
@@ -139,7 +150,41 @@ public sealed class LocalExplorerViewModel : ObservableObject
             if (SetProperty(ref _searchText, value))
             {
                 RenderItems();
+                OnPropertyChanged(nameof(HasSearchText));
+                OnPropertyChanged(nameof(SearchResultText));
+                ClearSearchCommand.RaiseCanExecuteChanged();
             }
+        }
+    }
+
+    private async Task ClearSearchAsync()
+    {
+        SearchText = string.Empty;
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Whether a search term is narrowing the list, for the clear button. A filter that hides rows
+    /// without saying so — and with no way back but selecting the text and deleting it — was the
+    /// specific complaint (docs/PLAN-UX-ROUND-2.md §9).
+    /// </summary>
+    public bool HasSearchText => !string.IsNullOrWhiteSpace(_searchText);
+
+    /// <summary>
+    /// How many rows survived the search, phrased the way the kind chips already phrase their own
+    /// counts. Empty when nothing is being searched, so the label costs no space in the common case.
+    /// </summary>
+    public string SearchResultText
+    {
+        get
+        {
+            if (!HasSearchText)
+            {
+                return string.Empty;
+            }
+
+            var shown = Items.Count;
+            return shown == 1 ? "1 resultado" : $"{shown} resultados";
         }
     }
 
@@ -180,7 +225,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
         {
-            StatusMessage = $"Can't open '{path}': {ex.Message}";
+            StatusMessage = $"No se pudo abrir '{path}': {ex.Message}";
         }
         finally
         {
@@ -211,6 +256,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         }
 
         RaiseSelectionChanged();
+        OnPropertyChanged(nameof(SearchResultText));
     }
 
     /// <summary>
@@ -313,12 +359,12 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
         var confirm = RequestConfirmationAsync;
         var question = selected.Count == 1
-            ? $"Delete '{selected[0].DisplayName}'? This cannot be undone."
-            : $"Delete {selected.Count} selected items? This cannot be undone.";
+            ? $"¿Eliminar '{selected[0].DisplayName}'? Esta acción no se puede deshacer."
+            : $"¿Eliminar {selected.Count} elementos seleccionados? Esta acción no se puede deshacer.";
 
         if (confirm is not null && !await confirm(question))
         {
-            StatusMessage = "Cancelled — nothing was deleted.";
+            StatusMessage = "Cancelado — no se eliminó nada.";
             return;
         }
 
@@ -336,8 +382,8 @@ public sealed class LocalExplorerViewModel : ObservableObject
         }
 
         StatusMessage = failures.Count == 0
-            ? $"Deleted {selected.Count} item(s)."
-            : $"Deleted {selected.Count - failures.Count} of {selected.Count} item(s). Failures: {string.Join("; ", failures)}";
+            ? $"Se eliminaron {selected.Count} elemento(s)."
+            : $"Se eliminaron {selected.Count - failures.Count} de {selected.Count} elemento(s). Fallos: {string.Join("; ", failures)}";
 
         await NavigateAsync(CurrentPath);
     }
@@ -390,24 +436,24 @@ public sealed class LocalExplorerViewModel : ObservableObject
     {
         var confirm = RequestConfirmationAsync;
         var question = item.IsFolder
-            ? $"Delete the folder '{item.Name}' and everything inside it? This cannot be undone."
-            : $"Delete '{item.Name}'? This cannot be undone.";
+            ? $"¿Eliminar la carpeta '{item.Name}' y todo su contenido? Esta acción no se puede deshacer."
+            : $"¿Eliminar '{item.Name}'? Esta acción no se puede deshacer.";
 
         if (confirm is not null && !await confirm(question))
         {
-            StatusMessage = $"Cancelled: {item.Name} was not deleted.";
+            StatusMessage = $"Cancelado: no se eliminó {item.Name}.";
             return;
         }
 
         try
         {
             _service.Delete(item.Path);
-            StatusMessage = $"Deleted {item.Name}.";
+            StatusMessage = $"Se eliminó {item.Name}.";
             await NavigateAsync(CurrentPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            StatusMessage = $"Could not delete '{item.Name}': {ex.Message}";
+            StatusMessage = $"No se pudo eliminar '{item.Name}': {ex.Message}";
         }
     }
 
@@ -416,7 +462,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         var requester = RequestRenameAsync;
         if (requester is null)
         {
-            StatusMessage = "Rename is not available.";
+            StatusMessage = "Renombrar no está disponible.";
             return;
         }
 
@@ -429,12 +475,12 @@ public sealed class LocalExplorerViewModel : ObservableObject
         try
         {
             _service.Rename(item.Path, newName);
-            StatusMessage = $"Renamed {item.Name} to {newName}.";
+            StatusMessage = $"Se renombró {item.Name} a {newName}.";
             await NavigateAsync(CurrentPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            StatusMessage = $"Could not rename '{item.Name}': {ex.Message}";
+            StatusMessage = $"No se pudo renombrar '{item.Name}': {ex.Message}";
         }
     }
 
@@ -443,12 +489,12 @@ public sealed class LocalExplorerViewModel : ObservableObject
         var copy = RequestCopyToClipboardAsync;
         if (copy is null)
         {
-            StatusMessage = "Copy is not available.";
+            StatusMessage = "Copiar no está disponible.";
             return;
         }
 
         await copy(item.Path);
-        StatusMessage = $"Copied path: {item.Path}";
+        StatusMessage = $"Ruta copiada: {item.Path}";
     }
 
     public async Task SyncSelectedPathAsync(DriveItem item)
@@ -461,7 +507,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         var handler = RequestSyncSelectedPathAsync;
         if (handler is null)
         {
-            StatusMessage = "Sync is not available.";
+            StatusMessage = "La sincronización no está disponible.";
             return;
         }
 
@@ -478,19 +524,27 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
         var fields = new List<PropertyField>
         {
-            new("Name", item.Name),
-            new("Path", item.Path),
-            new("Type", item.IsFolder ? "Folder" : "File"),
+            new("Nombre", item.Name),
+            new("Ruta", item.Path, IsCopyable: true),
+            new("Tipo", item.IsFolder ? "Carpeta" : "Archivo"),
         };
+
+        // The mirror of the remote pane's "Ruta local" (docs/PLAN-UX-ROUND-2.md §12). These two
+        // panes were made consistent by construction in §10; shipping half of this feature would
+        // put the asymmetry straight back.
+        if (FindRemotePathFor?.Invoke(item.Path) is { } remotePath)
+        {
+            fields.Add(new PropertyField("Ruta remota", remotePath, IsCopyable: true));
+        }
 
         if (item.Size is not null)
         {
-            fields.Add(new PropertyField("Size", ByteSize.Format(item.Size.Value)));
+            fields.Add(new PropertyField("Tamaño", ByteSize.Format(item.Size.Value)));
         }
 
         if (item.ModifiedAt is not null)
         {
-            fields.Add(new PropertyField("Modified", item.ModifiedAt.Value.ToLocalTime().ToString("g")));
+            fields.Add(new PropertyField("Modificado", item.ModifiedAt.Value.ToLocalTime().ToString("g")));
         }
 
         await show(item.Name, fields);

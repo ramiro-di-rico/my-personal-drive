@@ -33,7 +33,7 @@ public sealed class ImageFilePreviewService : IImageFilePreviewLoader
     {
         if (item.IsFolder)
         {
-            throw new InvalidOperationException("Folders have no image to preview.");
+            throw new InvalidOperationException("Las carpetas no tienen imagen para previsualizar.");
         }
 
         var directory = Path.Combine(_tempRoot, Guid.NewGuid().ToString("N"));
@@ -48,7 +48,7 @@ public sealed class ImageFilePreviewService : IImageFilePreviewLoader
             if (!File.Exists(downloadedPath))
             {
                 downloadedPath = Directory.EnumerateFiles(directory).FirstOrDefault()
-                    ?? throw new IOException($"The CLI reported success but downloaded nothing for '{item.Name}'.");
+                    ?? throw new IOException($"La CLI informó éxito pero no descargó nada para '{item.Name}'.");
             }
 
             var bytes = await File.ReadAllBytesAsync(downloadedPath, cancellationToken);

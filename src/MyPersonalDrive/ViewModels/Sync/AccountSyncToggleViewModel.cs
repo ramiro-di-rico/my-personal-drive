@@ -31,7 +31,28 @@ public sealed class AccountSyncToggleViewModel : ObservableObject
 
     public bool IsRunning => _scheduler?.IsRunning ?? false;
 
-    public string Label => IsRunning ? $"⏸ {DisplayName}: on" : $"▶ {DisplayName}: off";
+    /// <summary>
+    /// Whether this account's toggle is worth showing at all. A provider with no session has a
+    /// scheduler loop running like every other, but that loop skips every cycle, so reporting it
+    /// as "activada" told the user something that was true of the loop and false of the app
+    /// (docs/PLAN-UX-ROUND-2.md §11).
+    /// </summary>
+    public bool IsRelevant => _scheduler?.IsAccountAuthenticated ?? false;
+
+    /// <summary>
+    /// The account's name on its own. The state lives in <see cref="StateText"/> and the verb in
+    /// <see cref="ActionTooltip"/>: this used to be one string mixing all three ("⏸ Proton Drive:
+    /// activada" showed the action glyph next to the current state, which reads as a
+    /// contradiction), and it sat next to the filter chips looking exactly like one of them
+    /// (docs/PLAN-UX-ROUND-2.md §7).
+    /// </summary>
+    public string Label => DisplayName;
+
+    public string StateText => IsRunning ? "activada" : "pausada";
+
+    public string ActionTooltip => IsRunning
+        ? $"Pausar la sincronización automática de {DisplayName}"
+        : $"Activar la sincronización automática de {DisplayName}";
 
     public AsyncCommand ToggleCommand { get; }
 
@@ -39,7 +60,10 @@ public sealed class AccountSyncToggleViewModel : ObservableObject
     public void RaiseState()
     {
         OnPropertyChanged(nameof(IsRunning));
+        OnPropertyChanged(nameof(IsRelevant));
         OnPropertyChanged(nameof(Label));
+        OnPropertyChanged(nameof(StateText));
+        OnPropertyChanged(nameof(ActionTooltip));
     }
 
     private async Task ToggleAsync()

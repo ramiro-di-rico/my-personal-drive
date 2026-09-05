@@ -40,19 +40,49 @@ public class SyncPanelProviderNameTests : IDisposable
             : new SyncPanelViewModel(store, executor, new SyncCrashRecovery(store), providerDisplayName: providerDisplayName);
     }
 
+    // The prompt moved off StatusMessage and onto EmptyStateMessage, which is shown only while
+    // there are no pairs (docs/PLAN-UX-ROUND-2.md §13). The behaviour these two guard — that the
+    // name is interpolated, not hardcoded — is unchanged.
     [Fact]
     public void WithNoProviderNameGiven_DefaultsToProtonDrive()
     {
         var sut = Build(providerDisplayName: null);
 
-        Assert.Equal("Add a folder to start syncing it from Proton Drive.", sut.StatusMessage);
+        Assert.Equal("Agregá una carpeta para empezar a sincronizarla desde Proton Drive.", sut.EmptyStateMessage);
+        Assert.True(sut.HasNoPairs);
+        Assert.Equal(string.Empty, sut.StatusMessage);
     }
 
     [Fact]
-    public void WithAProviderNameGiven_UsesItInTheInitialStatusMessage()
+    public void WithAProviderNameGiven_UsesItInTheEmptyStatePrompt()
     {
         var sut = Build("OneDrive");
 
-        Assert.Equal("Add a folder to start syncing it from OneDrive.", sut.StatusMessage);
+        Assert.Equal("Agregá una carpeta para empezar a sincronizarla desde OneDrive.", sut.EmptyStateMessage);
+    }
+
+    // The prompt names the account a new pair would actually target. Switching the browsed account
+    // moves that target (SwitchBrowserAccountAsync -> SetActiveAccount -> AddPairAsync's
+    // ActiveSlot), so a fixed name would promise one provider and create a pair on another.
+    [Fact]
+    public void SwitchingTheActiveAccount_MovesThePromptWithIt()
+    {
+        var store = new SyncStateStore(_dbPath);
+        var service = new ProtonDriveService(new FakeCliExecutor());
+        var provider = new ProtonDriveProvider(service);
+        var executor = new SyncExecutor(provider.Operations, store, new LocalScanner(), new RemoteScanner(provider));
+        var sut = new SyncPanelViewModel(store, executor, new SyncCrashRecovery(store), providerDisplayName: "Proton Drive");
+        sut.AddAccount(store, executor, new SyncCrashRecovery(store), null, "Google Drive");
+
+        Assert.Contains("Proton Drive", sut.EmptyStateMessage);
+
+        sut.SetActiveAccount("Google Drive");
+
+        Assert.Contains("Google Drive", sut.EmptyStateMessage);
+
+        // An account that was never registered falls back to the primary rather than naming a
+        // provider that cannot receive the pair.
+        sut.SetActiveAccount("Dropbox");
+        Assert.Contains("Proton Drive", sut.EmptyStateMessage);
     }
 }

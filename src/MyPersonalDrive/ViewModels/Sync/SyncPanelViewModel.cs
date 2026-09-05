@@ -49,7 +49,13 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// label (falls back to <see cref="Primary"/> via <see cref="ActiveSlot"/>).
     /// </summary>
     public void SetActiveAccount(string displayName)
-        => _activeSlotOverride = _slots.FirstOrDefault(slot => slot.DisplayName == displayName);
+    {
+        _activeSlotOverride = _slots.FirstOrDefault(slot => slot.DisplayName == displayName);
+
+        // The empty-state prompt names the account a new pair would target, so it has to follow
+        // this (docs/PLAN-UX-ROUND-2.md §13).
+        OnPropertyChanged(nameof(EmptyStateMessage));
+    }
 
     /// <param name="providerDisplayName">
     /// Named in a couple of user-facing strings ("Add a folder to start syncing it from…").
@@ -59,9 +65,13 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// </param>
     public SyncPanelViewModel(SyncStateStore stateStore, SyncExecutor executor, SyncCrashRecovery crashRecovery, SyncScheduler? scheduler = null, string providerDisplayName = "Proton Drive")
     {
-        _statusMessage = $"Add a folder to start syncing it from {providerDisplayName}.";
+        _statusMessage = string.Empty;
         Pairs = new ObservableCollection<SyncPairViewModel>();
-        Pairs.CollectionChanged += (_, _) => RebuildProviderFilters();
+        Pairs.CollectionChanged += (_, _) =>
+        {
+            RebuildProviderFilters();
+            OnPropertyChanged(nameof(HasNoPairs));
+        };
         AccountSyncToggles = new ObservableCollection<AccountSyncToggleViewModel>();
         ProviderFilters = new ObservableCollection<ProviderFilterViewModel>();
 
@@ -113,6 +123,19 @@ public sealed class SyncPanelViewModel : ObservableObject
     public ObservableCollection<AccountSyncToggleViewModel> AccountSyncToggles { get; }
 
     /// <summary>
+    /// The toggles actually worth showing: every provider gets a scheduler at startup whether or
+    /// not it is configured, so the unfiltered collection reported five accounts as "activada"
+    /// when only one was signed in (docs/PLAN-UX-ROUND-2.md §11). <see cref="AccountSyncToggles"/>
+    /// stays the unfiltered source of truth every existing caller reads, the same relationship
+    /// <see cref="VisiblePairs"/> has to <see cref="Pairs"/>.
+    /// </summary>
+    public IEnumerable<AccountSyncToggleViewModel> VisibleAccountSyncToggles
+        => AccountSyncToggles.Where(toggle => toggle.IsRelevant);
+
+    /// <summary>Whether any account is signed in — hides the whole toggle row when none is.</summary>
+    public bool HasVisibleAccountSyncToggles => AccountSyncToggles.Any(toggle => toggle.IsRelevant);
+
+    /// <summary>
     /// The Sync window's "filter by account" chips (docs/PLAN-CLOUD-PROVIDERS.md P9) — empty (and
     /// hidden by the view) with a single account, where every pair obviously belongs to it already,
     /// same rule <see cref="SyncPairViewModel.AccountLabel"/> itself already follows.
@@ -131,6 +154,14 @@ public sealed class SyncPanelViewModel : ObservableObject
     public IEnumerable<SyncPairViewModel> VisiblePairs
         => _providerFilter is null ? Pairs : Pairs.Where(pair => pair.AccountLabel == _providerFilter);
 
+    /// <summary>
+    /// Whether any pair needs attention, for the badge on the sync tab. Reads <see cref="Pairs"/>
+    /// and not <see cref="VisiblePairs"/> on purpose: a failure hidden by the active filter chip is
+    /// still a failure, and the whole point of the badge is to be visible from the other views
+    /// (docs/PLAN-UX-ROUND-2.md §5).
+    /// </summary>
+    public bool HasFailingPairs => Pairs.Any(pair => pair.HasFailures);
+
     public AsyncCommand AddPairCommand { get; }
 
     public AsyncCommand RefreshCommand { get; }
@@ -147,13 +178,26 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// </summary>
     public bool IsSyncInProgress => IsBusy || Pairs.Any(pair => pair.IsBusy);
 
-    public string AutomaticSyncLabel => IsAutomaticSyncRunning ? "⏸ Automatic sync: on" : "▶ Automatic sync: off";
+    public string AutomaticSyncLabel => IsAutomaticSyncRunning ? "⏸ Sincronización automática: activada" : "▶ Sincronización automática: desactivada";
 
     public string StatusMessage
     {
         get => _statusMessage;
         private set => SetProperty(ref _statusMessage, value);
     }
+
+    /// <summary>
+    /// Shown only while there are no pairs at all. It used to be the panel's initial
+    /// <see cref="StatusMessage"/>, which meant it was still on screen underneath three configured
+    /// pairs, and still named whichever account happened to be primary at startup even after the
+    /// header switched to another one — while "Agregar par" really would have created a pair on
+    /// that other account (docs/PLAN-UX-ROUND-2.md §13).
+    /// </summary>
+    public string EmptyStateMessage
+        => $"Agregá una carpeta para empezar a sincronizarla desde {ActiveSlot.DisplayName}.";
+
+    /// <summary>Whether <see cref="EmptyStateMessage"/> is worth showing.</summary>
+    public bool HasNoPairs => Pairs.Count == 0;
 
     public bool IsBusy
     {
@@ -187,6 +231,9 @@ public sealed class SyncPanelViewModel : ObservableObject
 
     /// <summary>Shown the parked conflicts; returns a decision per queue row. Forwarded to every row.</summary>
     public Func<IReadOnlyList<QueuedSyncAction>, Task<IReadOnlyDictionary<long, ConflictResolution>>>? RequestConflictResolutionsAsync { get; set; }
+
+    /// <summary>Shown a pair's failed queue rows; returns a decision per row. Forwarded to every row (docs/PLAN-UX-ROUND-2.md §6).</summary>
+    public Func<IReadOnlyList<SyncFailureViewModel>, Task<IReadOnlyDictionary<long, SyncFailureDecision>>>? RequestFailureReviewAsync { get; set; }
 
     /// <summary>Shown a pair's current direction/conflict policy; returns the new values, or null if canceled. Forwarded to every row.</summary>
     public Func<SyncPairViewModel, Task<EditSyncPairRequest?>>? RequestEditPairAsync { get; set; }
@@ -244,7 +291,7 @@ public sealed class SyncPanelViewModel : ObservableObject
             var cleared = await slot.CrashRecovery.RecoverAsync();
             if (cleared > 0)
             {
-                clearedMessages.Add($"{slot.DisplayName}: cleared {cleared} leftover download folder(s).");
+                clearedMessages.Add($"{slot.DisplayName}: se limpiaron {cleared} carpeta(s) de descarga sobrantes.");
             }
 
             // Only after recovery: starting the loop first could hand a cycle a queue whose
@@ -258,7 +305,7 @@ public sealed class SyncPanelViewModel : ObservableObject
 
         if (clearedMessages.Count > 0)
         {
-            StatusMessage = "Recovered from a previous run: " + string.Join(" ", clearedMessages);
+            StatusMessage = "Se recuperó de una ejecución anterior: " + string.Join(" ", clearedMessages);
         }
 
         RaiseAutomaticSyncState();
@@ -266,6 +313,10 @@ public sealed class SyncPanelViewModel : ObservableObject
         {
             toggle.RaiseState();
         }
+
+        // Signing in or out changes which toggles are worth showing at all, not just their state.
+        OnPropertyChanged(nameof(VisibleAccountSyncToggles));
+        OnPropertyChanged(nameof(HasVisibleAccountSyncToggles));
     }
 
     private async Task ToggleAutomaticSyncAsync()
@@ -280,13 +331,13 @@ public sealed class SyncPanelViewModel : ObservableObject
         {
             await scheduler.StopAsync();
             await Primary.StateStore.SetAutomaticSyncEnabledAsync(false);
-            StatusMessage = "Automatic sync paused. Local changes won't be picked up until you resume it.";
+            StatusMessage = "Sincronización automática en pausa. Los cambios locales no se van a tomar hasta que la reanudes.";
         }
         else
         {
             scheduler.Start();
             await Primary.StateStore.SetAutomaticSyncEnabledAsync(true);
-            StatusMessage = "Automatic sync resumed.";
+            StatusMessage = "Sincronización automática reanudada.";
         }
 
         RaiseAutomaticSyncState();
@@ -333,6 +384,7 @@ public sealed class SyncPanelViewModel : ObservableObject
         {
             RequestPreviewConfirmationAsync = RequestPreviewConfirmationAsync,
             RequestConflictResolutionsAsync = RequestConflictResolutionsAsync,
+            RequestFailureReviewAsync = RequestFailureReviewAsync,
             RequestEditAsync = RequestEditPairAsync,
             ValidateDirectionChangeAsync = async newDirection
                 => SyncPairValidator.ValidateDirectionChange(pair, newDirection, await GetAllPairsAcrossAccountsAsync()),
@@ -340,11 +392,26 @@ public sealed class SyncPanelViewModel : ObservableObject
             // fire-and-forget is fine, OnError itself is a synchronous Action<string>.
             OnError = message => _ = AlertAsync(message),
         };
+        // The tab badge is a function of every pair's failure state, so it has to follow each
+        // row's own notifications, not just the collection's.
+        viewModel.PropertyChanged += OnPairPropertyChanged;
         Pairs.Add(viewModel);
         return viewModel;
     }
 
-    private void RemovePairViewModel(SyncPairViewModel viewModel) => Pairs.Remove(viewModel);
+    private void RemovePairViewModel(SyncPairViewModel viewModel)
+    {
+        viewModel.PropertyChanged -= OnPairPropertyChanged;
+        Pairs.Remove(viewModel);
+    }
+
+    private void OnPairPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(SyncPairViewModel.HasFailures) or nameof(SyncPairViewModel.StatusText))
+        {
+            OnPropertyChanged(nameof(HasFailingPairs));
+        }
+    }
 
     /// <summary>
     /// Rebuilds the chip row from whatever is currently in <see cref="Pairs"/> — called whenever
@@ -382,14 +449,34 @@ public sealed class SyncPanelViewModel : ObservableObject
         foreach (var slot in _slots)
         {
             var count = Pairs.Count(pair => pair.AccountLabel == slot.DisplayName);
+
+            // A chip for an account with no pairs is a filter whose only outcome is an empty list.
+            // Every provider in the catalog gets a slot whether or not it is configured, so before
+            // this the row offered "OneDrive (0)" and "Google Drive (0)" next to the one account
+            // that actually had pairs (docs/PLAN-UX-ROUND-2.md §11.4).
+            if (count == 0)
+            {
+                continue;
+            }
+
             ProviderFilters.Add(new ProviderFilterViewModel(slot.DisplayName, count, ApplyProviderFilterAsync, ReportError)
             {
                 IsActive = _providerFilter == slot.DisplayName,
             });
         }
 
+        // With only one account actually holding pairs, "Todos (3) | Proton Drive (3)" offers a
+        // choice between two identical lists. Same reasoning as the single-account gate above,
+        // just applied to accounts that *have* pairs rather than accounts that exist.
+        if (ProviderFilters.Count <= 2)
+        {
+            ProviderFilters.Clear();
+            _providerFilter = null;
+        }
+
         OnPropertyChanged(nameof(VisiblePairs));
         OnPropertyChanged(nameof(HasProviderFilters));
+        OnPropertyChanged(nameof(HasFailingPairs));
     }
 
     private Task ApplyProviderFilterAsync(string? accountLabel)
@@ -416,7 +503,7 @@ public sealed class SyncPanelViewModel : ObservableObject
         var requester = RequestNewPairAsync;
         if (requester is null)
         {
-            StatusMessage = "Adding a sync pair is not available.";
+            StatusMessage = "Agregar un par de sincronización no está disponible.";
             return;
         }
 
@@ -447,17 +534,17 @@ public sealed class SyncPanelViewModel : ObservableObject
 
             if (!await ConfirmBusyFolderAsync(request, targetSlot))
             {
-                StatusMessage = "Cancelled — no pair was created.";
+                StatusMessage = "Cancelado — no se creó ningún par.";
                 return;
             }
 
             var pair = await targetSlot.StateStore.CreatePairAsync(request.RemotePath, request.LocalPath, request.Direction, request.ConflictPolicy, mirrorDeletes: request.MirrorDeletes);
             AddPairViewModel(pair, targetSlot);
-            StatusMessage = $"Added: {pair.RemotePath} {DirectionArrow(pair.Direction)} {pair.LocalPath}";
+            StatusMessage = $"Agregado: {pair.RemotePath} {DirectionArrow(pair.Direction)} {pair.LocalPath}";
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 19) // SQLITE_CONSTRAINT (the pair's UNIQUE(RemotePath, LocalPath))
         {
-            StatusMessage = "That remote/local combination is already a sync pair.";
+            StatusMessage = "Esa combinación remoto/local ya es un par de sincronización.";
         }
         finally
         {
@@ -492,8 +579,8 @@ public sealed class SyncPanelViewModel : ObservableObject
         }
 
         return await confirm(
-            $"'{request.LocalPath}' already contains more than {LocalFolderInspector.BusyFolderThreshold} items. " +
-            $"Syncing it in this direction will upload all of them to {targetSlot.DisplayName}. Continue?");
+            $"'{request.LocalPath}' ya contiene más de {LocalFolderInspector.BusyFolderThreshold} elementos. " +
+            $"Sincronizarla en esta dirección va a subirlos todos a {targetSlot.DisplayName}. ¿Continuar?");
     }
 
     /// <summary>
@@ -520,6 +607,45 @@ public sealed class SyncPanelViewModel : ObservableObject
     public SyncPairViewModel? FindPairByLocalPath(string localPath)
         => Pairs.FirstOrDefault(pair => PathsEqual(pair.LocalPath, localPath));
 
+    /// <summary>
+    /// The pair that <paramref name="remotePath"/> lives inside — the pair root itself, or any
+    /// descendant of it. <see cref="FindPairByRemotePath"/> only matches the root exactly, which is
+    /// all the row badges need; the properties dialog needs to answer "is this file synced, and to
+    /// where" for a file several folders deep (docs/PLAN-UX-ROUND-2.md §12).
+    ///
+    /// The longest matching root wins, so a nested pair beats the outer one it sits inside.
+    /// </summary>
+    public SyncPairViewModel? FindPairContainingRemotePath(string remotePath)
+        => Pairs
+            .Where(pair => IsAtOrUnder(remotePath, pair.RemotePath))
+            .OrderByDescending(pair => pair.RemotePath.Length)
+            .FirstOrDefault();
+
+    /// <summary>The local-side counterpart of <see cref="FindPairContainingRemotePath"/>.</summary>
+    public SyncPairViewModel? FindPairContainingLocalPath(string localPath)
+        => Pairs
+            .Where(pair => IsAtOrUnder(localPath, pair.LocalPath))
+            .OrderByDescending(pair => pair.LocalPath.Length)
+            .FirstOrDefault();
+
+    // Segment-wise, not a bare StartsWith: "/my-files/Libros2" must not count as living inside
+    // "/my-files/Libros".
+    private static bool IsAtOrUnder(string path, string root)
+    {
+        var trimmedPath = path.TrimEnd('/', '\\');
+        var trimmedRoot = root.TrimEnd('/', '\\');
+
+        if (string.Equals(trimmedPath, trimmedRoot, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // Accept either separator so the same check serves the remote (always '/') and local
+        // (OS-native) sides without either caller having to normalise first.
+        return trimmedPath.StartsWith(trimmedRoot + "/", StringComparison.Ordinal)
+            || trimmedPath.StartsWith(trimmedRoot + "\\", StringComparison.Ordinal);
+    }
+
     private static bool PathsEqual(string a, string b)
         => string.Equals(a.TrimEnd('/', '\\'), b.TrimEnd('/', '\\'), StringComparison.Ordinal);
 
@@ -530,5 +656,5 @@ public sealed class SyncPanelViewModel : ObservableObject
         _ => "↔",
     };
 
-    private void ReportError(Exception ex) => StatusMessage = $"Unexpected error: {ex.Message}";
+    private void ReportError(Exception ex) => StatusMessage = $"Error inesperado: {ex.Message}";
 }

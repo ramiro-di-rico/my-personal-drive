@@ -102,38 +102,109 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         Assert.True(sut.IsSystemTheme);
     }
 
+    // Asserts on ConnectionStatusKind, not ConnectionStatus: the kind is the stable token the view
+    // binds its classes to, while the status text is user-facing copy that U4 translated. Testing
+    // the copy made these tests fail on a pure wording change (docs/PLAN-UX-ROUND-2.md §2).
     [Fact]
     public void ConnectionTelemetry_ReflectsOnlineAndDisconnectedStates()
     {
         var sutAuthenticated = Build(isAuthenticated: true);
-        Assert.Equal("Online", sutAuthenticated.ConnectionStatus);
+        Assert.Equal("Online", sutAuthenticated.ConnectionStatusKind);
         Assert.True(sutAuthenticated.IsOnline);
         Assert.False(sutAuthenticated.IsDisconnected);
+        Assert.False(sutAuthenticated.IsConnectionActionable);
 
         var sutDisconnected = Build(isAuthenticated: false);
-        Assert.Equal("Disconnected", sutDisconnected.ConnectionStatus);
+        Assert.Equal("Disconnected", sutDisconnected.ConnectionStatusKind);
         Assert.True(sutDisconnected.IsDisconnected);
         Assert.False(sutDisconnected.IsOnline);
+        Assert.True(sutDisconnected.IsConnectionActionable);
     }
 
     [Fact]
     public void ConnectionTelemetry_ReflectsRateLimitedWarning()
     {
         var sut = Build(isAuthenticated: true);
-        Assert.Equal("Online", sut.ConnectionStatus);
+        Assert.Equal("Online", sut.ConnectionStatusKind);
 
         sut.StatusMessage = "Rate limit exceeded (HTTP 429). Please wait.";
         // Setting StatusMessage cleared IsWarning; telemetry classifies off the typed DriveErrorKind
         // a real DriveException(Kind: RateLimited) would have left in _lastErrorKind, not off this
         // message text, so simulate both directly.
-        typeof(MainWindowViewModel).GetField("_lastErrorKind", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .SetValue(sut, DriveErrorKind.RateLimited);
-        typeof(MainWindowViewModel).GetProperty("IsWarning", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .SetValue(sut, true);
-        sut.UpdateConnectionTelemetry();
+        SetErrorKind(sut, DriveErrorKind.RateLimited);
+        SetWarning(sut);
 
-        Assert.Equal("Rate-Limited", sut.ConnectionStatus);
+        Assert.Equal("RateLimited", sut.ConnectionStatusKind);
         Assert.True(sut.IsRateLimited);
+    }
+
+    // U2: the header used to keep saying "Online" while the body reported a failed load, because
+    // only RateLimited had a branch. Any failure of the connection itself now demotes the badge.
+    [Theory]
+    [InlineData(DriveErrorKind.Network)]
+    [InlineData(DriveErrorKind.Timeout)]
+    [InlineData(DriveErrorKind.NotAuthenticated)]
+    [InlineData(DriveErrorKind.PermissionDenied)]
+    [InlineData(DriveErrorKind.Busy)]
+    public void ConnectionTelemetry_DemotesToDegraded_WhenAConnectionFailureIsStanding(DriveErrorKind kind)
+    {
+        var sut = Build(isAuthenticated: true);
+        Assert.Equal("Online", sut.ConnectionStatusKind);
+
+        sut.StatusMessage = "Failed to load /my-files: Invalid access token";
+        SetErrorKind(sut, kind);
+        SetWarning(sut);
+
+        Assert.Equal("Degraded", sut.ConnectionStatusKind);
+        Assert.True(sut.IsDegraded);
+        Assert.False(sut.IsOnline);
+        Assert.True(sut.IsConnectionActionable);
+    }
+
+    // A path that no longer exists says nothing about the connection — the badge must stay Online,
+    // or every stale bookmark would look like an outage.
+    [Fact]
+    public void ConnectionTelemetry_StaysOnline_WhenTheFailureIsAboutOnePath()
+    {
+        var sut = Build(isAuthenticated: true);
+
+        sut.StatusMessage = "Warning: The path '/my-files/gone' no longer exists.";
+        SetErrorKind(sut, DriveErrorKind.NotFound);
+        SetWarning(sut);
+
+        Assert.Equal("Online", sut.ConnectionStatusKind);
+        Assert.False(sut.IsConnectionActionable);
+    }
+
+    // U1: a warning the user cannot act on is a dead end. An expired session offers sign-in;
+    // anything else offers a retry.
+    [Fact]
+    public void StatusAction_OffersReconnect_WhenTheSessionExpired()
+    {
+        var sut = Build(isAuthenticated: true);
+        Assert.False(sut.HasStatusAction);
+
+        sut.StatusMessage = "Failed to load /my-files: Invalid access token";
+        SetErrorKind(sut, DriveErrorKind.NotAuthenticated);
+        SetWarning(sut);
+
+        Assert.True(sut.HasStatusAction);
+        Assert.Equal("Reconectar", sut.StatusActionLabel);
+        Assert.Same(sut.AuthenticateCommand, sut.StatusActionCommand);
+    }
+
+    [Fact]
+    public void StatusAction_OffersRetry_ForATransientFailure()
+    {
+        var sut = Build(isAuthenticated: true);
+
+        sut.StatusMessage = "Failed to load /my-files: connection reset";
+        SetErrorKind(sut, DriveErrorKind.Network);
+        SetWarning(sut);
+
+        Assert.True(sut.HasStatusAction);
+        Assert.Equal("Reintentar", sut.StatusActionLabel);
+        Assert.Same(sut.RefreshCommand, sut.StatusActionCommand);
     }
 
     [Fact]
@@ -143,9 +214,9 @@ public class MainWindowHeaderTelemetryTests : IDisposable
 
         var items = new List<DriveItem>
         {
-            new DriveItem("file1.pdf", "/my-files/file1.pdf", false, 1024 * 1024 * 100), // 100 MB
-            new DriveItem("file2.zip", "/my-files/file2.zip", false, 1024 * 1024 * 200), // 200 MB
-            new DriveItem("Docs", "/my-files/Docs", true, null)
+            new DriveItem("/my-files/file1.pdf", "file1.pdf", false, 1024 * 1024 * 100), // 100 MB
+            new DriveItem("/my-files/file2.zip", "file2.zip", false, 1024 * 1024 * 200), // 200 MB
+            new DriveItem("/my-files/Docs", "Docs", true, null)
         };
 
         sut.DisplayItems(items);
@@ -153,8 +224,92 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         Assert.Equal(1024 * 1024 * 300, sut.QuotaUsedBytes); // 300 MB
         Assert.Equal(500L * 1024 * 1024 * 1024, sut.QuotaTotalBytes); // 500 GB
         Assert.True(sut.QuotaPercent > 0.0);
+        Assert.True(sut.IsQuotaUsageKnown);
         Assert.Contains("300", sut.QuotaDisplay);
         Assert.Contains("500", sut.QuotaDisplay);
+
+        // A folder is present, so the sum covers the root's own files only — a lower bound, and
+        // labelled as one rather than dressed up with a percentage (U3).
+        Assert.StartsWith("≥", sut.QuotaDisplay);
+        Assert.DoesNotContain("%", sut.QuotaDisplay);
+    }
+
+    // The bug U3 fixes: files whose size the provider never reported summed to 0, and the header
+    // announced "0 B / 500 GB (0% used)" above a folder full of them.
+    [Fact]
+    public void StorageQuota_ReportsUnknown_WhenNoFileHasASize()
+    {
+        var sut = Build();
+
+        sut.DisplayItems(new List<DriveItem>
+        {
+            new DriveItem("/my-files/Notas.gdoc", "Notas.gdoc", false, null),
+            new DriveItem("/my-files/Plan.gsheet", "Plan.gsheet", false, null)
+        });
+
+        Assert.False(sut.IsQuotaUsageKnown);
+        Assert.Equal(0.0, sut.QuotaPercent);
+        Assert.StartsWith("—", sut.QuotaDisplay);
+        Assert.DoesNotContain("0 B", sut.QuotaDisplay);
+    }
+
+    // ...but a genuinely empty root is a real zero, and must not be hidden behind the em dash.
+    [Fact]
+    public void StorageQuota_ReportsAnExactZero_WhenTheRootIsActuallyEmpty()
+    {
+        var sut = Build();
+
+        sut.DisplayItems(new List<DriveItem>());
+
+        Assert.True(sut.IsQuotaUsageKnown);
+        Assert.Equal(0, sut.QuotaUsedBytes);
+        Assert.Contains("0 B", sut.QuotaDisplay);
+        Assert.Contains("%", sut.QuotaDisplay);
+    }
+
+    private static void SetErrorKind(MainWindowViewModel sut, DriveErrorKind kind)
+        => typeof(MainWindowViewModel)
+            .GetField("_lastErrorKind", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(sut, kind);
+
+    private static void SetWarning(MainWindowViewModel sut)
+    {
+        typeof(MainWindowViewModel)
+            .GetProperty("IsWarning", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(sut, true);
+        sut.UpdateConnectionTelemetry();
+    }
+
+    // U9 (docs/PLAN-UX-ROUND-2.md §9): the search box hid rows without saying how many it hid, and
+    // the only way back was selecting the text and deleting it.
+    [Fact]
+    public async Task Search_ReportsItsResultCount_AndCanBeCleared()
+    {
+        var sut = Build();
+        sut.DisplayItems(new List<DriveItem>
+        {
+            new DriveItem("/my-files/informe.pdf", "informe.pdf", false, 10),
+            new DriveItem("/my-files/informe-final.pdf", "informe-final.pdf", false, 20),
+            new DriveItem("/my-files/fotos", "fotos", true, null),
+        });
+
+        // Nothing typed: no count label and nothing to clear, so neither costs any space.
+        Assert.False(sut.HasSearchText);
+        Assert.Equal(string.Empty, sut.SearchResultText);
+        Assert.False(sut.ClearSearchCommand.CanExecute(null));
+
+        sut.SearchText = "informe";
+        Assert.True(sut.HasSearchText);
+        Assert.Equal("2 resultados", sut.SearchResultText);
+        Assert.True(sut.ClearSearchCommand.CanExecute(null));
+
+        sut.SearchText = "informe-final";
+        Assert.Equal("1 resultado", sut.SearchResultText);
+
+        await sut.ClearSearchCommand.ExecuteAsync();
+        Assert.Equal(string.Empty, sut.SearchText);
+        Assert.False(sut.HasSearchText);
+        Assert.Equal(3, sut.RootItems.Count);
     }
 
     [Fact]
@@ -171,6 +326,48 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         Assert.False(sut.IsSettingsView);
     }
 
+    // U5: three views, one value. The pair of booleans this replaced could represent "both" and
+    // "neither", and neither is a screen (docs/PLAN-UX-ROUND-2.md §5).
+    [Fact]
+    public async Task TopLevelViews_AreMutuallyExclusive()
+    {
+        var sut = Build();
+
+        Assert.Equal(MainView.Explorer, sut.ActiveView);
+        AssertExactlyOneViewIsActive(sut);
+
+        await sut.ShowSyncCommand.ExecuteAsync();
+        Assert.Equal(MainView.Sync, sut.ActiveView);
+        Assert.True(sut.IsSyncView);
+        AssertExactlyOneViewIsActive(sut);
+
+        await sut.ShowSettingsCommand.ExecuteAsync();
+        Assert.Equal(MainView.Settings, sut.ActiveView);
+        AssertExactlyOneViewIsActive(sut);
+
+        await sut.ShowExplorerCommand.ExecuteAsync();
+        Assert.Equal(MainView.Explorer, sut.ActiveView);
+        AssertExactlyOneViewIsActive(sut);
+    }
+
+    // The Ctrl+, toggle predates the sync view; leaving sync must land on the explorer, not
+    // silently keep the user where they were.
+    [Fact]
+    public async Task SettingsShortcut_FromTheSyncView_OpensSettings_ThenReturnsToTheExplorer()
+    {
+        var sut = Build();
+        await sut.ShowSyncCommand.ExecuteAsync();
+
+        await sut.ToggleSettingsCommand.ExecuteAsync();
+        Assert.True(sut.IsSettingsView);
+
+        await sut.ToggleSettingsCommand.ExecuteAsync();
+        Assert.True(sut.IsExplorerView);
+    }
+
+    private static void AssertExactlyOneViewIsActive(MainWindowViewModel sut)
+        => Assert.Equal(1, new[] { sut.IsExplorerView, sut.IsSyncView, sut.IsSettingsView }.Count(active => active));
+
     [Fact]
     public void SettingsShortcut_KeyGesturesAreValid()
     {
@@ -182,6 +379,76 @@ public class MainWindowHeaderTelemetryTests : IDisposable
 
         Assert.Equal(Avalonia.Input.Key.OemComma, cmdGesture.Key);
         Assert.Equal(Avalonia.Input.KeyModifiers.Meta, cmdGesture.KeyModifiers);
+    }
+
+    // U8 (docs/PLAN-UX-ROUND-2.md §8): the Conexión tabs used to bind only Is*Active, so a provider
+    // that had never been configured was indistinguishable from a signed-in one.
+    [Fact]
+    public void ProviderTabs_ExposeAuthState_SeparatelyFromWhichTabIsSelected()
+    {
+        var sut = Build(isAuthenticated: true);
+
+        // Proton is both the active provider and the authenticated one...
+        Assert.True(sut.IsProtonActive);
+        Assert.True(sut.IsProtonAuthenticated);
+
+        // ...while the rest are neither: selection and session are different axes.
+        Assert.False(sut.IsOneDriveActive);
+        Assert.False(sut.IsOneDriveAuthenticated);
+        Assert.False(sut.IsGoogleDriveAuthenticated);
+        Assert.False(sut.IsNextcloudAuthenticated);
+        Assert.False(sut.IsS3Authenticated);
+    }
+
+    [Fact]
+    public void ProviderTabs_ReadTheActiveProvidersLiveAuthState_NotOnlyThePersistedFlag()
+    {
+        var sut = Build(isAuthenticated: false);
+
+        Assert.True(sut.IsProtonActive);
+        Assert.False(sut.IsProtonAuthenticated);
+    }
+
+    // Regression, reported live (docs/PLAN-UX-ROUND-2.md §11): the header ComboBox went blank
+    // after signing in. AvailableProviders is updated in place, and Avalonia clears the selection
+    // when the *selected element* is replaced; the two-way binding then wrote -1 back, the setter
+    // correctly ignored it, and nothing pushed the real index out again. The sign-in path was the
+    // one call site that did not re-raise SelectedProviderIndex, so the raise moved inside
+    // RefreshAvailableProviders where no caller can forget it.
+    [Fact]
+    public void RefreshingTheProviderList_ReRaisesTheSelectedIndex_SoTheComboBoxCanResync()
+    {
+        var sut = Build(isAuthenticated: false);
+        var raised = new List<string>();
+        sut.PropertyChanged += (_, e) => raised.Add(e.PropertyName ?? string.Empty);
+
+        // Any auth-state change refreshes the list, replacing element 0 — the selected one.
+        typeof(MainWindowViewModel)
+            .GetProperty("IsAuthenticated", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(sut, true);
+        typeof(MainWindowViewModel)
+            .GetMethod("RefreshAvailableProviders", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .Invoke(sut, null);
+
+        Assert.Contains(nameof(MainWindowViewModel.SelectedProviderIndex), raised);
+        Assert.Contains(nameof(MainWindowViewModel.SelectedProvider), raised);
+
+        // And the index it re-publishes is the real one, not the -1 the control wrote back.
+        Assert.Equal(0, sut.SelectedProviderIndex);
+        Assert.Equal(ProviderId.Proton, sut.SelectedProvider!.Id);
+    }
+
+    // The setter must keep ignoring the -1 the control writes when it clears its own selection:
+    // that is the control reporting its state, not the user choosing "no provider".
+    [Fact]
+    public void SelectedProviderIndex_IgnoresAnOutOfRangeWriteBack()
+    {
+        var sut = Build(isAuthenticated: true);
+
+        sut.SelectedProviderIndex = -1;
+
+        Assert.Equal(0, sut.SelectedProviderIndex);
+        Assert.Equal(ProviderId.Proton, sut.SelectedProvider!.Id);
     }
 
     [Fact]

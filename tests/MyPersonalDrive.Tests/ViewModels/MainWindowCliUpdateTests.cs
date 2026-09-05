@@ -106,7 +106,7 @@ public class MainWindowCliUpdateTests : IDisposable
         await viewModel.CheckForCliUpdateCommand.ExecuteAsync();
 
         Assert.False(viewModel.IsCliUpdateAvailable);
-        Assert.Contains("Up to date", viewModel.CliUpdateStatus);
+        Assert.Contains("Al día", viewModel.CliUpdateStatus);
     }
 
     /// <summary>
@@ -123,7 +123,7 @@ public class MainWindowCliUpdateTests : IDisposable
 
         Assert.False(viewModel.IsCliUpdateAvailable);
         Assert.False(viewModel.InstallCliUpdateCommand.CanExecute(null));
-        Assert.Contains("could not be read", viewModel.CliUpdateStatus);
+        Assert.Contains("no se pudo leer la versión instalada", viewModel.CliUpdateStatus);
     }
 
     [Fact]
@@ -135,7 +135,7 @@ public class MainWindowCliUpdateTests : IDisposable
         await viewModel.CheckForCliUpdateCommand.ExecuteAsync();
 
         Assert.False(viewModel.IsCliUpdateAvailable);
-        Assert.Contains("Could not reach", viewModel.CliUpdateStatus);
+        Assert.Contains("No se pudo acceder", viewModel.CliUpdateStatus);
     }
 
     [Fact]
@@ -147,7 +147,7 @@ public class MainWindowCliUpdateTests : IDisposable
         await viewModel.CheckForCliUpdateCommand.ExecuteAsync();
 
         Assert.False(viewModel.IsCliUpdateAvailable);
-        Assert.Contains("no Stable build", viewModel.CliUpdateStatus);
+        Assert.Contains("no publica una compilación Stable", viewModel.CliUpdateStatus);
     }
 
     [Fact]
@@ -184,7 +184,7 @@ public class MainWindowCliUpdateTests : IDisposable
         Assert.Equal(payload, await File.ReadAllTextAsync(target));
         Assert.Equal("Proton Drive CLI cli-drive@0.7.0+aabbccdd", viewModel.CliVersion);
         Assert.False(viewModel.IsCliUpdateAvailable);
-        Assert.Contains("Updated to 0.7.0", viewModel.CliUpdateStatus);
+        Assert.Contains("Se actualizó a 0.7.0", viewModel.CliUpdateStatus);
     }
 
     [Fact]
@@ -201,7 +201,7 @@ public class MainWindowCliUpdateTests : IDisposable
         await viewModel.CheckForCliUpdateCommand.ExecuteAsync();
         await viewModel.InstallCliUpdateCommand.ExecuteAsync();
 
-        Assert.Contains("Checksum mismatch", viewModel.CliUpdateStatus);
+        Assert.Contains("checksum", viewModel.CliUpdateStatus);
         Assert.Equal("old binary", await File.ReadAllTextAsync(target));
     }
 
@@ -226,7 +226,7 @@ public class MainWindowCliUpdateTests : IDisposable
         syncing = true;
         await viewModel.InstallCliUpdateCommand.ExecuteAsync();
 
-        Assert.Contains("A sync is running", viewModel.CliUpdateStatus);
+        Assert.Contains("Hay una sincronización en curso", viewModel.CliUpdateStatus);
         Assert.Equal("old binary", await File.ReadAllTextAsync(target));
     }
 }

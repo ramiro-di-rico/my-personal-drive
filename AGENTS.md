@@ -27,6 +27,7 @@ one-line description.
 | [`cli-command`](.claude/skills/cli-command/SKILL.md) | Adding or changing a `proton-drive` command: service method, parsing, error kind, tests |
 | [`add-feature`](.claude/skills/add-feature/SKILL.md) | Adding UI: view, panel, button, or any user-facing action (MVVM rules) |
 | [`add-cloud-provider`](.claude/skills/add-cloud-provider/SKILL.md) | Planning and implementing a new cloud storage backend behind `ICloudDriveProvider` |
+| [`add-language`](.claude/skills/add-language/SKILL.md) | Adding a UI language, or filling in a locale that fell behind English |
 | [`release-linux`](.claude/skills/release-linux/SKILL.md) | Cutting a Linux release or producing an installable artifact |
 | [`aot-check`](.claude/skills/aot-check/SKILL.md) | After touching serialization, reflection, packages, or bindings; before a release |
 | [`run-app`](.claude/skills/run-app/SKILL.md) | Running the app for real, with the real CLI or a stub |

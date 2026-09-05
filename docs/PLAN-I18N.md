@@ -16,7 +16,7 @@
 
 ## Status
 
-> **L0-L3 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
+> **L0-L4 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
 > passing (from 1001). The AOT publish is clean — only the five warnings that predate this work —
 > and both locales are verifiably embedded in the single-file binary. **Not visually verified: this
 > environment has no working screenshot tool** (GNOME refuses `ScreenshotWindow` over D-Bus), so
@@ -54,7 +54,15 @@
       `"operación(es) activa(s)"` plural hack, now `Localizer.Plural`). What is left in the file is
       exactly L9's intended allowlist: the `DRIVE` wordmark, a `·` separator, and the five provider
       names.
-- [ ] **L4 — Code-built dialogs (`MainWindow.axaml.cs`).** Not started.
+- [x] **L4 — Code-built dialogs (`MainWindow.axaml.cs`).** Every user-facing string in the file:
+      the six platform pickers, the rename/new-folder/copy prompts, the upload-conflict picker, the
+      add/edit sync pair form and its remote folder browser, the sync preview, the conflict and
+      failure resolution dialogs, properties, and the generic confirm/alert. Dialogs are built on
+      demand, so nothing here needed a language-change subscription. The one design decision is the
+      preview summary — see [§6.4](#64-l4s-one-design-decision-the-preview-summarys-two-counts).
+      Two findings parked rather than fixed inline:
+      [PLAN-TECH-DEBT.md](PLAN-TECH-DEBT.md) **B6.3** (the sync dialogs name Proton Drive whichever
+      provider is syncing) and **B6.4** (a second byte formatter disagreeing with `ByteSize`).
 - [ ] **L5 — `MainWindowViewModel`.** Not started.
 - [ ] **L6 — Sync surface.** Not started.
 - [ ] **L7 — Service-layer messages → typed reasons.** Not started.
@@ -428,6 +436,20 @@ Mechanical, but two rules:
 Dialog titles, body copy, button captions, file-picker filter names. These are built and shown
 immediately, so `Loc.T(key)` at the call site is correct with no lifetime concern. Cheap phase;
 do it before L5 to get the `common.*` dialog vocabulary settled.
+
+### 6.4 L4's one design decision: the preview summary's two counts
+
+The sync preview's three summary lines each carried *two* counts in one sentence —
+`"↓ {n} archivo(s) a descargar ({size}), {m} carpeta(s) a crear localmente."`. The `(s)` hack is
+Spanish-specific and no other language can reproduce it, but the deeper problem is that a single
+format string cannot make two different counts agree independently: at 1 file and 3 folders, no
+one wording is correct.
+
+Each count became its own clause with its own plural lookup, joined with `", "` in code (a local
+`TwoClauses` helper), with the trailing period living in the second clause. This is a small
+concession — the joining comma is not itself translatable — and the honest alternative, a full
+message-format grammar with nested plurals, is far more machinery than nine sentences justify.
+Revisit only if a language arrives where the clause order has to change.
 
 ### 6.2 L5 — `MainWindowViewModel` (~292 strings)
 

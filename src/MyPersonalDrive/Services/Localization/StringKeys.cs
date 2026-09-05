@@ -27,6 +27,134 @@ public static class StringKeys
         public const string Path = "common.path";
         public const string Owner = "common.owner";
         public const string Shared = "common.shared";
+
+        // Dialog buttons. One vocabulary for all of them — the code-built dialogs each used to
+        // spell their own.
+        public const string Ok = "common.ok";
+        public const string Continue = "common.continue";
+        public const string Apply = "common.apply";
+        public const string Save = "common.save";
+        public const string Create = "common.create";
+        public const string Copy = "common.copy";
+        public const string Copied = "common.copied";
+        public const string Close = "common.close";
+        public const string Browse = "common.browse";
+        public const string Add = "common.add";
+
+        /// <summary>Plural prefix — the "… and N more" tail on a truncated list.</summary>
+        public const string More = "common.more";
+    }
+
+    /// <summary>The drag-and-drop overlays (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5).</summary>
+    public static class Drop
+    {
+        public const string UploadTo = "drop.uploadto";
+        public const string DownloadTo = "drop.downloadto";
+        public const string CurrentFolder = "drop.currentfolder";
+        public const string Error = "drop.error";
+    }
+
+    /// <summary>Titles of the platform file/folder pickers.</summary>
+    public static class Picker
+    {
+        public const string CliPathTitle = "picker.clipath.title";
+        public const string DefaultSyncFolderTitle = "picker.defaultsyncfolder.title";
+        public const string UploadTitle = "picker.upload.title";
+        public const string DownloadFolderTitle = "picker.downloadfolder.title";
+        public const string SaveLogTitle = "picker.savelog.title";
+        public const string LocalSyncFolderTitle = "picker.localsyncfolder.title";
+    }
+
+    /// <summary>The dialogs built in <c>MainWindow.axaml.cs</c> rather than in markup.</summary>
+    public static class Dialog
+    {
+        public const string RenameTitle = "dialog.rename.title";
+        public const string RenamePrompt = "dialog.rename.prompt";
+
+        public const string NewFolderTitle = "dialog.newfolder.title";
+        public const string NewFolderPrompt = "dialog.newfolder.prompt";
+        public const string NewFolderPlaceholder = "dialog.newfolder.placeholder";
+
+        public const string CopyPrompt = "dialog.copy.prompt";
+        public const string CopyPlaceholder = "dialog.copy.placeholder";
+
+        public const string UploadConflictTitle = "dialog.uploadconflict.title";
+        public const string UploadConflictIntro = "dialog.uploadconflict.intro";
+        public const string UploadConflictQuestion = "dialog.uploadconflict.question";
+        public const string UploadConflictKeepBoth = "dialog.uploadconflict.keepboth";
+        public const string UploadConflictReplace = "dialog.uploadconflict.replace";
+        public const string UploadConflictSkip = "dialog.uploadconflict.skip";
+
+        public const string PairAddTitle = "dialog.pair.add.title";
+        public const string PairEditTitle = "dialog.pair.edit.title";
+        public const string PairRemotePathLabel = "dialog.pair.remotepath.label";
+        public const string PairLocalFolderLabel = "dialog.pair.localfolder.label";
+        public const string PairLocalFolderPlaceholder = "dialog.pair.localfolder.placeholder";
+        public const string PairDirectionLabel = "dialog.pair.direction.label";
+        public const string PairDirectionDownload = "dialog.pair.direction.download";
+        public const string PairDirectionUpload = "dialog.pair.direction.upload";
+        public const string PairDirectionTwoWay = "dialog.pair.direction.twoway";
+        public const string PairPolicyLabel = "dialog.pair.policy.label";
+        public const string PairPolicyAsk = "dialog.pair.policy.ask";
+        public const string PairPolicyKeepBoth = "dialog.pair.policy.keepboth";
+        public const string PairPolicyPreferLocal = "dialog.pair.policy.preferlocal";
+        public const string PairPolicyPreferRemote = "dialog.pair.policy.preferremote";
+        public const string PairMirrorDeletes = "dialog.pair.mirrordeletes";
+
+        public const string RemoteBrowserTitle = "dialog.remotebrowser.title";
+        public const string RemoteBrowserUp = "dialog.remotebrowser.up";
+        public const string RemoteBrowserSelect = "dialog.remotebrowser.select";
+        public const string RemoteBrowserBack = "dialog.remotebrowser.back";
+        public const string RemoteBrowserEmpty = "dialog.remotebrowser.empty";
+        public const string RemoteBrowserError = "dialog.remotebrowser.error";
+        public const string RemoteBrowserFolder = "dialog.remotebrowser.folder";
+
+        public const string PreviewTitle = "dialog.preview.title";
+
+        // Plural prefixes. The summary used to be three sentences with "archivo(s)"/"carpeta(s)"
+        // baked in — a hack no other language can reproduce. Each count is now its own clause so
+        // each can agree on its own; the clauses are joined in code (docs/PLAN-I18N.md §6.3).
+        public const string PreviewDownloadFiles = "dialog.preview.download.files";
+        public const string PreviewDownloadFolders = "dialog.preview.download.folders";
+        public const string PreviewUploadFiles = "dialog.preview.upload.files";
+        public const string PreviewUploadFolders = "dialog.preview.upload.folders";
+        public const string PreviewTrashLocal = "dialog.preview.trash.local";
+        public const string PreviewTrashRemote = "dialog.preview.trash.remote";
+        public const string PreviewMovedLocally = "dialog.preview.movedlocally";
+        public const string PreviewMovedRemotely = "dialog.preview.movedremotely";
+        public const string PreviewConflicts = "dialog.preview.conflicts";
+
+        public const string PreviewWarning = "dialog.preview.warning";
+        public const string PreviewNoActionsConflicts = "dialog.preview.noactions.conflicts";
+        public const string PreviewNoActionsUpToDate = "dialog.preview.noactions.uptodate";
+        public const string PreviewAction = "dialog.preview.action";
+
+        /// <summary>Plural prefix; the one-form deliberately ignores the count.</summary>
+        public const string ConflictsTitle = "dialog.conflicts.title";
+        public const string ConflictsIntro = "dialog.conflicts.intro";
+        public const string ConflictsChoiceLater = "dialog.conflicts.choice.later";
+        public const string ConflictsChoiceKeepBoth = "dialog.conflicts.choice.keepboth";
+        public const string ConflictsChoiceKeepLocal = "dialog.conflicts.choice.keeplocal";
+        public const string ConflictsChoiceKeepRemote = "dialog.conflicts.choice.keepremote";
+        public const string ConflictsReasonBothChanged = "dialog.conflicts.reason.bothchanged";
+        public const string ConflictsReasonBothAppeared = "dialog.conflicts.reason.bothappeared";
+        public const string ConflictsReasonRemoteDeleted = "dialog.conflicts.reason.remotedeleted";
+        public const string ConflictsReasonLocalDeleted = "dialog.conflicts.reason.localdeleted";
+        public const string ConflictsReasonDefault = "dialog.conflicts.reason.default";
+
+        /// <summary>Plural prefix; the one-form deliberately ignores the count.</summary>
+        public const string FailuresTitle = "dialog.failures.title";
+        public const string FailuresIntro = "dialog.failures.intro";
+        public const string FailuresChoiceLeave = "dialog.failures.choice.leave";
+        public const string FailuresChoiceRetry = "dialog.failures.choice.retry";
+        public const string FailuresChoiceDiscard = "dialog.failures.choice.discard";
+        public const string FailuresRetryAll = "dialog.failures.retryall";
+
+        public const string PropertiesTitle = "dialog.properties.title";
+        public const string PropertiesField = "dialog.properties.field";
+
+        public const string ConfirmTitle = "dialog.confirm.title";
+        public const string AlertTitle = "dialog.alert.title";
     }
 
     public static class Header

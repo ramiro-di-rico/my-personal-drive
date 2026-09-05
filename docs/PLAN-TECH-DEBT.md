@@ -31,6 +31,10 @@
       `scripts/run-tests.sh`. Not yet covered: `DriveCacheService`, `PathMapper`-equivalent
       (doesn't exist until sync work starts).
 - [ ] **B4 (persistence/state), B5 (async lifecycle), B6 (observability)** — not started.
+- [ ] **B6.3** — the sync preview/conflict dialogs name Proton Drive whichever provider is
+      syncing. Found during [PLAN-I18N.md](PLAN-I18N.md) L4; see §8.
+- [ ] **B6.4** — a second byte formatter in `MainWindow.axaml.cs` disagreeing with
+      `Services/ByteSize`. Fold in during PLAN-I18N.md L8; see §8.
 
 ---
 
@@ -488,6 +492,44 @@ path for no reason.
   `StringBuilder` and rebuild on a 100 ms timer.
 - Move `RaiseCommandStates()` out of the per-line path — only `DownloadActivityCommand` and
   `ClearActivityCommand` depend on the line count, and only on the empty/non-empty transition.
+
+### B6.3 — The sync dialogs name Proton Drive regardless of which provider is syncing
+
+**Where:** `src/MyPersonalDrive/Views/MainWindow.axaml.cs` — `ShowPreviewAsync`,
+`ShowConflictsAsync` and `DescribeReason`; the strings now live in
+`Services/Localization/Locales/*.json` under `dialog.preview.*` and `dialog.conflicts.*`.
+
+**What goes wrong:** the sync preview says "to Proton's trash" and "moved on Proton Drive to
+follow this machine", the conflict picker offers "Keep the Proton Drive version", and every
+`DescribeReason` sentence names Proton. Sync a OneDrive or Google Drive pair and the dialogs
+still say Proton Drive — the user is told the wrong service is about to trash their files. This
+predates the localization work (PLAN-CLOUD-PROVIDERS.md P7 made the app multi-provider without
+revisiting these sentences); the sweep in [PLAN-I18N.md](PLAN-I18N.md) L4 preserved the wording
+verbatim rather than silently changing behaviour.
+
+**Why it wasn't fixed here:** the fix is to plumb the pair's provider display name into
+`ShowPreviewAsync`/`ShowConflictsAsync`/`DescribeReason` and make it a `{0}` in each string — a
+signature change through the sync dialog call chain, which would have buried a mechanical string
+sweep in a behavioural change. Cheap to do on its own, and cheaper now that each sentence is a
+single key with a placeholder convention already in use.
+
+**What it blocks:** nothing, but it should land before any further translation of those strings,
+so a translator is not asked to translate the same sentence twice.
+
+### B6.4 — `MainWindow.axaml.cs.FormatBytes` duplicates `Services/ByteSize`
+
+**Where:** `src/MyPersonalDrive/Views/MainWindow.axaml.cs`, private static `FormatBytes`.
+
+**What goes wrong:** a second byte formatter with its own thresholds and its own `:F1` format,
+used only by the sync preview summary. It disagrees with `ByteSize.Format` — which the rest of
+the interface uses — so the same size can render two ways in two places. It also formats through
+the ambient culture with no explicit provider, which is exactly the hazard
+[PLAN-I18N.md §10](PLAN-I18N.md#10-l8--culture-aware-formatting-and-the-invariant-culture-audit)
+is about now that the interface language moves `CurrentCulture`.
+
+**Why it wasn't fixed here:** folding it into `ByteSize.Format` changes the text the preview
+dialog shows, which is a visible change and wants its own before/after. It belongs with L8, which
+is going over every formatting site anyway.
 
 ---
 

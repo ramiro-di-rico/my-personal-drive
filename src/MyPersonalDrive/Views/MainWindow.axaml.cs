@@ -495,7 +495,7 @@ public partial class MainWindow : Window
 
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Select proton-drive executable",
+            Title = "Seleccioná el ejecutable de proton-drive",
             AllowMultiple = false
         });
 
@@ -516,7 +516,7 @@ public partial class MainWindow : Window
 
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "Select default sync folder",
+            Title = "Seleccioná la carpeta de sincronización por defecto",
             AllowMultiple = false
         });
 
@@ -564,6 +564,7 @@ public partial class MainWindow : Window
         viewModel.SyncPanel.RequestNewPairAsync = prefill => PromptForNewPairAsync(viewModel.SyncPanel, viewModel.RootPath, prefill);
         viewModel.SyncPanel.RequestPreviewConfirmationAsync = ShowPreviewAsync;
         viewModel.SyncPanel.RequestConflictResolutionsAsync = ShowConflictsAsync;
+        viewModel.SyncPanel.RequestFailureReviewAsync = ShowFailuresAsync;
         viewModel.SyncPanel.RequestConfirmationAsync = AskAsync;
         viewModel.SyncPanel.RequestEditPairAsync = PromptForEditPairAsync;
         viewModel.SyncPanel.RequestAlertAsync = ShowAlertAsync;
@@ -588,7 +589,7 @@ public partial class MainWindow : Window
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Select files to upload",
+            Title = "Seleccioná los archivos a subir",
             AllowMultiple = true
         });
 
@@ -599,7 +600,7 @@ public partial class MainWindow : Window
     {
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "Select download folder",
+            Title = "Seleccioná la carpeta de descarga",
             AllowMultiple = false
         });
 
@@ -617,7 +618,7 @@ public partial class MainWindow : Window
 
         var dialog = new Window
         {
-            Title = "Rename Item",
+            Title = "Renombrar elemento",
             Width = 400,
             Height = 180,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -627,7 +628,7 @@ public partial class MainWindow : Window
                 Margin = new Avalonia.Thickness(20),
                 Children =
                 {
-                    new TextBlock { Text = $"Enter new name for '{currentName}':", FontWeight = Avalonia.Media.FontWeight.Bold },
+                    new TextBlock { Text = $"Ingresá el nuevo nombre para '{currentName}':", FontWeight = Avalonia.Media.FontWeight.Bold },
                     textBox,
                     new StackPanel
                     {
@@ -636,8 +637,8 @@ public partial class MainWindow : Window
                         HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
                         Children =
                         {
-                            new Button { Content = "Rename", IsDefault = true, Width = 80 },
-                            new Button { Content = "Cancel", IsCancel = true, Width = 80 }
+                            new Button { Content = "Renombrar", IsDefault = true, Width = 80 },
+                            new Button { Content = "Cancelar", IsCancel = true, Width = 80 }
                         }
                     }
                 }
@@ -670,14 +671,14 @@ public partial class MainWindow : Window
     {
         var textBox = new TextBox
         {
-            PlaceholderText = "New folder name",
+            PlaceholderText = "Nombre de la carpeta nueva",
             Width = 350,
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch
         };
 
         var dialog = new Window
         {
-            Title = "Create Folder",
+            Title = "Crear carpeta",
             Width = 400,
             Height = 180,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -687,7 +688,7 @@ public partial class MainWindow : Window
                 Margin = new Avalonia.Thickness(20),
                 Children =
                 {
-                    new TextBlock { Text = "Enter name for the new folder:", FontWeight = Avalonia.Media.FontWeight.Bold },
+                    new TextBlock { Text = "Ingresá el nombre de la carpeta nueva:", FontWeight = Avalonia.Media.FontWeight.Bold },
                     textBox,
                     new StackPanel
                     {
@@ -696,8 +697,8 @@ public partial class MainWindow : Window
                         HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
                         Children =
                         {
-                            new Button { Content = "Create", IsDefault = true, Width = 80 },
-                            new Button { Content = "Cancel", IsCancel = true, Width = 80 }
+                            new Button { Content = "Crear", IsDefault = true, Width = 80 },
+                            new Button { Content = "Cancelar", IsCancel = true, Width = 80 }
                         }
                     }
                 }
@@ -730,14 +731,14 @@ public partial class MainWindow : Window
     {
         var textBox = new TextBox
         {
-            PlaceholderText = "Leave empty to use original name",
+            PlaceholderText = "Dejalo vacío para usar el nombre original",
             Width = 350,
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch
         };
 
         var dialog = new Window
         {
-            Title = "Copy Item",
+            Title = "Crear una copia",
             Width = 400,
             Height = 180,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -747,7 +748,7 @@ public partial class MainWindow : Window
                 Margin = new Avalonia.Thickness(20),
                 Children =
                 {
-                    new TextBlock { Text = $"Optional new name for copy of '{currentName}':", FontWeight = Avalonia.Media.FontWeight.Bold },
+                    new TextBlock { Text = $"Nombre nuevo (opcional) para la copia de '{currentName}':", FontWeight = Avalonia.Media.FontWeight.Bold },
                     textBox,
                     new StackPanel
                     {
@@ -756,8 +757,8 @@ public partial class MainWindow : Window
                         HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
                         Children =
                         {
-                            new Button { Content = "Copy", IsDefault = true, Width = 80 },
-                            new Button { Content = "Cancel", IsCancel = true, Width = 80 }
+                            new Button { Content = "Copiar", IsDefault = true, Width = 80 },
+                            new Button { Content = "Cancelar", IsCancel = true, Width = 80 }
                         }
                     }
                 }
@@ -791,12 +792,12 @@ public partial class MainWindow : Window
         var filesList = string.Join("\n", conflictingFiles.Take(10).Select(f => "- " + f));
         if (conflictingFiles.Count > 10)
         {
-            filesList += $"\n... and {conflictingFiles.Count - 10} more";
+            filesList += $"\n... y {conflictingFiles.Count - 10} más";
         }
 
         var dialog = new Window
         {
-            Title = "Upload Conflict",
+            Title = "Conflicto al subir",
             Width = 450,
             Height = 350,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -806,9 +807,9 @@ public partial class MainWindow : Window
                 Margin = new Avalonia.Thickness(20),
                 Children =
                 {
-                    new TextBlock { Text = "The following files already exist in the drive:", FontWeight = Avalonia.Media.FontWeight.Bold },
+                    new TextBlock { Text = "Estos archivos ya existen en la nube:", FontWeight = Avalonia.Media.FontWeight.Bold },
                     new TextBlock { Text = filesList, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                    new TextBlock { Text = "What would you like to do?", FontWeight = Avalonia.Media.FontWeight.Bold },
+                    new TextBlock { Text = "¿Qué querés hacer?", FontWeight = Avalonia.Media.FontWeight.Bold },
                     new StackPanel
                     {
                         Spacing = 10,
@@ -816,10 +817,10 @@ public partial class MainWindow : Window
                         HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
                         Children =
                         {
-                            new Button { Content = "Keep Both (Rename new files)", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.KeepBoth },
-                            new Button { Content = "Replace (Overwrite existing files)", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.Replace },
-                            new Button { Content = "Skip (Don't upload conflicting files)", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.Skip },
-                            new Button { Content = "Cancel", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.None }
+                            new Button { Content = "Conservar ambos (renombrar los nuevos)", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.KeepBoth },
+                            new Button { Content = "Reemplazar (sobrescribir los existentes)", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.Replace },
+                            new Button { Content = "Omitir (no subir los archivos en conflicto)", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.Skip },
+                            new Button { Content = "Cancelar", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.None }
                         }
                     }
                 }
@@ -849,7 +850,7 @@ public partial class MainWindow : Window
     {
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "Save CLI activity",
+            Title = "Guardar la actividad de la CLI",
             SuggestedFileName = "cli-activity.log",
             DefaultExtension = "log"
         });
@@ -864,9 +865,9 @@ public partial class MainWindow : Window
     private async Task<NewSyncPairRequest?> PromptForNewPairAsync(SyncPanelViewModel syncPanel, string remoteRootPath, SyncPairPrefill? prefill = null)
     {
         var remoteBox = new TextBox { PlaceholderText = "/my-files/Documents", Width = 280, Text = prefill?.RemotePath };
-        var remoteBrowseButton = new Button { Content = "Browse", IsVisible = syncPanel.GetRemoteFolderChildren is not null };
-        var localBox = new TextBox { Width = 280, IsReadOnly = true, PlaceholderText = "Choose a local folder...", Text = prefill?.LocalPath };
-        var browseButton = new Button { Content = "Browse" };
+        var remoteBrowseButton = new Button { Content = "Explorar", IsVisible = syncPanel.GetRemoteFolderChildren is not null };
+        var localBox = new TextBox { Width = 280, IsReadOnly = true, PlaceholderText = "Elegí una carpeta local...", Text = prefill?.LocalPath };
+        var browseButton = new Button { Content = "Explorar" };
 
         // RemoteToLocal stays first, and therefore the default: it's the only direction that
         // cannot destroy anything in the cloud (docs/PLAN-LOCAL-SYNC.md §15).
@@ -875,9 +876,9 @@ public partial class MainWindow : Window
             Width = 380,
             ItemsSource = new[]
             {
-                "Download only  (remote → local)",
-                "Upload only  (local → remote)",
-                "Two-way  (remote ↔ local)",
+                "Solo descargar  (Remoto → Local)",
+                "Solo subir  (Local → Remoto)",
+                "Bidireccional  (Remoto ↔ Local)",
             },
             SelectedIndex = 0,
         };
@@ -887,21 +888,21 @@ public partial class MainWindow : Window
             Width = 380,
             ItemsSource = new[]
             {
-                "Ask me  (park the conflict, decide later)",
-                "Keep both  (never loses either version)",
-                "Prefer local",
-                "Prefer remote",
+                "Preguntarme  (dejar el conflicto pendiente y decidir después)",
+                "Conservar ambos  (nunca se pierde ninguna versión)",
+                "Preferir la local",
+                "Preferir la remota",
             },
             SelectedIndex = 0,
         };
 
-        var policyLabel = new TextBlock { Text = "When both sides changed:", FontWeight = Avalonia.Media.FontWeight.Bold };
+        var policyLabel = new TextBlock { Text = "Cuando cambian los dos lados:", FontWeight = Avalonia.Media.FontWeight.Bold };
 
         // Only meaningful for a one-way pair (SyncPair.MirrorDeletes) — a two-way pair already
         // tracks deletions through its baseline, so there is no "extra file at the destination"
         // for this to opt out of. Checked by default: today's only behavior before this existed
         // was a strict mirror, and every new pair should keep that unless asked otherwise.
-        var mirrorDeletesCheckBox = new CheckBox { Content = "Delete files at the destination that no longer exist at the source", IsChecked = true };
+        var mirrorDeletesCheckBox = new CheckBox { Content = "Borrar en el destino los archivos que ya no existen en el origen", IsChecked = true };
 
         // The conflict policy is only ever consulted in two-way mode — a one-way mirror's source
         // side wins by definition, so showing the choice there would imply a decision that
@@ -922,7 +923,7 @@ public partial class MainWindow : Window
         {
             var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
             {
-                Title = "Select the local folder to sync into",
+                Title = "Seleccioná la carpeta local a sincronizar",
                 AllowMultiple = false
             });
 
@@ -932,8 +933,8 @@ public partial class MainWindow : Window
             }
         };
 
-        var addButton = new Button { Content = "Add", IsDefault = true, Width = 80 };
-        var cancelButton = new Button { Content = "Cancel", IsCancel = true, Width = 80 };
+        var addButton = new Button { Content = "Agregar", IsDefault = true, Width = 80 };
+        var cancelButton = new Button { Content = "Cancelar", IsCancel = true, Width = 80 };
 
         var formPanel = new StackPanel
         {
@@ -941,21 +942,21 @@ public partial class MainWindow : Window
             Margin = new Avalonia.Thickness(20),
             Children =
             {
-                new TextBlock { Text = "Remote folder path:", FontWeight = Avalonia.Media.FontWeight.Bold },
+                new TextBlock { Text = "Ruta de la carpeta remota:", FontWeight = Avalonia.Media.FontWeight.Bold },
                 new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
                     Spacing = 8,
                     Children = { remoteBox, remoteBrowseButton }
                 },
-                new TextBlock { Text = "Local folder:", FontWeight = Avalonia.Media.FontWeight.Bold },
+                new TextBlock { Text = "Carpeta local:", FontWeight = Avalonia.Media.FontWeight.Bold },
                 new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
                     Spacing = 8,
                     Children = { localBox, browseButton }
                 },
-                new TextBlock { Text = "Direction:", FontWeight = Avalonia.Media.FontWeight.Bold },
+                new TextBlock { Text = "Dirección:", FontWeight = Avalonia.Media.FontWeight.Bold },
                 directionBox,
                 policyLabel,
                 policyBox,
@@ -972,7 +973,7 @@ public partial class MainWindow : Window
 
         var dialog = new Window
         {
-            Title = "Add sync pair",
+            Title = "Agregar par de sincronización",
             Width = 480,
             Height = 560,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -1030,9 +1031,9 @@ public partial class MainWindow : Window
             Width = 380,
             ItemsSource = new[]
             {
-                "Download only  (remote → local)",
-                "Upload only  (local → remote)",
-                "Two-way  (remote ↔ local)",
+                "Solo descargar  (Remoto → Local)",
+                "Solo subir  (Local → Remoto)",
+                "Bidireccional  (Remoto ↔ Local)",
             },
             SelectedIndex = pair.Direction switch
             {
@@ -1047,10 +1048,10 @@ public partial class MainWindow : Window
             Width = 380,
             ItemsSource = new[]
             {
-                "Ask me  (park the conflict, decide later)",
-                "Keep both  (never loses either version)",
-                "Prefer local",
-                "Prefer remote",
+                "Preguntarme  (dejar el conflicto pendiente y decidir después)",
+                "Conservar ambos  (nunca se pierde ninguna versión)",
+                "Preferir la local",
+                "Preferir la remota",
             },
             SelectedIndex = pair.ConflictPolicy switch
             {
@@ -1061,9 +1062,9 @@ public partial class MainWindow : Window
             },
         };
 
-        var policyLabel = new TextBlock { Text = "When both sides changed:", FontWeight = Avalonia.Media.FontWeight.Bold };
+        var policyLabel = new TextBlock { Text = "Cuando cambian los dos lados:", FontWeight = Avalonia.Media.FontWeight.Bold };
 
-        var mirrorDeletesCheckBox = new CheckBox { Content = "Delete files at the destination that no longer exist at the source", IsChecked = pair.MirrorDeletes };
+        var mirrorDeletesCheckBox = new CheckBox { Content = "Borrar en el destino los archivos que ya no existen en el origen", IsChecked = pair.MirrorDeletes };
 
         void SyncPolicyVisibility()
         {
@@ -1076,12 +1077,12 @@ public partial class MainWindow : Window
         directionBox.SelectionChanged += (_, _) => SyncPolicyVisibility();
         SyncPolicyVisibility();
 
-        var saveButton = new Button { Content = "Save", IsDefault = true, Width = 80 };
-        var cancelButton = new Button { Content = "Cancel", IsCancel = true, Width = 80 };
+        var saveButton = new Button { Content = "Guardar", IsDefault = true, Width = 80 };
+        var cancelButton = new Button { Content = "Cancelar", IsCancel = true, Width = 80 };
 
         var dialog = new Window
         {
-            Title = "Edit sync pair",
+            Title = "Editar par de sincronización",
             Width = 440,
             Height = 360,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -1093,7 +1094,7 @@ public partial class MainWindow : Window
                 {
                     new TextBlock { Text = pair.RemotePath, FontWeight = Avalonia.Media.FontWeight.Bold },
                     new TextBlock { Text = pair.LocalPath, Opacity = 0.7 },
-                    new TextBlock { Text = "Direction:", FontWeight = Avalonia.Media.FontWeight.Bold },
+                    new TextBlock { Text = "Dirección:", FontWeight = Avalonia.Media.FontWeight.Bold },
                     directionBox,
                     policyLabel,
                     policyBox,
@@ -1158,11 +1159,11 @@ public partial class MainWindow : Window
         var pathHistory = new Stack<string>();
 
         var pathText = new TextBlock { FontWeight = Avalonia.Media.FontWeight.Bold, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
-        var upButton = new Button { Content = "⬆ Up", IsEnabled = false };
+        var upButton = new Button { Content = "⬆ Subir un nivel", IsEnabled = false };
         var statusText = new TextBlock { Opacity = 0.7, IsVisible = false };
         var itemsPanel = new StackPanel { Spacing = 4 };
-        var selectButton = new Button { Content = "Select this folder", IsDefault = true, Width = 160 };
-        var backButton = new Button { Content = "◀ Back", IsCancel = true, Width = 90 };
+        var selectButton = new Button { Content = "Elegir esta carpeta", IsDefault = true, Width = 200 };
+        var backButton = new Button { Content = "◀ Volver", IsCancel = true, Width = 90 };
 
         var browsePanel = new StackPanel
         {
@@ -1170,7 +1171,7 @@ public partial class MainWindow : Window
             Margin = new Avalonia.Thickness(20),
             Children =
             {
-                new TextBlock { Text = "Choose a remote folder", FontSize = 16, FontWeight = Avalonia.Media.FontWeight.Bold },
+                new TextBlock { Text = "Elegí una carpeta remota", FontSize = 16, FontWeight = Avalonia.Media.FontWeight.Bold },
                 new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
@@ -1195,7 +1196,7 @@ public partial class MainWindow : Window
             upButton.IsEnabled = pathHistory.Count > 0;
             itemsPanel.Children.Clear();
             statusText.IsVisible = true;
-            statusText.Text = "Loading...";
+            statusText.Text = "Cargando...";
 
             try
             {
@@ -1206,7 +1207,7 @@ public partial class MainWindow : Window
                     .ToList();
 
                 statusText.IsVisible = folders.Count == 0;
-                statusText.Text = "(no subfolders here)";
+                statusText.Text = "(no hay subcarpetas acá)";
 
                 foreach (var folder in folders)
                 {
@@ -1229,7 +1230,7 @@ public partial class MainWindow : Window
             catch (Exception ex)
             {
                 statusText.IsVisible = true;
-                statusText.Text = $"Couldn't list this folder: {ex.Message}";
+                statusText.Text = $"No se pudo listar esta carpeta: {ex.Message}";
             }
         }
 
@@ -1260,24 +1261,24 @@ public partial class MainWindow : Window
         var stats = plan.Stats;
         var lines = new List<string>
         {
-            $"↓ {stats.FilesToDownload} file(s) to download ({FormatBytes(stats.BytesToDownload)}), {stats.FoldersToCreateLocally} folder(s) to create locally.",
-            $"↑ {stats.FilesToUpload} file(s) to upload ({FormatBytes(stats.BytesToUpload)}), {stats.FoldersToCreateRemotely} folder(s) to create remotely.",
-            $"🗑 {stats.ToDeleteLocal} local item(s) to local trash, {stats.ToTrashRemote} remote item(s) to Proton's trash.",
+            $"↓ {stats.FilesToDownload} archivo(s) a descargar ({FormatBytes(stats.BytesToDownload)}), {stats.FoldersToCreateLocally} carpeta(s) a crear localmente.",
+            $"↑ {stats.FilesToUpload} archivo(s) a subir ({FormatBytes(stats.BytesToUpload)}), {stats.FoldersToCreateRemotely} carpeta(s) a crear en el remoto.",
+            $"🗑 {stats.ToDeleteLocal} elemento(s) local(es) a la papelera local, {stats.ToTrashRemote} elemento(s) remoto(s) a la papelera de Proton.",
         };
 
         if (stats.FilesToMoveLocally > 0)
         {
-            lines.Add($"↔ {stats.FilesToMoveLocally} file(s) moved locally to follow Proton Drive — no re-download needed.");
+            lines.Add($"↔ {stats.FilesToMoveLocally} archivo(s) movido(s) localmente para seguir a Proton Drive — no hace falta volver a descargarlos.");
         }
 
         if (stats.FilesToMoveRemotely > 0)
         {
-            lines.Add($"↔ {stats.FilesToMoveRemotely} file(s) moved on Proton Drive to follow this machine — no re-upload needed.");
+            lines.Add($"↔ {stats.FilesToMoveRemotely} archivo(s) movido(s) en Proton Drive para seguir a esta máquina — no hace falta volver a subirlos.");
         }
 
         if (stats.Conflicts > 0)
         {
-            lines.Add($"⚠ {stats.Conflicts} conflict(s) — both sides changed.");
+            lines.Add($"⚠ {stats.Conflicts} conflicto(s) — cambiaron los dos lados.");
         }
 
         foreach (var warning in warnings)
@@ -1290,7 +1291,7 @@ public partial class MainWindow : Window
         var actionLines = plan.Actions.Take(50).Select(a => $"{a.Operation}  {a.RelativePath}").ToList();
         if (plan.Actions.Count > 50)
         {
-            actionLines.Add($"... and {plan.Actions.Count - 50} more");
+            actionLines.Add($"... y {plan.Actions.Count - 50} más");
         }
 
         // A plan with no actions but with conflicts isn't "up to date" — under the Ask policy that
@@ -1298,12 +1299,12 @@ public partial class MainWindow : Window
         var actionsText = actionLines.Count > 0
             ? string.Join("\n", actionLines)
             : stats.Conflicts > 0
-                ? "(no automatic actions — every difference is a conflict awaiting your decision)"
-                : "(nothing to do — already up to date)";
+                ? "(no hay acciones automáticas — cada diferencia es un conflicto que espera tu decisión)"
+                : "(nada para hacer — ya está todo al día)";
 
         var dialog = new Window
         {
-            Title = "Sync preview",
+            Title = "Vista previa de la sincronización",
             Width = 520,
             Height = 440,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -1326,8 +1327,8 @@ public partial class MainWindow : Window
                         HorizontalAlignment = HorizontalAlignment.Right,
                         Children =
                         {
-                            new Button { Content = "Run now", IsDefault = true, Width = 100, IsEnabled = plan.Actions.Count > 0 },
-                            new Button { Content = "Close", IsCancel = true, Width = 80 }
+                            new Button { Content = "Sincronizar ahora", IsDefault = true, Width = 160, IsEnabled = plan.Actions.Count > 0 },
+                            new Button { Content = "Cerrar", IsCancel = true, Width = 80 }
                         }
                     }
                 }
@@ -1367,7 +1368,7 @@ public partial class MainWindow : Window
             var selector = new ComboBox
             {
                 Width = 260,
-                ItemsSource = new[] { "Decide later", "Keep both", "Keep my local version", "Keep the Proton Drive version" },
+                ItemsSource = new[] { "Decidir después", "Conservar ambos", "Conservar mi versión local", "Conservar la versión de Proton Drive" },
                 SelectedIndex = 0,
             };
 
@@ -1395,12 +1396,12 @@ public partial class MainWindow : Window
             });
         }
 
-        var applyButton = new Button { Content = "Apply", IsDefault = true, Width = 100 };
-        var cancelButton = new Button { Content = "Cancel", IsCancel = true, Width = 100 };
+        var applyButton = new Button { Content = "Aplicar", IsDefault = true, Width = 100 };
+        var cancelButton = new Button { Content = "Cancelar", IsCancel = true, Width = 100 };
 
         var dialog = new Window
         {
-            Title = conflicts.Count == 1 ? "Resolve conflict" : $"Resolve {conflicts.Count} conflicts",
+            Title = conflicts.Count == 1 ? "Resolver el conflicto" : $"Resolver {conflicts.Count} conflictos",
             Width = 560,
             Height = 460,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -1412,8 +1413,8 @@ public partial class MainWindow : Window
                 {
                     new TextBlock
                     {
-                        Text = "Both sides of these files changed since the last sync, so neither can win automatically. "
-                             + "\"Keep both\" never loses anything: your version is renamed aside and uploaded alongside.",
+                        Text = "Estos archivos cambiaron de los dos lados desde la última sincronización, así que ninguno puede ganar automáticamente. "
+                             + "\"Conservar ambos\" nunca pierde nada: tu versión se renombra aparte y se sube junto a la otra.",
                         TextWrapping = Avalonia.Media.TextWrapping.Wrap,
                         Opacity = 0.8,
                     },
@@ -1439,6 +1440,115 @@ public partial class MainWindow : Window
 
         await dialog.ShowDialog(this);
         return apply ? chosen : new Dictionary<long, ConflictResolution>();
+    }
+
+    /// <summary>
+    /// The failures view (docs/PLAN-UX-ROUND-2.md §6). Same shape as
+    /// <see cref="ShowConflictsAsync"/>, because it is the same kind of decision: here is what
+    /// happened per file, choose per file. The pair row previously showed only "N acción(es)
+    /// fallaron" and a blind retry-everything button, while the per-action reason sat unread in
+    /// the queue.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<long, SyncFailureDecision>> ShowFailuresAsync(IReadOnlyList<SyncFailureViewModel> failures)
+    {
+        var chosen = new Dictionary<long, SyncFailureDecision>();
+        var rows = new StackPanel { Spacing = 12 };
+
+        foreach (var failure in failures)
+        {
+            var selector = new ComboBox
+            {
+                Width = 260,
+                ItemsSource = new[] { "Dejar como está", "Reintentar en la próxima sincronización", "Descartar esta acción" },
+                SelectedIndex = 0,
+            };
+
+            var id = failure.Id;
+            selector.SelectionChanged += (_, _) =>
+            {
+                switch (selector.SelectedIndex)
+                {
+                    case 1: chosen[id] = SyncFailureDecision.Retry; break;
+                    case 2: chosen[id] = SyncFailureDecision.Discard; break;
+                    default: chosen.Remove(id); break;
+                }
+            };
+
+            rows.Children.Add(new StackPanel
+            {
+                Spacing = 4,
+                Children =
+                {
+                    new TextBlock { Text = failure.RelativePath, FontWeight = Avalonia.Media.FontWeight.Bold, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                    new TextBlock { Text = failure.Summary, Opacity = 0.7, FontSize = 12 },
+                    // The provider's own words, verbatim and wrapped rather than trimmed: this is
+                    // the sentence that tells the user whether it is their problem or ours.
+                    new TextBlock { Text = failure.ReasonText, Opacity = 0.9, FontSize = 12, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                    selector,
+                }
+            });
+        }
+
+        var retryAllButton = new Button { Content = "Reintentar todas", Width = 160 };
+        var applyButton = new Button { Content = "Aplicar", IsDefault = true, Width = 100 };
+        var cancelButton = new Button { Content = "Cancelar", IsCancel = true, Width = 100 };
+
+        var dialog = new Window
+        {
+            Title = failures.Count == 1 ? "Acción fallida" : $"{failures.Count} acciones fallidas",
+            Width = 620,
+            Height = 500,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                Margin = new Avalonia.Thickness(20),
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Estas acciones no se pudieron completar. Reintentar vuelve a encolarlas para el próximo ciclo; "
+                             + "descartar las elimina de la cola, y si la diferencia sigue existiendo el próximo análisis las "
+                             + "vuelve a proponer.",
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                        Opacity = 0.8,
+                    },
+                    new ScrollViewer { Height = 300, Content = rows },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 10,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Children = { retryAllButton, applyButton, cancelButton }
+                    }
+                }
+            }
+        };
+
+        var apply = false;
+
+        // The old one-click behavior, kept: deciding file by file is the new capability, not a new
+        // obligation.
+        retryAllButton.Click += (_, _) =>
+        {
+            foreach (var failure in failures)
+            {
+                chosen[failure.Id] = SyncFailureDecision.Retry;
+            }
+
+            apply = true;
+            dialog.Close();
+        };
+
+        applyButton.Click += (_, _) =>
+        {
+            apply = true;
+            dialog.Close();
+        };
+        cancelButton.Click += (_, _) => dialog.Close();
+
+        await dialog.ShowDialog(this);
+        return apply ? chosen : new Dictionary<long, SyncFailureDecision>();
     }
 
     /// <summary>Puts text on the system clipboard — "Copiar ruta" (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6). Silently a no-op if the platform offers no clipboard (e.g. a headless test host).</summary>
@@ -1478,7 +1588,7 @@ public partial class MainWindow : Window
 
         var dialog = new Window
         {
-            Title = "Properties",
+            Title = "Propiedades",
             Width = 420,
             SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -1495,12 +1605,12 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task<bool> AskAsync(string question)
     {
-        var yes = new Button { Content = "Continue", Width = 100 };
-        var no = new Button { Content = "Cancel", IsCancel = true, IsDefault = true, Width = 100 };
+        var yes = new Button { Content = "Continuar", Width = 100 };
+        var no = new Button { Content = "Cancelar", IsCancel = true, IsDefault = true, Width = 100 };
 
         var dialog = new Window
         {
-            Title = "Are you sure?",
+            Title = "¿Estás seguro?",
             Width = 480,
             SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -1547,7 +1657,7 @@ public partial class MainWindow : Window
 
         var dialog = new Window
         {
-            Title = "Can't do that",
+            Title = "No se puede hacer eso",
             Width = 480,
             SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -1575,11 +1685,11 @@ public partial class MainWindow : Window
 
     private static string DescribeReason(string? reason) => reason switch
     {
-        nameof(ConflictReason.BothChanged) => "Changed here and on Proton Drive since the last sync.",
-        nameof(ConflictReason.BothAppearedDiffering) => "Appeared on both sides with different content, with no shared history.",
-        nameof(ConflictReason.RemoteDeletedLocalChanged) => "Deleted on Proton Drive, but changed here.",
-        nameof(ConflictReason.LocalDeletedRemoteChanged) => "Deleted here, but changed on Proton Drive.",
-        _ => "Conflicting changes on both sides.",
+        nameof(ConflictReason.BothChanged) => "Cambió acá y en Proton Drive desde la última sincronización.",
+        nameof(ConflictReason.BothAppearedDiffering) => "Apareció en los dos lados con contenido distinto, sin historial compartido.",
+        nameof(ConflictReason.RemoteDeletedLocalChanged) => "Se borró en Proton Drive, pero cambió acá.",
+        nameof(ConflictReason.LocalDeletedRemoteChanged) => "Se borró acá, pero cambió en Proton Drive.",
+        _ => "Cambios en conflicto en los dos lados.",
     };
 
     private static string FormatBytes(long bytes)

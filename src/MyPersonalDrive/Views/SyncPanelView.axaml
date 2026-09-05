@@ -104,6 +104,15 @@
                             HorizontalAlignment="Left"
                             Foreground="#F5C451"
                             ToolTip.Tip="Decidir qué hacer con cada archivo en conflicto" />
+                    <!-- The detail view comes first and the blind retry-all second, deliberately:
+                         the row used to offer only the second, so the user was asked to retry
+                         without ever being told what failed (docs/PLAN-UX-ROUND-2.md §6). -->
+                    <Button Content="{Binding FailureSummary}"
+                            IsVisible="{Binding HasFailures}"
+                            Command="{Binding ReviewFailuresCommand}"
+                            HorizontalAlignment="Left"
+                            Foreground="#E06C6C"
+                            ToolTip.Tip="Ver qué acciones fallaron y por qué, y decidir una por una" />
                     <Button Content="↻ Reintentar las acciones fallidas"
                             IsVisible="{Binding HasFailures}"
                             Command="{Binding RetryFailedCommand}"

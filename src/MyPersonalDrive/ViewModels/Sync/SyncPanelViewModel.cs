@@ -196,6 +196,9 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// <summary>Shown the parked conflicts; returns a decision per queue row. Forwarded to every row.</summary>
     public Func<IReadOnlyList<QueuedSyncAction>, Task<IReadOnlyDictionary<long, ConflictResolution>>>? RequestConflictResolutionsAsync { get; set; }
 
+    /// <summary>Shown a pair's failed queue rows; returns a decision per row. Forwarded to every row (docs/PLAN-UX-ROUND-2.md §6).</summary>
+    public Func<IReadOnlyList<SyncFailureViewModel>, Task<IReadOnlyDictionary<long, SyncFailureDecision>>>? RequestFailureReviewAsync { get; set; }
+
     /// <summary>Shown a pair's current direction/conflict policy; returns the new values, or null if canceled. Forwarded to every row.</summary>
     public Func<SyncPairViewModel, Task<EditSyncPairRequest?>>? RequestEditPairAsync { get; set; }
 
@@ -341,6 +344,7 @@ public sealed class SyncPanelViewModel : ObservableObject
         {
             RequestPreviewConfirmationAsync = RequestPreviewConfirmationAsync,
             RequestConflictResolutionsAsync = RequestConflictResolutionsAsync,
+            RequestFailureReviewAsync = RequestFailureReviewAsync,
             RequestEditAsync = RequestEditPairAsync,
             ValidateDirectionChangeAsync = async newDirection
                 => SyncPairValidator.ValidateDirectionChange(pair, newDirection, await GetAllPairsAcrossAccountsAsync()),

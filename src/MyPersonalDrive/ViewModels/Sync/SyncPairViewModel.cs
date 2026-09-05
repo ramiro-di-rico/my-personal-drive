@@ -38,6 +38,7 @@ public sealed class SyncPairViewModel : ObservableObject
         RemoveCommand = new AsyncCommand(RemoveAsync, () => !IsBusy, ReportError);
         ResolveConflictsCommand = new AsyncCommand(ResolveConflictsAsync, () => !IsBusy && HasConflicts, ReportError);
         RetryFailedCommand = new AsyncCommand(RetryFailedAsync, () => !IsBusy && HasFailures, ReportError);
+        ReviewFailuresCommand = new AsyncCommand(ReviewFailuresAsync, () => !IsBusy && HasFailures, ReportError);
         TogglePauseCommand = new AsyncCommand(TogglePauseAsync, () => !IsBusy, ReportError);
         EditCommand = new AsyncCommand(EditAsync, () => !IsBusy, ReportError);
 
@@ -86,6 +87,7 @@ public sealed class SyncPairViewModel : ObservableObject
                 RemoveCommand.RaiseCanExecuteChanged();
                 ResolveConflictsCommand.RaiseCanExecuteChanged();
                 RetryFailedCommand.RaiseCanExecuteChanged();
+                ReviewFailuresCommand.RaiseCanExecuteChanged();
                 TogglePauseCommand.RaiseCanExecuteChanged();
                 EditCommand.RaiseCanExecuteChanged();
             }
@@ -101,6 +103,13 @@ public sealed class SyncPairViewModel : ObservableObject
     public AsyncCommand ResolveConflictsCommand { get; }
 
     public AsyncCommand RetryFailedCommand { get; }
+
+    /// <summary>
+    /// Opens the per-action failure list (docs/PLAN-UX-ROUND-2.md §6). Distinct from
+    /// <see cref="RetryFailedCommand"/>, which is still the one-click "retry everything" — this is
+    /// the "what actually failed, and why" the row never offered.
+    /// </summary>
+    public AsyncCommand ReviewFailuresCommand { get; }
 
     public AsyncCommand TogglePauseCommand { get; }
 
@@ -131,6 +140,7 @@ public sealed class SyncPairViewModel : ObservableObject
                 OnPropertyChanged(nameof(ConflictText));
                 ResolveConflictsCommand.RaiseCanExecuteChanged();
                 RetryFailedCommand.RaiseCanExecuteChanged();
+                ReviewFailuresCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -143,7 +153,9 @@ public sealed class SyncPairViewModel : ObservableObject
             if (SetProperty(ref _failedCount, value))
             {
                 OnPropertyChanged(nameof(HasFailures));
+                OnPropertyChanged(nameof(FailureSummary));
                 RetryFailedCommand.RaiseCanExecuteChanged();
+                ReviewFailuresCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -164,21 +176,21 @@ public sealed class SyncPairViewModel : ObservableObject
                 return true;
             }
 
-            if (_pair.LastStatus == SyncPairStatus.PartialFailure)
-            {
-                if (HasConflicts && _pair.LastError is not null && !_pair.LastError.Contains("fallaron") && !_pair.LastError.Contains("se detuvo"))
-                {
-                    return false;
-                }
-
-                return true;
-            }
-
-            return false;
+            // PartialFailure with conflicts and no failed rows is a conflicts-only outcome:
+            // FailedCount above already answered that authoritatively from the durable queue.
+            // This used to second-guess it by substring-matching LastError for failure wording,
+            // which broke the moment the message was reworded — as U4's translation proved
+            // (docs/PLAN-UX-ROUND-2.md §6).
+            return _pair.LastStatus == SyncPairStatus.PartialFailure && !HasConflicts;
         }
     }
 
     public string ConflictText => ConflictCount == 1 ? "⚠ 1 conflicto" : $"⚠ {ConflictCount} conflictos";
+
+    /// <summary>Label for the button that opens the per-action failure list.</summary>
+    public string FailureSummary => FailedCount == 1
+        ? "Ver la acción que falló"
+        : $"Ver las {FailedCount} acciones que fallaron";
 
     /// <summary>
     /// Shown a dry-run plan plus any warnings about carrying it out; returns true if the user chose
@@ -193,6 +205,9 @@ public sealed class SyncPairViewModel : ObservableObject
     /// "leave that one alone", so closing the dialog resolves nothing.
     /// </summary>
     public Func<IReadOnlyList<QueuedSyncAction>, Task<IReadOnlyDictionary<long, ConflictResolution>>>? RequestConflictResolutionsAsync { get; set; }
+
+    /// <summary>Shown the failed queue rows; returns a decision per row. Left null disables the failures view.</summary>
+    public Func<IReadOnlyList<SyncFailureViewModel>, Task<IReadOnlyDictionary<long, SyncFailureDecision>>>? RequestFailureReviewAsync { get; set; }
 
     /// <summary>Shown this pair's current direction/conflict policy; returns the new values, or null if the user canceled.</summary>
     public Func<SyncPairViewModel, Task<EditSyncPairRequest?>>? RequestEditAsync { get; set; }
@@ -276,7 +291,9 @@ public sealed class SyncPairViewModel : ObservableObject
         ConflictCount = (await _stateStore.GetConflictActionsAsync(_pair.Id)).Count;
         FailedCount = (await _stateStore.GetFailedActionsAsync(_pair.Id)).Count;
         OnPropertyChanged(nameof(HasFailures));
+        OnPropertyChanged(nameof(FailureSummary));
         RetryFailedCommand.RaiseCanExecuteChanged();
+        ReviewFailuresCommand.RaiseCanExecuteChanged();
     }
 
     private async Task ResolveConflictsAsync()
@@ -353,6 +370,78 @@ public sealed class SyncPairViewModel : ObservableObject
             IsBusy = false;
             await RefreshOutstandingAsync();
         }
+    }
+
+    /// <summary>
+    /// Shows what actually failed and lets the user decide per action, instead of the blind
+    /// retry-everything the row offered before (docs/PLAN-UX-ROUND-2.md §6). Deliberately the same
+    /// shape as <see cref="ResolveConflictsAsync"/>: gather the rows, hand them to the view, apply
+    /// only what came back.
+    /// </summary>
+    private async Task ReviewFailuresAsync()
+    {
+        var requester = RequestFailureReviewAsync;
+        if (requester is null)
+        {
+            StatusText = "Revisar las fallas no está disponible.";
+            return;
+        }
+
+        var failures = await _stateStore.GetFailedActionsAsync(_pair.Id);
+        if (failures.Count == 0)
+        {
+            await RefreshOutstandingAsync();
+            return;
+        }
+
+        var decisions = await requester(failures.Select(f => new SyncFailureViewModel(f)).ToList());
+        if (decisions.Count == 0)
+        {
+            return; // dialog dismissed — deciding nothing must change nothing
+        }
+
+        IsBusy = true;
+        try
+        {
+            var toRetry = decisions.Where(d => d.Value == SyncFailureDecision.Retry).Select(d => d.Key).ToList();
+            var toDiscard = decisions.Where(d => d.Value == SyncFailureDecision.Discard).Select(d => d.Key).ToList();
+
+            var retried = await _stateStore.RetryFailedAsync(_pair.Id, toRetry, DateTimeOffset.UtcNow);
+            var discarded = await _stateStore.DiscardFailedAsync(_pair.Id, toDiscard);
+
+            // Only clear the pair's error banner once nothing failed is left behind; a partial
+            // decision must not make the row claim it is healthy.
+            if (retried + discarded == failures.Count && _pair.LastStatus is SyncPairStatus.PartialFailure or SyncPairStatus.Error)
+            {
+                await _stateStore.UpdatePairStatusAsync(_pair.Id, _pair.LastSyncAt ?? DateTimeOffset.UtcNow, SyncPairStatus.Ok, null);
+                _pair = await _stateStore.GetPairAsync(_pair.Id) ?? _pair;
+            }
+
+            StatusText = DescribeFailureDecisions(retried, discarded);
+        }
+        finally
+        {
+            IsBusy = false;
+            await RefreshOutstandingAsync();
+        }
+    }
+
+    private static string DescribeFailureDecisions(int retried, int discarded)
+    {
+        var parts = new List<string>();
+        if (retried > 0)
+        {
+            parts.Add($"{retried} acción(es) volvieron a la cola");
+        }
+
+        if (discarded > 0)
+        {
+            parts.Add($"{discarded} acción(es) descartadas");
+        }
+
+        return parts.Count == 0
+            ? "No se cambió ninguna acción."
+            : string.Join("; ", parts) + ".";
     }
 
     /// <summary>

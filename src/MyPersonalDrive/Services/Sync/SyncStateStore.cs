@@ -647,6 +647,69 @@ public sealed class SyncStateStore
     });
 
     /// <summary>
+    /// <see cref="RetryFailedAsync(int, DateTimeOffset, CancellationToken)"/> narrowed to specific
+    /// queue rows, for the per-action retry in the failures view (docs/PLAN-UX-ROUND-2.md §6).
+    /// Retrying every failure at once is often the wrong move: one path may be failing for a
+    /// reason the user has just fixed while another is still broken.
+    /// </summary>
+    public Task<int> RetryFailedAsync(int pairId, IReadOnlyList<long> queueIds, DateTimeOffset now, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<int>(async () =>
+    {
+        if (queueIds.Count == 0)
+        {
+            return 0;
+        }
+
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+
+        // Parameterized IN list, same rule the rest of this file follows for anything derived from
+        // user data — ids are integers here, but the shape stays consistent on purpose.
+        var placeholders = queueIds.Select((_, index) => $"@id{index}").ToList();
+        command.CommandText = $"""
+            UPDATE SyncQueue
+            SET State = 'Pending', AttemptCount = 0, NextAttemptAt = NULL, LastError = NULL, EnqueuedAt = @Now
+            WHERE PairId = @PairId AND Id IN ({string.Join(", ", placeholders)})
+            """;
+        command.Parameters.AddWithValue("@PairId", pairId);
+        command.Parameters.AddWithValue("@Now", FormatTimestamp(now));
+        for (var i = 0; i < queueIds.Count; i++)
+        {
+            command.Parameters.AddWithValue($"@id{i}", queueIds[i]);
+        }
+
+        return await command.ExecuteNonQueryAsync(ct);
+    });
+
+    /// <summary>
+    /// Drops specific failed rows for good — the "I know, stop telling me" half of the failures
+    /// view. Deletes rather than marking Done: a discarded action was never carried out, and
+    /// recording it as completed would corrupt the baseline the next scan reasons from. If the
+    /// difference is still really there, the next plan re-proposes it.
+    /// </summary>
+    public Task<int> DiscardFailedAsync(int pairId, IReadOnlyList<long> queueIds, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<int>(async () =>
+    {
+        if (queueIds.Count == 0)
+        {
+            return 0;
+        }
+
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+        var placeholders = queueIds.Select((_, index) => $"@id{index}").ToList();
+        command.CommandText =
+            $"DELETE FROM SyncQueue WHERE PairId = @PairId AND Id IN ({string.Join(", ", placeholders)})";
+        command.Parameters.AddWithValue("@PairId", pairId);
+        for (var i = 0; i < queueIds.Count; i++)
+        {
+            command.Parameters.AddWithValue($"@id{i}", queueIds[i]);
+        }
+
+        return await command.ExecuteNonQueryAsync(ct);
+    });
+
+    /// <summary>
     /// Deletes <c>Failed</c> rows the current plan no longer proposes. Mirrors
     /// <see cref="ClearStaleConflictsAsync"/>: <see cref="EnqueueActionsAsync"/> only revives a
     /// <c>Failed</c> row when the fresh plan re-proposes the exact same (path, operation) pair, so a

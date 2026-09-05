@@ -584,6 +584,45 @@ public sealed class SyncPanelViewModel : ObservableObject
     public SyncPairViewModel? FindPairByLocalPath(string localPath)
         => Pairs.FirstOrDefault(pair => PathsEqual(pair.LocalPath, localPath));
 
+    /// <summary>
+    /// The pair that <paramref name="remotePath"/> lives inside — the pair root itself, or any
+    /// descendant of it. <see cref="FindPairByRemotePath"/> only matches the root exactly, which is
+    /// all the row badges need; the properties dialog needs to answer "is this file synced, and to
+    /// where" for a file several folders deep (docs/PLAN-UX-ROUND-2.md §12).
+    ///
+    /// The longest matching root wins, so a nested pair beats the outer one it sits inside.
+    /// </summary>
+    public SyncPairViewModel? FindPairContainingRemotePath(string remotePath)
+        => Pairs
+            .Where(pair => IsAtOrUnder(remotePath, pair.RemotePath))
+            .OrderByDescending(pair => pair.RemotePath.Length)
+            .FirstOrDefault();
+
+    /// <summary>The local-side counterpart of <see cref="FindPairContainingRemotePath"/>.</summary>
+    public SyncPairViewModel? FindPairContainingLocalPath(string localPath)
+        => Pairs
+            .Where(pair => IsAtOrUnder(localPath, pair.LocalPath))
+            .OrderByDescending(pair => pair.LocalPath.Length)
+            .FirstOrDefault();
+
+    // Segment-wise, not a bare StartsWith: "/my-files/Libros2" must not count as living inside
+    // "/my-files/Libros".
+    private static bool IsAtOrUnder(string path, string root)
+    {
+        var trimmedPath = path.TrimEnd('/', '\\');
+        var trimmedRoot = root.TrimEnd('/', '\\');
+
+        if (string.Equals(trimmedPath, trimmedRoot, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // Accept either separator so the same check serves the remote (always '/') and local
+        // (OS-native) sides without either caller having to normalise first.
+        return trimmedPath.StartsWith(trimmedRoot + "/", StringComparison.Ordinal)
+            || trimmedPath.StartsWith(trimmedRoot + "\\", StringComparison.Ordinal);
+    }
+
     private static bool PathsEqual(string a, string b)
         => string.Equals(a.TrimEnd('/', '\\'), b.TrimEnd('/', '\\'), StringComparison.Ordinal);
 

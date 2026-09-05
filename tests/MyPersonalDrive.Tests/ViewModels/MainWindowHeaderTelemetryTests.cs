@@ -214,9 +214,9 @@ public class MainWindowHeaderTelemetryTests : IDisposable
 
         var items = new List<DriveItem>
         {
-            new DriveItem("file1.pdf", "/my-files/file1.pdf", false, 1024 * 1024 * 100), // 100 MB
-            new DriveItem("file2.zip", "/my-files/file2.zip", false, 1024 * 1024 * 200), // 200 MB
-            new DriveItem("Docs", "/my-files/Docs", true, null)
+            new DriveItem("/my-files/file1.pdf", "file1.pdf", false, 1024 * 1024 * 100), // 100 MB
+            new DriveItem("/my-files/file2.zip", "file2.zip", false, 1024 * 1024 * 200), // 200 MB
+            new DriveItem("/my-files/Docs", "Docs", true, null)
         };
 
         sut.DisplayItems(items);
@@ -243,8 +243,8 @@ public class MainWindowHeaderTelemetryTests : IDisposable
 
         sut.DisplayItems(new List<DriveItem>
         {
-            new DriveItem("Notas.gdoc", "/my-files/Notas.gdoc", false, null),
-            new DriveItem("Plan.gsheet", "/my-files/Plan.gsheet", false, null)
+            new DriveItem("/my-files/Notas.gdoc", "Notas.gdoc", false, null),
+            new DriveItem("/my-files/Plan.gsheet", "Plan.gsheet", false, null)
         });
 
         Assert.False(sut.IsQuotaUsageKnown);
@@ -288,9 +288,9 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         var sut = Build();
         sut.DisplayItems(new List<DriveItem>
         {
-            new DriveItem("informe.pdf", "/my-files/informe.pdf", false, 10),
-            new DriveItem("informe-final.pdf", "/my-files/informe-final.pdf", false, 20),
-            new DriveItem("fotos", "/my-files/fotos", true, null),
+            new DriveItem("/my-files/informe.pdf", "informe.pdf", false, 10),
+            new DriveItem("/my-files/informe-final.pdf", "informe-final.pdf", false, 20),
+            new DriveItem("/my-files/fotos", "fotos", true, null),
         });
 
         // Nothing typed: no count label and nothing to clear, so neither costs any space.

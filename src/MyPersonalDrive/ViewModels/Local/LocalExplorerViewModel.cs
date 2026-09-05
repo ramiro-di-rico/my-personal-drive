@@ -130,6 +130,13 @@ public sealed class LocalExplorerViewModel : ObservableObject
     public Func<string, SyncPairViewModel?>? FindSyncPairByPath { get; set; }
 
     /// <summary>
+    /// The remote path a local path maps to, or null when it is outside every sync pair. Supplied
+    /// by <c>MainWindowViewModel</c> so this pane needs no reference to the sync panel or to
+    /// <c>PathMapper</c> (docs/PLAN-UX-ROUND-2.md §12).
+    /// </summary>
+    public Func<string, string?>? FindRemotePathFor { get; set; }
+
+    /// <summary>
     /// A quick filter over the current folder's file/folder names (case-insensitive substring,
     /// same rule as the cloud pane's own search — docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1's "Global
     /// Quick Search"). Reset on navigation: a search term belongs to the folder it was typed in, the
@@ -518,9 +525,17 @@ public sealed class LocalExplorerViewModel : ObservableObject
         var fields = new List<PropertyField>
         {
             new("Nombre", item.Name),
-            new("Ruta", item.Path),
+            new("Ruta", item.Path, IsCopyable: true),
             new("Tipo", item.IsFolder ? "Carpeta" : "Archivo"),
         };
+
+        // The mirror of the remote pane's "Ruta local" (docs/PLAN-UX-ROUND-2.md §12). These two
+        // panes were made consistent by construction in §10; shipping half of this feature would
+        // put the asymmetry straight back.
+        if (FindRemotePathFor?.Invoke(item.Path) is { } remotePath)
+        {
+            fields.Add(new PropertyField("Ruta remota", remotePath, IsCopyable: true));
+        }
 
         if (item.Size is not null)
         {

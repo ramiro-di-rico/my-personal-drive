@@ -1556,11 +1556,46 @@ public partial class MainWindow : Window
             new TextBlock { Text = title, FontWeight = Avalonia.Media.FontWeight.Bold, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
         };
 
-        children.AddRange(fields.Select(field => new TextBlock
+        foreach (var field in fields)
         {
-            Text = $"{field.Label}: {field.Value}",
-            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-        }));
+            var text = new TextBlock
+            {
+                Text = $"{field.Label}: {field.Value}",
+                TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+
+            if (!field.IsCopyable)
+            {
+                children.Add(text);
+                continue;
+            }
+
+            // Paths are the only values here anyone needs elsewhere, and the only ones long enough
+            // that retyping them is not an option (docs/PLAN-UX-ROUND-2.md §12).
+            var copyButton = new Button
+            {
+                Content = "Copiar",
+                FontSize = 11,
+                Padding = new Avalonia.Thickness(8, 2),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+
+            var value = field.Value;
+            copyButton.Click += async (_, _) =>
+            {
+                await CopyToClipboardAsync(value);
+                // Confirm in place: a clipboard write is otherwise completely invisible.
+                copyButton.Content = "Copiado";
+            };
+
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8 };
+            Grid.SetColumn(text, 0);
+            Grid.SetColumn(copyButton, 1);
+            row.Children.Add(text);
+            row.Children.Add(copyButton);
+            children.Add(row);
+        }
 
         var okButton = new Button { Content = "OK", IsDefault = true, IsCancel = true, Width = 80 };
         children.Add(new StackPanel

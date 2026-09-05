@@ -6,6 +6,7 @@ using System.Text.Json;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Providers;
+using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Providers.OneDrive;
 using MyPersonalDrive.Services.Providers.GoogleDrive;
@@ -430,6 +431,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             RequestSyncSelectedPathAsync = localPath => SyncPanel.AddPairAsync(new SyncPairPrefill(null, localPath)),
             FindSyncPairByPath = SyncPanel.FindPairByLocalPath,
+            FindRemotePathFor = RemotePathFor,
         };
 
         var appSettings = settings.Load();
@@ -2715,6 +2717,38 @@ public sealed class MainWindowViewModel : ObservableObject
     public Task SyncSelectedRemotePathAsync(DriveItem item)
         => item.IsFolder ? SyncPanel.AddPairAsync(new SyncPairPrefill(item.Path, null)) : Task.CompletedTask;
 
+    /// <summary>
+    /// The local path a remote path maps to, or null when it is not inside any sync pair. Routed
+    /// through <see cref="PathMapper"/> rather than composed here: that class is the single place
+    /// allowed to convert between the three path shapes (docs/PLAN-LOCAL-SYNC.md §3.2's golden
+    /// rule), and its <c>ToLocalAbsolute</c> is what already produces the paths the sync engine
+    /// actually writes to — so the dialog cannot disagree with what sync does.
+    /// </summary>
+    private string? LocalPathFor(string remotePath)
+    {
+        var pair = SyncPanel.FindPairContainingRemotePath(remotePath);
+        if (pair is null)
+        {
+            return null;
+        }
+
+        var mapper = new PathMapper(pair.RemotePath, pair.LocalPath);
+        return mapper.ToLocalAbsolute(mapper.ToRelativeFromRemote(remotePath));
+    }
+
+    /// <summary>The mirror of <see cref="LocalPathFor"/>, for the local pane's own properties dialog.</summary>
+    private string? RemotePathFor(string localPath)
+    {
+        var pair = SyncPanel.FindPairContainingLocalPath(localPath);
+        if (pair is null)
+        {
+            return null;
+        }
+
+        var mapper = new PathMapper(pair.RemotePath, pair.LocalPath);
+        return mapper.ToRemoteAbsolute(mapper.ToRelativeFromLocal(localPath));
+    }
+
     public async Task ShowPropertiesAsync(DriveItem item)
     {
         var show = RequestShowPropertiesAsync;
@@ -2726,9 +2760,16 @@ public sealed class MainWindowViewModel : ObservableObject
         var fields = new List<PropertyField>
         {
             new("Nombre", item.Name),
-            new("Ruta", item.Path),
+            new("Ruta", item.Path, IsCopyable: true),
             new("Tipo", item.IsFolder ? "Carpeta" : "Archivo"),
         };
+
+        // Where this lives on the machine, when it is inside a sync pair. The pair already knows;
+        // the dialog just never asked (docs/PLAN-UX-ROUND-2.md §12).
+        if (LocalPathFor(item.Path) is { } localPath)
+        {
+            fields.Add(new PropertyField("Ruta local", localPath, IsCopyable: true));
+        }
 
         if (item.Size is not null)
         {

@@ -499,6 +499,43 @@ the chip it asserted on correctly no longer exists.
 
 ---
 
+## 12. Where a synced item lives on this machine
+
+Asked for by the repo owner after using the finished branch: the properties dialog for a remote
+item that is part of a sync pair should say which local path it maps to, and offer to copy it.
+
+**The data was already there, one lookup away.** Every pair knows both of its roots, and
+`PathMapper` already converts between the three path shapes — it is the single place allowed to,
+per [PLAN-LOCAL-SYNC.md](PLAN-LOCAL-SYNC.md) §3.2's golden rule. Routing the dialog through it
+rather than composing the path locally is what guarantees the dialog cannot disagree with the path
+the sync engine actually writes to.
+
+**What was missing was the containment question.** `FindPairByRemotePath` matches a pair *root*
+exactly, which is all the row badges ever needed. A file several folders deep is equally synced and
+answered `null`. New `FindPairContainingRemotePath` / `FindPairContainingLocalPath` answer
+"which pair is this inside", longest root first so a nested pair beats the outer one. The check is
+segment-wise rather than a bare `StartsWith`, so `/my-files/Libros2` is not treated as living
+inside `/my-files/Libros` — a real pair of folders in the owner's own account.
+
+**Copying.** `PropertyField` gained an `IsCopyable` flag, defaulting to false so every existing
+field is untouched. It is set on paths only: they are the sole values here anyone needs elsewhere,
+and the only ones too long to retype. The button confirms in place ("Copiado"), because a clipboard
+write is otherwise entirely invisible.
+
+**Both panes, not one.** The local pane's dialog gained the mirror field ("Ruta remota"). Only the
+remote half was requested, but [§10](#10-u10--deduplicate-the-breadcrumbs) had just finished making
+these two panes consistent by construction; shipping half of this would have put that asymmetry
+straight back.
+
+**Found in passing.** Writing the end-to-end test surfaced that several existing tests construct
+`DriveItem` with `Name` and `Path` swapped — the record is `(Path, Name, IsFolder, Size)`. They
+passed anyway (the quota tests only sum sizes; the §9 search test happened to match either field),
+but they were asserting against a shape the app never produces. Fixed in the tests this round
+touched. Others elsewhere in the suite may still have it; not swept, since a broad rewrite of
+untouched tests belongs in its own change.
+
+---
+
 ## Appendix A — Claims checked against the source
 
 The initial screenshot review made eleven claims. Each was checked before being written up here.

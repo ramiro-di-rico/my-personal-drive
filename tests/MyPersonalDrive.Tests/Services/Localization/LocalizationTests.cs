@@ -124,8 +124,20 @@ public class LocalizationTests
         var constants = CollectConstants(typeof(StringKeys)).ToHashSet(StringComparer.Ordinal);
         var english = Load("en").Keys.ToHashSet(StringComparer.Ordinal);
 
-        var missingConstant = english.Except(constants).Order().ToList();
-        var danglingConstant = constants.Except(english).Order().ToList();
+        // A plural constant names the *prefix* — "console.activeoperations" — while the locale
+        // holds "…​.one" and "…​.other". Count the prefix as covered when its categories exist, and
+        // the categories as covered by that one constant.
+        var pluralPrefixes = english
+            .Where(key => key.EndsWith(".other", StringComparison.Ordinal))
+            .Select(key => key[..^6])
+            .Where(constants.Contains)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var missingConstant = english
+            .Where(key => !constants.Contains(key))
+            .Where(key => !pluralPrefixes.Any(prefix => key.StartsWith(prefix + ".", StringComparison.Ordinal)))
+            .Order().ToList();
+        var danglingConstant = constants.Except(english).Except(pluralPrefixes).Order().ToList();
 
         Assert.True(
             missingConstant.Count == 0 && danglingConstant.Count == 0,

@@ -69,6 +69,35 @@ public class LocalizerTests
         Assert.Equal("Sign in to Proton Drive", localizer.F(StringKeys.Settings.SignInTooltip, "Proton Drive"));
     }
 
+    [Theory]
+    [InlineData(0, "0 active operations")]
+    [InlineData(1, "1 active operation")]
+    [InlineData(2, "2 active operations")]
+    public void PluralSelectsTheCategoryForTheCount(int count, string expected)
+        => Assert.Equal(expected, new Localizer().Plural(StringKeys.Console.ActiveOperations, count));
+
+    [Theory]
+    [InlineData(0, "0 operaciones activas")]
+    [InlineData(1, "1 operación activa")]
+    [InlineData(2, "2 operaciones activas")]
+    public void PluralFollowsTheLanguage(int count, string expected)
+        => Assert.Equal(expected, new Localizer("es").Plural(StringKeys.Console.ActiveOperations, count));
+
+    /// <summary>
+    /// The markup used to carry "{0} operación(es) activa(s)" in a StringFormat — a Spanish-specific
+    /// hack no other language can reproduce. Whatever a locale is missing, Plural must still render
+    /// a sentence rather than a marker.
+    /// </summary>
+    [Fact]
+    public void PluralFallsBackToOtherWhenTheCategoryKeyIsMissing()
+    {
+        var localizer = new Localizer();
+
+        var rendered = localizer.Plural("console.activeoperations", 7);
+
+        Assert.Equal("7 active operations", rendered);
+    }
+
     [Fact]
     public void SetLanguageSwitchesTheStringsAndTheCulture()
     {

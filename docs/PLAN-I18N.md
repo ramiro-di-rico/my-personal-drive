@@ -16,13 +16,19 @@
 
 ## Status
 
-> **L0-L2 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
+> **L0-L3 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
 > passing (from 1001). The AOT publish is clean — only the five warnings that predate this work —
 > and both locales are verifiably embedded in the single-file binary. **Not visually verified: this
 > environment has no working screenshot tool** (GNOME refuses `ScreenshotWindow` over D-Bus), so
 > the Settings layout with the picker, and the language actually changing on screen, are both
 > unconfirmed by eye and want a human pass. The counts in §0.1 were taken on `feature/ux-round-2`
 > and are slightly low against the merged `main`, which added the per-pane toolbars.
+>
+> L3 turned up one thing worth carrying forward: `{Binding Loc[key]}` needs the DataContext to be
+> a view model, and one `DataTemplate` in the header is typed against `ProviderDescriptor`. That
+> single site names the singleton explicitly —
+> `{Binding [key], Source={x:Static loc:Localizer.Instance}, x:DataType=loc:Localizer}` — which is
+> still a compiled binding. Expect the same for any template over a model type in L4-L6.
 
 - [x] **L0 — Live-switch spike (partial).** The markup half is proven; the ViewModel half is wired
       but unobserved. See [§3](#3-l0--the-live-switch-spike) for what was and was not shown.
@@ -38,7 +44,16 @@
       into `SignInTooltip` / `SignOutTooltip` taking the provider name. Found in passing: the S3
       button's `Content` said "Conectar Bucket S3" while its own inner label said "Conectar S3" —
       one key now covers both.
-- [ ] **L3 — Shell and Explorer markup.** Not started.
+- [x] **L3 — Shell and Explorer markup.** All 128 remaining literals in `MainWindow.axaml`
+      (header, view tabs, both explorer toolbars, context menus, the status/details sidebar, folder
+      metrics, the CLI console, the viewer) resolved into 83 keys — the ratio is the four context
+      menus, which carried four copies of the same vocabulary. Both hidden `StringFormat` literals
+      became view-model properties: `LocalExplorerViewModel.FreeSpaceLabel` (which had kept an
+      English `"{0} free"` through the Spanish-only round) and
+      `MainWindowViewModel.ActiveOperationsText` (which had a Spanish-specific
+      `"operación(es) activa(s)"` plural hack, now `Localizer.Plural`). What is left in the file is
+      exactly L9's intended allowlist: the `DRIVE` wordmark, a `·` separator, and the five provider
+      names.
 - [ ] **L4 — Code-built dialogs (`MainWindow.axaml.cs`).** Not started.
 - [ ] **L5 — `MainWindowViewModel`.** Not started.
 - [ ] **L6 — Sync surface.** Not started.

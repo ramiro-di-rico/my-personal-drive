@@ -1260,8 +1260,22 @@ public sealed class MainWindowViewModel : ObservableObject
     public int ActiveOperationCount
     {
         get => _activeOperationCount;
-        private set => SetProperty(ref _activeOperationCount, value);
+        private set
+        {
+            if (SetProperty(ref _activeOperationCount, value))
+            {
+                OnPropertyChanged(nameof(ActiveOperationsText));
+            }
+        }
     }
+
+    /// <summary>
+    /// The floating status line's count. Was a <c>StringFormat</c> in the markup reading
+    /// "{0} operación(es) activa(s)" — a Spanish-specific plural hack that no other language can
+    /// reproduce, and which a XAML format string has no way to express. Plural selection belongs
+    /// here (docs/PLAN-I18N.md §5).
+    /// </summary>
+    public string ActiveOperationsText => Loc.Plural(StringKeys.Console.ActiveOperations, ActiveOperationCount);
 
     /// <summary>The most recent line added to the log, regardless of the search/warnings filter below — always the real last event, not whatever the filter happens to be hiding.</summary>
     public string? LastLogLine

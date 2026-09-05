@@ -135,7 +135,7 @@
                     CornerRadius="6"
                     Padding="10,4"
                     MinWidth="180"
-                    ToolTip.Tip="Seleccionar proveedor de almacenamiento">
+                    ToolTip.Tip="{Binding Loc[header.provider.tooltip]}">
             <ComboBox.ItemTemplate>
               <DataTemplate x:DataType="providers:ProviderDescriptor">
                 <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" VerticalAlignment="Center" Margin="2,2">
@@ -148,13 +148,19 @@
                        a filled dot, and the two measure different things — this one is "hay sesión
                        iniciada", that one is "se puede llegar al proveedor" (U2). Same colour
                        vocabulary, deliberately different shape. -->
+                  <!-- The one place that names the Localizer explicitly. Everywhere else the
+                       DataContext is a view model, so ObservableObject.Loc is in scope and
+                       {Binding Loc[key]} compiles; inside this template the DataContext is a
+                       ProviderDescriptor, which has no Loc and should not grow one. Source +
+                       x:DataType keeps it a compiled binding rather than falling back to
+                       reflection. -->
                   <Ellipse Grid.Column="2"
                            Width="9"
                            Height="9"
                            StrokeThickness="2"
                            Fill="Transparent"
                            VerticalAlignment="Center"
-                           ToolTip.Tip="Estado de la sesión en este proveedor">
+                           ToolTip.Tip="{Binding [header.session.tooltip], Source={x:Static loc:Localizer.Instance}, x:DataType=loc:Localizer}">
                     <Ellipse.Styles>
                       <Style Selector="Ellipse.auth">
                         <Setter Property="Stroke" Value="#28A745" />
@@ -281,19 +287,19 @@
             <StackPanel Orientation="Horizontal" Spacing="2">
               <Button Command="{Binding SetThemeDefaultCommand}"
                       Classes.active="{Binding IsSystemTheme}"
-                      ToolTip.Tip="Tema del sistema (predeterminado)"
+                      ToolTip.Tip="{Binding Loc[header.theme.system.tooltip]}"
                       Padding="6,4">
                 <Path Classes="icon" Data="{StaticResource IconMonitor}" Width="14" Height="14" />
               </Button>
               <Button Command="{Binding SetThemeLightCommand}"
                       Classes.active="{Binding IsLightTheme}"
-                      ToolTip.Tip="Tema claro"
+                      ToolTip.Tip="{Binding Loc[header.theme.light.tooltip]}"
                       Padding="6,4">
                 <Path Classes="icon" Data="{StaticResource IconSun}" Width="14" Height="14" />
               </Button>
               <Button Command="{Binding SetThemeDarkCommand}"
                       Classes.active="{Binding IsDarkTheme}"
-                      ToolTip.Tip="Tema oscuro"
+                      ToolTip.Tip="{Binding Loc[header.theme.dark.tooltip]}"
                       Padding="6,4">
                 <Path Classes="icon" Data="{StaticResource IconMoon}" Width="14" Height="14" />
               </Button>
@@ -308,7 +314,7 @@
           <Button Command="{Binding ToggleLocalExplorerPanelCommand}"
                   Classes.active="{Binding IsLocalExplorerPanelVisible}"
                   IsVisible="{Binding IsExplorerView}"
-                  ToolTip.Tip="Mostrar u ocultar el explorador local"
+                  ToolTip.Tip="{Binding Loc[header.localpane.tooltip]}"
                   Padding="8,6">
             <Path Classes="icon" Data="{StaticResource IconPanelRight}" Width="14" Height="14" />
           </Button>
@@ -316,10 +322,10 @@
           <!-- Global Settings Shortcut Button -->
           <Button Command="{Binding ToggleSettingsCommand}"
                   Classes.active="{Binding IsSettingsView}"
-                  ToolTip.Tip="Configuración global (Ctrl+,)">
+                  ToolTip.Tip="{Binding Loc[header.settings.tooltip]}">
             <StackPanel Orientation="Horizontal" Spacing="6">
               <Path Classes="icon" Data="{StaticResource IconSettings}" Width="14" Height="14" />
-              <TextBlock Text="Configuración" FontSize="12" />
+              <TextBlock Text="{Binding Loc[nav.settings]}" FontSize="12" />
             </StackPanel>
           </Button>
         </StackPanel>
@@ -338,7 +344,7 @@
               Classes.active="{Binding IsExplorerView}">
         <StackPanel Orientation="Horizontal" Spacing="8">
           <Path Classes="icon" Data="{StaticResource IconExplorer}" />
-          <TextBlock Text="Explorador" />
+          <TextBlock Text="{Binding Loc[nav.explorer]}" />
         </StackPanel>
       </Button>
       <!-- Opens the viewer on whatever row is selected. A menu entry and not only a per-row action,
@@ -347,10 +353,10 @@
            ImagePreviewPolicy). -->
       <Button Command="{Binding ViewSelectedFileCommand}"
               Classes.active="{Binding IsViewerVisible}"
-              ToolTip.Tip="Ver el contenido del archivo seleccionado">
+              ToolTip.Tip="{Binding Loc[nav.viewer.tooltip]}">
         <StackPanel Orientation="Horizontal" Spacing="8">
           <Path Classes="icon" Data="{StaticResource IconEye}" />
-          <TextBlock Text="Visor" />
+          <TextBlock Text="{Binding Loc[nav.viewer]}" />
         </StackPanel>
       </Button>
       <!-- The failure dot is the point of promoting sync up here: previously you had to open
@@ -358,16 +364,16 @@
            failing since last week (docs/PLAN-UX-ROUND-2.md §5). -->
       <Button Command="{Binding ShowSyncCommand}"
               Classes.active="{Binding IsSyncView}"
-              ToolTip.Tip="Pares de sincronización">
+              ToolTip.Tip="{Binding Loc[nav.sync.tooltip]}">
         <StackPanel Orientation="Horizontal" Spacing="8">
           <Path Classes="icon" Data="{StaticResource IconSync}" />
-          <TextBlock Text="Sincronización" />
+          <TextBlock Text="{Binding Loc[nav.sync]}" />
           <Ellipse Width="8"
                    Height="8"
                    Fill="#DC3545"
                    VerticalAlignment="Center"
                    IsVisible="{Binding SyncPanel.HasFailingPairs}"
-                   ToolTip.Tip="Hay pares con acciones fallidas" />
+                   ToolTip.Tip="{Binding Loc[nav.sync.failures.tooltip]}" />
         </StackPanel>
       </Button>
     </StackPanel>
@@ -394,13 +400,13 @@
                                    Icon="{StaticResource IconCloud}" />
             </Border>
 
-            <Button Grid.Column="1" ToolTip.Tip="Volver atrás" Command="{Binding BackCommand}">
+            <Button Grid.Column="1" ToolTip.Tip="{Binding Loc[explorer.back.tooltip]}" Command="{Binding BackCommand}">
               <Path Classes="icon" Data="{StaticResource IconArrowLeft}" />
             </Button>
-            <Button Grid.Column="2" ToolTip.Tip="Crear una carpeta" Command="{Binding CreateFolderCommand}">
+            <Button Grid.Column="2" ToolTip.Tip="{Binding Loc[explorer.newfolder.tooltip]}" Command="{Binding CreateFolderCommand}">
               <Path Classes="icon" Data="{StaticResource IconFolderPlus}" />
             </Button>
-            <Button Grid.Column="3" ToolTip.Tip="Subir archivos" Command="{Binding UploadCommand}">
+            <Button Grid.Column="3" ToolTip.Tip="{Binding Loc[explorer.upload.tooltip]}" Command="{Binding UploadCommand}">
               <Path Classes="icon" Data="{StaticResource IconUpload}" />
             </Button>
 
@@ -409,21 +415,21 @@
             <Button Grid.Column="4"
                     Classes="viewMode"
                     Classes.active="{Binding IsListView}"
-                    ToolTip.Tip="Ver como lista"
+                    ToolTip.Tip="{Binding Loc[explorer.view.list.tooltip]}"
                     Command="{Binding ShowListViewCommand}">
               <Path Classes="icon" Data="{StaticResource IconViewList}" />
             </Button>
             <Button Grid.Column="5"
                     Classes="viewMode"
                     Classes.active="{Binding IsIconsView}"
-                    ToolTip.Tip="Ver como iconos"
+                    ToolTip.Tip="{Binding Loc[explorer.view.icons.tooltip]}"
                     Command="{Binding ShowIconsViewCommand}">
               <Path Classes="icon" Data="{StaticResource IconViewGrid}" />
             </Button>
             <Button Grid.Column="6"
                     Classes="viewMode"
                     Classes.active="{Binding IsGalleryView}"
-                    ToolTip.Tip="Ver como galería"
+                    ToolTip.Tip="{Binding Loc[explorer.view.gallery.tooltip]}"
                     Command="{Binding ShowGalleryViewCommand}">
               <Path Classes="icon" Data="{StaticResource IconViewGallery}" />
             </Button>
@@ -452,14 +458,14 @@
             <!-- U9 (docs/PLAN-UX-ROUND-2.md §9): the box used to hide rows without saying how many
                  it hid, and the only way out was selecting the text and deleting it. -->
             <TextBox Width="200"
-                     PlaceholderText="Buscar en esta carpeta…"
+                     PlaceholderText="{Binding Loc[explorer.search.placeholder]}"
                      Text="{Binding SearchText, Mode=TwoWay}" />
             <Button Command="{Binding ClearSearchCommand}"
                     IsVisible="{Binding HasSearchText}"
                     Padding="6,2"
                     Margin="4,0,0,0"
                     VerticalAlignment="Center"
-                    ToolTip.Tip="Limpiar la búsqueda">
+                    ToolTip.Tip="{Binding Loc[explorer.search.clear.tooltip]}">
               <Path Classes="icon" Data="{StaticResource IconClear}" Width="12" Height="12" />
             </Button>
             <TextBlock Text="{Binding SearchResultText}"
@@ -468,28 +474,28 @@
                        Opacity="0.7"
                        FontSize="12"
                        Margin="6,0,8,0" />
-            <TextBlock Text="Ordenar por:" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
+            <TextBlock Text="{Binding Loc[explorer.sort.label]}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
             <Button Classes="sortKey" Classes.active="{Binding IsSortedByName}" Command="{Binding SortByNameCommand}">
               <StackPanel Orientation="Horizontal" Spacing="4">
-                <TextBlock Text="Nombre" />
+                <TextBlock Text="{Binding Loc[common.name]}" />
                 <TextBlock Text="{Binding SortDirectionGlyph}" IsVisible="{Binding IsSortedByName}" FontSize="10" />
               </StackPanel>
             </Button>
             <Button Classes="sortKey" Classes.active="{Binding IsSortedBySize}" Command="{Binding SortBySizeCommand}">
               <StackPanel Orientation="Horizontal" Spacing="4">
-                <TextBlock Text="Tamaño" />
+                <TextBlock Text="{Binding Loc[common.size]}" />
                 <TextBlock Text="{Binding SortDirectionGlyph}" IsVisible="{Binding IsSortedBySize}" FontSize="10" />
               </StackPanel>
             </Button>
             <Button Classes="sortKey" Classes.active="{Binding IsSortedByModified}" Command="{Binding SortByModifiedCommand}">
               <StackPanel Orientation="Horizontal" Spacing="4">
-                <TextBlock Text="Modificado" />
+                <TextBlock Text="{Binding Loc[common.modified]}" />
                 <TextBlock Text="{Binding SortDirectionGlyph}" IsVisible="{Binding IsSortedByModified}" FontSize="10" />
               </StackPanel>
             </Button>
             <Button Classes="sortKey" Classes.active="{Binding IsSortedByKind}" Command="{Binding SortByKindCommand}">
               <StackPanel Orientation="Horizontal" Spacing="4">
-                <TextBlock Text="Tipo" />
+                <TextBlock Text="{Binding Loc[common.type]}" />
                 <TextBlock Text="{Binding SortDirectionGlyph}" IsVisible="{Binding IsSortedByKind}" FontSize="10" />
               </StackPanel>
             </Button>
@@ -513,8 +519,8 @@
                   IsVisible="{Binding HasMultipleSelected}">
             <StackPanel Orientation="Horizontal" Spacing="10">
               <TextBlock VerticalAlignment="Center" FontWeight="Bold" Text="{Binding SelectionSummaryText}" />
-              <Button Content="Descargar seleccionados" Command="{Binding DownloadSelectedCommand}" />
-              <Button Content="Mover a la papelera" Command="{Binding TrashSelectedCommand}" />
+              <Button Content="{Binding Loc[explorer.download.selected]}" Command="{Binding DownloadSelectedCommand}" />
+              <Button Content="{Binding Loc[menu.trash]}" Command="{Binding TrashSelectedCommand}" />
             </StackPanel>
           </Border>
 
@@ -546,7 +552,7 @@
                         Classes.active="{Binding IsActive}"
                         Command="{Binding ApplyCommand}"
                         Content="{Binding LabelWithCount}"
-                        ToolTip.Tip="Filtrar por este tipo" />
+                        ToolTip.Tip="{Binding Loc[explorer.kindfilter.tooltip]}" />
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
@@ -562,11 +568,11 @@
                   MaxWidth="480">
             <StackPanel Spacing="14" HorizontalAlignment="Center">
               <Path Classes="icon" Data="{StaticResource IconKey}" Width="36" Height="36" Stroke="{DynamicResource AccentBrush}" HorizontalAlignment="Center" />
-              <TextBlock Text="Autenticación Requerida" FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" />
+              <TextBlock Text="{Binding Loc[auth.required.title]}" FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" />
               <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" TextAlignment="Center" Opacity="0.8" />
               <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center" Margin="0,8,0,0">
-                <Button Classes="primary" Content="Iniciar Sesión" Command="{Binding AuthenticateCommand}" Padding="16,8" />
-                <Button Content="Configuración" Command="{Binding ToggleSettingsCommand}" Padding="16,8" />
+                <Button Classes="primary" Content="{Binding Loc[auth.signin]}" Command="{Binding AuthenticateCommand}" Padding="16,8" />
+                <Button Content="{Binding Loc[nav.settings]}" Command="{Binding ToggleSettingsCommand}" Padding="16,8" />
               </StackPanel>
             </StackPanel>
           </Border>
@@ -589,26 +595,26 @@
                       Margin="0,0,0,6">
                   <Grid.ContextMenu>
                     <ContextMenu>
-                      <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
-                      <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
-                      <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
-                      <MenuItem Header="Copiar enlace para compartir"
+                      <MenuItem Header="{Binding Loc[menu.downloadhere]}" Command="{Binding DownloadHereCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.uploadhere]}" Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="{Binding Loc[menu.copypath]}" Command="{Binding CopyPathCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.copysharelink]}"
                                 Command="{Binding ShareLinkCommand}"
                                 IsEnabled="{Binding CanShareLink}"
                                 ToolTip.Tip="{Binding ShareLinkTooltip}"
                                 ToolTip.ShowOnDisabled="True" />
                       <Separator IsVisible="{Binding IsFolder}" />
-                      <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
-                      <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
-                      <MenuItem Header="Pausar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
-                      <MenuItem Header="Reanudar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
+                      <MenuItem Header="{Binding Loc[menu.syncpath]}" Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
+                      <MenuItem Header="{Binding Loc[menu.syncnow]}" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
+                      <MenuItem Header="{Binding Loc[menu.syncpause]}" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
+                      <MenuItem Header="{Binding Loc[menu.syncresume]}" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
                       <Separator />
-                      <MenuItem Header="Propiedades" Command="{Binding PropertiesCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.properties]}" Command="{Binding PropertiesCommand}" />
                     </ContextMenu>
                   </Grid.ContextMenu>
                   <Button Grid.Column="0"
                           Command="{Binding RowCommand}"
-                          ToolTip.Tip="Seleccionar el elemento o abrir la carpeta"
+                          ToolTip.Tip="{Binding Loc[explorer.row.open.tooltip]}"
                           HorizontalAlignment="Stretch"
                           HorizontalContentAlignment="Left"
                           Focusable="False">
@@ -617,9 +623,9 @@
                       <Path Classes="icon" Data="{StaticResource IconFile}" IsVisible="{Binding IsFile}" />
                       <TextBlock Text="{Binding DisplayName}" />
                       <Path Classes="icon" Data="{StaticResource IconRefresh}" Width="12" Height="12" Opacity="0.7"
-                            IsVisible="{Binding IsSyncPairActive}" ToolTip.Tip="Par de sincronización activo" />
+                            IsVisible="{Binding IsSyncPairActive}" ToolTip.Tip="{Binding Loc[explorer.row.syncactive.tooltip]}" />
                       <Path Classes="icon" Data="{StaticResource IconPause}" Width="12" Height="12" Opacity="0.7"
-                            IsVisible="{Binding IsSyncPairPaused}" ToolTip.Tip="Par de sincronización pausado" />
+                            IsVisible="{Binding IsSyncPairPaused}" ToolTip.Tip="{Binding Loc[explorer.row.syncpaused.tooltip]}" />
                     </StackPanel>
                   </Button>
 
@@ -635,7 +641,7 @@
 
                   <Button Grid.Column="2"
                           Classes="rowAction"
-                          ToolTip.Tip="Ver el contenido"
+                          ToolTip.Tip="{Binding Loc[menu.preview]}"
                           Margin="8,0,0,0"
                           Command="{Binding PreviewCommand}"
                           IsVisible="{Binding CanPreview}">
@@ -644,7 +650,7 @@
 
                   <Button Grid.Column="3"
                           Classes="rowAction"
-                          ToolTip.Tip="Crear una copia"
+                          ToolTip.Tip="{Binding Loc[menu.copy]}"
                           Margin="8,0,0,0"
                           Command="{Binding CopyCommand}">
                     <Path Classes="icon" Data="{StaticResource IconCopy}" />
@@ -652,7 +658,7 @@
 
                   <Button Grid.Column="4"
                           Classes="rowAction"
-                          ToolTip.Tip="Renombrar el elemento"
+                          ToolTip.Tip="{Binding Loc[explorer.row.rename.tooltip]}"
                           Margin="8,0,0,0"
                           Command="{Binding RenameCommand}">
                     <Path Classes="icon" Data="{StaticResource IconPencil}" />
@@ -669,7 +675,7 @@
 
                   <Button Grid.Column="6"
                           Classes="rowAction"
-                          ToolTip.Tip="Mover a la papelera"
+                          ToolTip.Tip="{Binding Loc[menu.trash]}"
                           Margin="8,0,0,0"
                           Command="{Binding TrashCommand}">
                     <Path Classes="icon" Data="{StaticResource IconTrash}" />
@@ -698,32 +704,32 @@
                 <Border Classes="tile" Classes.selected="{Binding IsSelected}">
                   <Border.ContextMenu>
                     <ContextMenu>
-                      <MenuItem Header="Abrir / seleccionar" Command="{Binding RowCommand}" />
-                      <MenuItem Header="Ver el contenido" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
-                      <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
-                      <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
-                      <MenuItem Header="Descargar"
+                      <MenuItem Header="{Binding Loc[menu.open]}" Command="{Binding RowCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.preview]}" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
+                      <MenuItem Header="{Binding Loc[menu.copy]}" Command="{Binding CopyCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.rename]}" Command="{Binding RenameCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.download]}"
                                 Command="{Binding DownloadCommand}"
                                 IsVisible="{Binding IsFile}"
                                 IsEnabled="{Binding CanDownload}"
                                 ToolTip.Tip="{Binding DownloadTooltip}"
                                 ToolTip.ShowOnDisabled="True" />
-                      <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
-                      <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
-                      <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
-                      <MenuItem Header="Copiar enlace para compartir"
+                      <MenuItem Header="{Binding Loc[menu.downloadhere]}" Command="{Binding DownloadHereCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.uploadhere]}" Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="{Binding Loc[menu.copypath]}" Command="{Binding CopyPathCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.copysharelink]}"
                                 Command="{Binding ShareLinkCommand}"
                                 IsEnabled="{Binding CanShareLink}"
                                 ToolTip.Tip="{Binding ShareLinkTooltip}"
                                 ToolTip.ShowOnDisabled="True" />
                       <Separator IsVisible="{Binding IsFolder}" />
-                      <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
-                      <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
-                      <MenuItem Header="Pausar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
-                      <MenuItem Header="Reanudar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
+                      <MenuItem Header="{Binding Loc[menu.syncpath]}" Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
+                      <MenuItem Header="{Binding Loc[menu.syncnow]}" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
+                      <MenuItem Header="{Binding Loc[menu.syncpause]}" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
+                      <MenuItem Header="{Binding Loc[menu.syncresume]}" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
                       <Separator />
-                      <MenuItem Header="Mover a la papelera" Command="{Binding TrashCommand}" />
-                      <MenuItem Header="Propiedades" Command="{Binding PropertiesCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.trash]}" Command="{Binding TrashCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.properties]}" Command="{Binding PropertiesCommand}" />
                     </ContextMenu>
                   </Border.ContextMenu>
                   <Button Command="{Binding RowCommand}"
@@ -767,32 +773,32 @@
                 <Border Classes="tile" Classes.selected="{Binding IsSelected}">
                   <Border.ContextMenu>
                     <ContextMenu>
-                      <MenuItem Header="Abrir / seleccionar" Command="{Binding RowCommand}" />
-                      <MenuItem Header="Ver el contenido" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
-                      <MenuItem Header="Crear una copia" Command="{Binding CopyCommand}" />
-                      <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
-                      <MenuItem Header="Descargar"
+                      <MenuItem Header="{Binding Loc[menu.open]}" Command="{Binding RowCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.preview]}" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
+                      <MenuItem Header="{Binding Loc[menu.copy]}" Command="{Binding CopyCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.rename]}" Command="{Binding RenameCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.download]}"
                                 Command="{Binding DownloadCommand}"
                                 IsVisible="{Binding IsFile}"
                                 IsEnabled="{Binding CanDownload}"
                                 ToolTip.Tip="{Binding DownloadTooltip}"
                                 ToolTip.ShowOnDisabled="True" />
-                      <MenuItem Header="Descargar aquí" Command="{Binding DownloadHereCommand}" />
-                      <MenuItem Header="Subir a esta carpeta..." Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
-                      <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
-                      <MenuItem Header="Copiar enlace para compartir"
+                      <MenuItem Header="{Binding Loc[menu.downloadhere]}" Command="{Binding DownloadHereCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.uploadhere]}" Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
+                      <MenuItem Header="{Binding Loc[menu.copypath]}" Command="{Binding CopyPathCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.copysharelink]}"
                                 Command="{Binding ShareLinkCommand}"
                                 IsEnabled="{Binding CanShareLink}"
                                 ToolTip.Tip="{Binding ShareLinkTooltip}"
                                 ToolTip.ShowOnDisabled="True" />
                       <Separator IsVisible="{Binding IsFolder}" />
-                      <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
-                      <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
-                      <MenuItem Header="Pausar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
-                      <MenuItem Header="Reanudar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
+                      <MenuItem Header="{Binding Loc[menu.syncpath]}" Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
+                      <MenuItem Header="{Binding Loc[menu.syncnow]}" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
+                      <MenuItem Header="{Binding Loc[menu.syncpause]}" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
+                      <MenuItem Header="{Binding Loc[menu.syncresume]}" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
                       <Separator />
-                      <MenuItem Header="Mover a la papelera" Command="{Binding TrashCommand}" />
-                      <MenuItem Header="Propiedades" Command="{Binding PropertiesCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.trash]}" Command="{Binding TrashCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.properties]}" Command="{Binding PropertiesCommand}" />
                     </ContextMenu>
                   </Border.ContextMenu>
                   <Button Command="{Binding RowCommand}"
@@ -878,7 +884,7 @@
                       ResizeDirection="Columns"
                       DoubleTapped="ExplorerSplitter_DoubleTapped"
                       IsVisible="{Binding IsLocalExplorerPanelVisible}"
-                      ToolTip.Tip="Arrastrá para redimensionar · doble clic para restablecer" />
+                      ToolTip.Tip="{Binding Loc[explorer.splitter.tooltip]}" />
 
         <!-- Local pane: read-only browsing only (navigate, breadcrumb, home, hidden-files toggle,
              free space). File operations and drag-and-drop transfer are separate plan tasks.
@@ -905,13 +911,13 @@
                    cloud pane's own search box (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1). -->
               <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Left">
                 <TextBox Width="200"
-                         PlaceholderText="Buscar en esta carpeta…"
+                         PlaceholderText="{Binding Loc[explorer.search.placeholder]}"
                          Text="{Binding SearchText, Mode=TwoWay}" />
                 <Button Command="{Binding ClearSearchCommand}"
                         IsVisible="{Binding HasSearchText}"
                         Padding="6,2"
                         VerticalAlignment="Center"
-                        ToolTip.Tip="Limpiar la búsqueda">
+                        ToolTip.Tip="{Binding Loc[explorer.search.clear.tooltip]}">
                   <Path Classes="icon" Data="{StaticResource IconClear}" Width="12" Height="12" />
                 </Button>
                 <TextBlock Text="{Binding SearchResultText}"
@@ -923,24 +929,24 @@
               </StackPanel>
             </Border>
 
-            <Button Grid.Column="1" ToolTip.Tip="Ir a la carpeta personal" Command="{Binding GoHomeCommand}">
+            <Button Grid.Column="1" ToolTip.Tip="{Binding Loc[local.home.tooltip]}" Command="{Binding GoHomeCommand}">
               <Path Classes="icon" Data="{StaticResource IconHome}" />
             </Button>
             <Button Grid.Column="2"
                     Classes="viewMode"
                     Classes.active="{Binding ShowHiddenFiles}"
-                    ToolTip.Tip="Mostrar u ocultar los archivos ocultos"
+                    ToolTip.Tip="{Binding Loc[local.hidden.tooltip]}"
                     Command="{Binding ToggleHiddenFilesCommand}">
               <Path Classes="icon" Data="{StaticResource IconEyeOff}" />
             </Button>
-            <Button Grid.Column="3" ToolTip.Tip="Actualizar" Command="{Binding RefreshCommand}">
+            <Button Grid.Column="3" ToolTip.Tip="{Binding Loc[common.refresh]}" Command="{Binding RefreshCommand}">
               <Path Classes="icon" Data="{StaticResource IconRefresh}" />
             </Button>
             <TextBlock Grid.Column="4"
                        VerticalAlignment="Center"
                        Opacity="0.7"
                        FontSize="12"
-                       Text="{Binding FreeSpaceText, StringFormat='{}{0} free'}" />
+                       Text="{Binding FreeSpaceLabel}" />
           </Grid>
 
           <Grid Grid.Row="1" RowDefinitions="Auto,Auto,*">
@@ -961,7 +967,7 @@
                     IsVisible="{Binding HasMultipleSelected}">
               <StackPanel Orientation="Horizontal" Spacing="10">
                 <TextBlock VerticalAlignment="Center" FontWeight="Bold" Text="{Binding SelectionSummaryText}" />
-                <Button Content="Eliminar seleccionados" Command="{Binding DeleteSelectedCommand}" />
+                <Button Content="{Binding Loc[local.delete.selected]}" Command="{Binding DeleteSelectedCommand}" />
               </StackPanel>
             </Border>
 
@@ -982,16 +988,16 @@
                           HorizontalContentAlignment="Stretch">
                     <Button.ContextMenu>
                       <ContextMenu>
-                        <MenuItem Header="Copiar ruta" Command="{Binding CopyPathCommand}" />
-                        <MenuItem Header="Renombrar" Command="{Binding RenameCommand}" />
+                        <MenuItem Header="{Binding Loc[menu.copypath]}" Command="{Binding CopyPathCommand}" />
+                        <MenuItem Header="{Binding Loc[menu.rename]}" Command="{Binding RenameCommand}" />
                         <Separator IsVisible="{Binding IsFolder}" />
-                        <MenuItem Header="Sincronizar esta ruta..." Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
-                        <MenuItem Header="Sincronizar ahora" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
-                        <MenuItem Header="Pausar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
-                        <MenuItem Header="Reanudar sincronización" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
+                        <MenuItem Header="{Binding Loc[menu.syncpath]}" Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
+                        <MenuItem Header="{Binding Loc[menu.syncnow]}" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
+                        <MenuItem Header="{Binding Loc[menu.syncpause]}" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
+                        <MenuItem Header="{Binding Loc[menu.syncresume]}" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
                         <Separator />
-                        <MenuItem Header="Eliminar" Command="{Binding DeleteCommand}" />
-                        <MenuItem Header="Propiedades" Command="{Binding PropertiesCommand}" />
+                        <MenuItem Header="{Binding Loc[menu.delete]}" Command="{Binding DeleteCommand}" />
+                        <MenuItem Header="{Binding Loc[menu.properties]}" Command="{Binding PropertiesCommand}" />
                       </ContextMenu>
                     </Button.ContextMenu>
                     <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
@@ -1012,7 +1018,7 @@
                             VerticalAlignment="Center"
                             Data="{StaticResource IconRefresh}"
                             IsVisible="{Binding IsSyncPairActive}"
-                            ToolTip.Tip="Par de sincronización activo" />
+                            ToolTip.Tip="{Binding Loc[explorer.row.syncactive.tooltip]}" />
                       <Path Grid.Column="2"
                             Classes="icon"
                             Width="12"
@@ -1021,7 +1027,7 @@
                             VerticalAlignment="Center"
                             Data="{StaticResource IconPause}"
                             IsVisible="{Binding IsSyncPairPaused}"
-                            ToolTip.Tip="Par de sincronización pausado" />
+                            ToolTip.Tip="{Binding Loc[explorer.row.syncpaused.tooltip]}" />
                       <TextBlock Grid.Column="3"
                                  VerticalAlignment="Center"
                                  FontSize="12"
@@ -1066,7 +1072,7 @@
                than the panel on a short window, and a clipped histogram is worse than a scrollbar. -->
           <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
           <StackPanel Spacing="10">
-            <TextBlock FontSize="18" Text="Estado" />
+            <TextBlock FontSize="18" Text="{Binding Loc[status.title]}" />
 
             <!-- Drag-and-drop transfer queue (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5). Only
                  status text and a Cancel button — no progress bar/ETA, since nothing in the CLI
@@ -1088,7 +1094,7 @@
                                 Grid.Column="1"
                                 Padding="4"
                                 Command="{Binding CancelCommand}"
-                                ToolTip.Tip="Cancelar">
+                                ToolTip.Tip="{Binding Loc[common.cancel]}">
                           <Path Classes="icon" Width="12" Height="12" Data="{StaticResource IconClear}" />
                         </Button>
                         <TextBlock Grid.Row="1"
@@ -1133,7 +1139,7 @@
                         IsVisible="{Binding HasStatusAction}"
                         Content="{Binding StatusActionLabel}"
                         Command="{Binding StatusActionCommand}"
-                        ToolTip.Tip="Reintenta la última operación, o vuelve a iniciar sesión si la sesión expiró" />
+                        ToolTip.Tip="{Binding Loc[status.action.tooltip]}" />
               </StackPanel>
               <Border.Styles>
                 <Style Selector="Border#StatusBorder">
@@ -1150,7 +1156,7 @@
 
             <TextBlock Opacity="0.7"
                        TextWrapping="Wrap"
-                       Text="Seleccioná un archivo o una carpeta para ver sus detalles."
+                       Text="{Binding Loc[status.empty.details]}"
                        IsVisible="{Binding !HasSelection}" />
 
             <!-- Multi-select summary (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) replaces the
@@ -1158,23 +1164,23 @@
                  different files isn't one field. -->
             <StackPanel Spacing="10" IsVisible="{Binding HasMultipleSelected}">
               <TextBlock FontWeight="Bold" Text="{Binding SelectionSummaryText}" />
-              <TextBlock Opacity="0.7" TextWrapping="Wrap" Text="Usá la barra de acciones sobre la lista para descargar o mover a la papelera." />
+              <TextBlock Opacity="0.7" TextWrapping="Wrap" Text="{Binding Loc[status.empty.hint]}" />
             </StackPanel>
 
             <StackPanel Spacing="10" IsVisible="{Binding IsSingleSelected}">
-              <TextBlock FontWeight="Bold" Text="Elemento seleccionado" />
+              <TextBlock FontWeight="Bold" Text="{Binding Loc[status.selected.title]}" />
               <TextBlock Text="{Binding SelectedName}" />
-              <TextBlock FontWeight="Bold" Text="Tipo" />
+              <TextBlock FontWeight="Bold" Text="{Binding Loc[common.type]}" />
               <TextBlock Text="{Binding SelectedKind}" />
-              <TextBlock FontWeight="Bold" Text="Ruta" />
+              <TextBlock FontWeight="Bold" Text="{Binding Loc[common.path]}" />
               <TextBlock TextWrapping="Wrap" Text="{Binding SelectedPath}" />
-              <TextBlock FontWeight="Bold" Text="Tamaño" />
+              <TextBlock FontWeight="Bold" Text="{Binding Loc[common.size]}" />
               <TextBlock Text="{Binding SelectedSize}" />
-              <TextBlock FontWeight="Bold" Text="Modificado" />
+              <TextBlock FontWeight="Bold" Text="{Binding Loc[common.modified]}" />
               <TextBlock TextWrapping="Wrap" Text="{Binding SelectedModified}" />
-              <TextBlock FontWeight="Bold" Text="Propietario" />
+              <TextBlock FontWeight="Bold" Text="{Binding Loc[common.owner]}" />
               <TextBlock TextWrapping="Wrap" Text="{Binding SelectedOwner}" />
-              <TextBlock FontWeight="Bold" Text="Compartido" />
+              <TextBlock FontWeight="Bold" Text="{Binding Loc[common.shared]}" />
               <TextBlock Text="{Binding SelectedShared}" />
             </StackPanel>
 
@@ -1183,7 +1189,7 @@
                  CLI (docs/PLAN-BROWSER-VIEWS.md M2/M3), which is why ScopeNote spells out what the
                  total leaves out instead of letting it read as recursive. -->
             <Border Height="1" Background="{DynamicResource CardBackgroundBrush}" Margin="0,4" />
-            <TextBlock FontSize="16" FontWeight="Bold" Text="Métricas de la carpeta" />
+            <TextBlock FontSize="16" FontWeight="Bold" Text="{Binding Loc[metrics.title]}" />
             <TextBlock Text="{Binding Metrics.Headline}" />
 
             <StackPanel Spacing="10" IsVisible="{Binding Metrics.HasItems}">
@@ -1210,8 +1216,8 @@
                       HorizontalAlignment="Stretch"
                       HorizontalContentAlignment="Left">
                 <StackPanel Spacing="2">
-                  <TextBlock Text="Calcular tamaño total (recursivo)" />
-                  <TextBlock Text="Analiza todas las subcarpetas; puede tardar varios minutos."
+                  <TextBlock Text="{Binding Loc[metrics.scan]}" />
+                  <TextBlock Text="{Binding Loc[metrics.scan.hint]}"
                              TextWrapping="Wrap"
                              FontSize="11"
                              Opacity="0.7" />
@@ -1221,7 +1227,7 @@
               <StackPanel Spacing="6" IsVisible="{Binding Metrics.IsScanning}">
                 <ProgressBar IsIndeterminate="True" />
                 <TextBlock Text="{Binding Metrics.ProgressText}" FontSize="12" />
-                <Button Command="{Binding CancelDeepScanCommand}" Content="Cancelar análisis" />
+                <Button Command="{Binding CancelDeepScanCommand}" Content="{Binding Loc[metrics.scan.cancel]}" />
               </StackPanel>
 
               <!-- Bar chart made of Borders: no charting dependency, and the widths come from the
@@ -1246,7 +1252,7 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
 
-              <TextBlock FontWeight="Bold" Text="Más grandes" IsVisible="{Binding Metrics.HasLargestItems}" />
+              <TextBlock FontWeight="Bold" Text="{Binding Loc[metrics.largest]}" IsVisible="{Binding Metrics.HasLargestItems}" />
               <ItemsControl ItemsSource="{Binding Metrics.LargestItems}" IsVisible="{Binding Metrics.HasLargestItems}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="vm:LargestItemViewModel">
@@ -1267,16 +1273,16 @@
               </ItemsControl>
 
               <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" ColumnSpacing="8">
-                <TextBlock Text="Más reciente:" FontSize="12" Opacity="0.7" />
+                <TextBlock Text="{Binding Loc[metrics.newest]}" FontSize="12" Opacity="0.7" />
                 <TextBlock Grid.Column="1" Text="{Binding Metrics.NewestText}" FontSize="12" />
-                <TextBlock Grid.Row="1" Text="Más antiguo:" FontSize="12" Opacity="0.7" />
+                <TextBlock Grid.Row="1" Text="{Binding Loc[metrics.oldest]}" FontSize="12" Opacity="0.7" />
                 <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Metrics.OldestText}" FontSize="12" />
               </Grid>
             </StackPanel>
 
-            <TextBlock FontWeight="Bold" Text="Carpeta actual" />
+            <TextBlock FontWeight="Bold" Text="{Binding Loc[metrics.scope.current]}" />
             <TextBlock TextWrapping="Wrap" Text="{Binding CurrentPath}" />
-            <TextBlock FontWeight="Bold" Text="Raíz" />
+            <TextBlock FontWeight="Bold" Text="{Binding Loc[metrics.scope.root]}" />
             <TextBlock Text="{Binding RootPath}" />
           </StackPanel>
           </ScrollViewer>
@@ -1287,7 +1293,7 @@
         <StackPanel Spacing="8">
           <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsLoading}">
             <ProgressBar Width="120" IsIndeterminate="True" />
-            <TextBlock VerticalAlignment="Center" Text="Cargando…" />
+            <TextBlock VerticalAlignment="Center" Text="{Binding Loc[common.loading]}" />
           </StackPanel>
 
           <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
@@ -1297,17 +1303,17 @@
                 <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
               </Style>
             </Grid.Styles>
-            <TextBlock FontSize="16" FontWeight="Bold" Text="Actividad del CLI" />
+            <TextBlock FontSize="16" FontWeight="Bold" Text="{Binding Loc[console.title]}" />
             <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding ActiveCommand}" />
             <TextBox Grid.Column="2"
                       Width="160"
-                      PlaceholderText="Buscar en el log..."
+                      PlaceholderText="{Binding Loc[console.search.placeholder]}"
                       Text="{Binding LogSearchText, Mode=TwoWay}" />
             <Button Grid.Column="3"
                     Classes="viewMode"
                     Classes.active="{Binding ShowOnlyWarningsAndErrors}"
                     Command="{Binding ToggleLogFilterCommand}"
-                    ToolTip.Tip="Mostrar solo advertencias y errores">
+                    ToolTip.Tip="{Binding Loc[console.warningsonly.tooltip]}">
               <Path Classes="icon" Data="{StaticResource IconWarning}" />
             </Button>
             <Button Grid.Column="4"
@@ -1317,12 +1323,12 @@
             </Button>
             <Button Grid.Column="5"
                     Command="{Binding DownloadActivityCommand}"
-                    ToolTip.Tip="Descargar el registro de actividad">
+                    ToolTip.Tip="{Binding Loc[console.download.tooltip]}">
               <Path Classes="icon" Data="{StaticResource IconSave}" />
             </Button>
             <Button Grid.Column="6"
                     Command="{Binding ClearActivityCommand}"
-                    ToolTip.Tip="Limpiar el registro de actividad">
+                    ToolTip.Tip="{Binding Loc[console.clear.tooltip]}">
               <Path Classes="icon" Data="{StaticResource IconClear}" />
             </Button>
           </Grid>
@@ -1338,7 +1344,7 @@
             <TextBlock VerticalAlignment="Center"
                        FontSize="12"
                        Opacity="0.8"
-                       Text="{Binding ActiveOperationCount, StringFormat='{}{0} operación(es) activa(s)'}" />
+                       Text="{Binding ActiveOperationsText}" />
             <TextBlock VerticalAlignment="Center"
                        FontSize="12"
                        Opacity="0.5"
@@ -1399,7 +1405,7 @@
                         Spacing="8"
                         VerticalAlignment="Center"
                         IsVisible="{Binding HasViewerZoomableContent}">
-              <TextBlock VerticalAlignment="Center" FontSize="12" Opacity="0.7" Text="Zoom:" />
+              <TextBlock VerticalAlignment="Center" FontSize="12" Opacity="0.7" Text="{Binding Loc[viewer.zoom.label]}" />
               <Slider Width="140"
                       VerticalAlignment="Center"
                       Minimum="0.25"
@@ -1417,7 +1423,7 @@
             <Button Grid.Column="2"
                     VerticalAlignment="Top"
                     Command="{Binding CloseViewerCommand}"
-                    ToolTip.Tip="Cerrar el visor">
+                    ToolTip.Tip="{Binding Loc[viewer.close.tooltip]}">
               <Path Classes="icon" Data="{StaticResource IconClear}" />
             </Button>
           </Grid>
@@ -1431,7 +1437,7 @@
 
           <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsViewerLoading}">
             <ProgressBar Width="120" IsIndeterminate="True" />
-            <TextBlock VerticalAlignment="Center" Text="Descargando el archivo para verlo…" />
+            <TextBlock VerticalAlignment="Center" Text="{Binding Loc[viewer.loading]}" />
           </StackPanel>
 
           <!-- NoWrap with horizontal scrolling, for the same reason as the CLI console above:

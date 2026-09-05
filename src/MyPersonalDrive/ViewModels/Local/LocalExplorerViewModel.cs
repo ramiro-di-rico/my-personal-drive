@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Localization;
 using MyPersonalDrive.ViewModels.Sync;
 
 namespace MyPersonalDrive.ViewModels.Local;
@@ -46,6 +47,11 @@ public sealed class LocalExplorerViewModel : ObservableObject
         SelectAllCommand = new AsyncCommand(SelectAllAsync, () => Items.Count > 0, onError);
         DeleteSelectedCommand = new AsyncCommand(DeleteSelectedAsync, () => SelectedCount > 0, onError);
         ClearSearchCommand = new AsyncCommand(ClearSearchAsync, () => HasSearchText, onError);
+
+        // Long-lived, like the window itself, so subscribing without unsubscribing is not a leak.
+        // Deliberately not done in ObservableObject: a row view model is recreated on every
+        // listing, and the singleton would accumulate a handler per row (docs/PLAN-I18N.md §3).
+        Loc.LanguageChanged += (_, _) => OnAllPropertiesChanged();
     }
 
     public ObservableCollection<LocalNodeViewModel> Items { get; }
@@ -71,8 +77,22 @@ public sealed class LocalExplorerViewModel : ObservableObject
     public string FreeSpaceText
     {
         get => _freeSpaceText;
-        private set => SetProperty(ref _freeSpaceText, value);
+        private set
+        {
+            if (SetProperty(ref _freeSpaceText, value))
+            {
+                OnPropertyChanged(nameof(FreeSpaceLabel));
+            }
+        }
     }
+
+    /// <summary>
+    /// The free-space line as shown. The markup used to wrap <see cref="FreeSpaceText"/> in a
+    /// <c>StringFormat</c> of "{0} free" — which had survived the round that made the interface
+    /// Spanish (PLAN-UX-ROUND-2 U4) precisely because a format string inside a binding does not
+    /// look like a literal.
+    /// </summary>
+    public string FreeSpaceLabel => Loc.F(StringKeys.Local.FreeSpace, FreeSpaceText);
 
     public bool IsLoading
     {

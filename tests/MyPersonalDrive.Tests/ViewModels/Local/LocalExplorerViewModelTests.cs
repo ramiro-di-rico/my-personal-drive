@@ -35,6 +35,38 @@ public class LocalExplorerViewModelTests : IDisposable
     private LocalExplorerViewModel Build(string homePath)
         => new(new FakeHomeLocalFileSystemService(homePath), new AppSettingsService());
 
+    /// <summary>
+    /// The free-space line used to be a XAML StringFormat of "{0} free" — English that survived
+    /// the Spanish-only round because a format string inside a binding does not read as a literal
+    /// (docs/PLAN-I18N.md §5). It is a view-model property now, so it is testable at all.
+    /// </summary>
+    [Fact]
+    public async Task FreeSpaceLabel_RendersThroughTheStringTable_AndFollowsFreeSpaceText()
+    {
+        var sut = Build(_root);
+        await sut.NavigateAsync(_root);
+
+        Assert.Contains(sut.FreeSpaceText, sut.FreeSpaceLabel, StringComparison.Ordinal);
+        Assert.NotEqual(sut.FreeSpaceText, sut.FreeSpaceLabel);
+    }
+
+    /// <summary>The label is derived, so it has to be announced alongside the value it derives from.</summary>
+    [Fact]
+    public async Task FreeSpaceLabel_IsAnnouncedWheneverFreeSpaceTextChanges()
+    {
+        var service = new ChangingFreeSpaceService(_root, 1_000, 2_000);
+        var sut = new LocalExplorerViewModel(service, new AppSettingsService());
+        await sut.NavigateAsync(_root);
+
+        var raised = new List<string?>();
+        sut.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        await sut.NavigateAsync(_root);
+
+        Assert.Contains(nameof(sut.FreeSpaceText), raised);
+        Assert.Contains(nameof(sut.FreeSpaceLabel), raised);
+    }
+
     [Fact]
     public async Task NavigateAsync_ListsAndSortsWithFoldersFirst()
     {
@@ -386,5 +418,17 @@ public class LocalExplorerViewModelTests : IDisposable
     private sealed class FakeHomeLocalFileSystemService(string home) : LocalFileSystemService
     {
         public override string GetHomeDirectory() => home;
+    }
+
+    /// <summary>Reports a different amount of free space on each call, so the derived label has
+    /// something to actually change in response to.</summary>
+    private sealed class ChangingFreeSpaceService(string home, params long[] freeBytes) : LocalFileSystemService
+    {
+        private int _call;
+
+        public override string GetHomeDirectory() => home;
+
+        public override long? AvailableFreeBytes(string path)
+            => freeBytes[Math.Min(_call++, freeBytes.Length - 1)];
     }
 }

@@ -409,6 +409,48 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         Assert.False(sut.IsProtonAuthenticated);
     }
 
+    // Regression, reported live (docs/PLAN-UX-ROUND-2.md §11): the header ComboBox went blank
+    // after signing in. AvailableProviders is updated in place, and Avalonia clears the selection
+    // when the *selected element* is replaced; the two-way binding then wrote -1 back, the setter
+    // correctly ignored it, and nothing pushed the real index out again. The sign-in path was the
+    // one call site that did not re-raise SelectedProviderIndex, so the raise moved inside
+    // RefreshAvailableProviders where no caller can forget it.
+    [Fact]
+    public void RefreshingTheProviderList_ReRaisesTheSelectedIndex_SoTheComboBoxCanResync()
+    {
+        var sut = Build(isAuthenticated: false);
+        var raised = new List<string>();
+        sut.PropertyChanged += (_, e) => raised.Add(e.PropertyName ?? string.Empty);
+
+        // Any auth-state change refreshes the list, replacing element 0 — the selected one.
+        typeof(MainWindowViewModel)
+            .GetProperty("IsAuthenticated", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(sut, true);
+        typeof(MainWindowViewModel)
+            .GetMethod("RefreshAvailableProviders", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .Invoke(sut, null);
+
+        Assert.Contains(nameof(MainWindowViewModel.SelectedProviderIndex), raised);
+        Assert.Contains(nameof(MainWindowViewModel.SelectedProvider), raised);
+
+        // And the index it re-publishes is the real one, not the -1 the control wrote back.
+        Assert.Equal(0, sut.SelectedProviderIndex);
+        Assert.Equal(ProviderId.Proton, sut.SelectedProvider!.Id);
+    }
+
+    // The setter must keep ignoring the -1 the control writes when it clears its own selection:
+    // that is the control reporting its state, not the user choosing "no provider".
+    [Fact]
+    public void SelectedProviderIndex_IgnoresAnOutOfRangeWriteBack()
+    {
+        var sut = Build(isAuthenticated: true);
+
+        sut.SelectedProviderIndex = -1;
+
+        Assert.Equal(0, sut.SelectedProviderIndex);
+        Assert.Equal(ProviderId.Proton, sut.SelectedProvider!.Id);
+    }
+
     [Fact]
     public void SelectedProvider_ReflectsActiveProvider_AndListsAvailable()
     {

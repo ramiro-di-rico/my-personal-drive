@@ -211,6 +211,16 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         }
 
+        // Avalonia's SelectingItemsControl clears its selection when the *selected element* is
+        // replaced, even in place — and every refresh replaces element 0, which is normally the
+        // selected provider. The two-way binding then writes -1 back, SelectedProviderIndex's
+        // setter correctly ignores it, and nothing ever pushes the real index out again: the
+        // header ComboBox renders blank while the view model still knows exactly which provider is
+        // active. Raised here rather than at the call sites because two of the four already did it
+        // and the sign-in path did not, which is precisely how the bug got in
+        // (docs/PLAN-UX-ROUND-2.md §11; same family as PLAN-CLOUD-PROVIDERS.md P10 Appendix A2 #4).
+        OnPropertyChanged(nameof(SelectedProvider));
+        OnPropertyChanged(nameof(SelectedProviderIndex));
         RaiseProviderAuthStates();
     }
 

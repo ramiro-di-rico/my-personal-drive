@@ -402,6 +402,66 @@ change — and it makes the two panes consistent by construction rather than by 
 
 ---
 
+## 11. Two bugs found by actually looking at the app
+
+Both reported by the repo owner on first launch of the finished branch, and neither was findable
+from the source review that produced §§1–10 — the first needs Avalonia's runtime behaviour, the
+second needs a real multi-provider install. Recorded because they are the direct argument for the
+"no visual verification" caveat in the status block.
+
+### 11.1 The header ComboBox went blank after signing in
+
+**Symptom.** The provider picker rendered empty while the app was demonstrably browsing Proton
+Drive. Noticed after navigating to Sincronización, but present from startup.
+
+**Not a view bug.** `AvailableProviders.Count == 5` and `SelectedProviderIndex == 0` throughout;
+the view model always knew exactly which provider was active.
+
+**Cause.** `RefreshAvailableProviders` updates the collection in place
+(`AvailableProviders[i] = updated`), and element 0 is normally the selected one. Avalonia's
+`SelectingItemsControl` clears its selection when the *selected element* is replaced, even in
+place. The two-way binding then wrote `-1` back to `SelectedProviderIndex`, whose setter correctly
+ignores an out-of-range value — and nothing ever pushed the real index out again, so the control
+stayed at `-1` forever.
+
+Three of the four call sites already re-raised `SelectedProviderIndex` afterwards. **The sign-in
+path did not**, which is exactly why it only reproduced after authenticating. The raise moved
+inside `RefreshAvailableProviders` itself, so no call site can forget it again.
+
+This is the same family as [PLAN-CLOUD-PROVIDERS.md](PLAN-CLOUD-PROVIDERS.md) P10 Appendix A2 #4,
+which took four iterations to diagnose. The general shape worth remembering: **a stable collection
+updated in place still perturbs a selection control**, and keeping the view model correct is not
+the same as keeping the control in sync with it.
+
+### 11.2 Every provider reported its automatic sync as "activada"
+
+**Symptom.** The sync view listed all five providers as `activada` when only Proton Drive had a
+session.
+
+**Cause, and why it is not a lie exactly.** `App.axaml.cs` builds an `AccountSyncContext` — with a
+`SyncScheduler` — for every provider in the catalog, configured or not, and
+`RecoverFromPreviousRunAsync` starts every scheduler whose store has automatic sync enabled (the
+default). So all five loops genuinely were running. Each one gates every *cycle* on
+`isAuthenticated`, so an unconfigured provider's loop wakes up and does nothing, forever.
+`IsRunning` was reporting a true fact about the loop and a false one about the app.
+
+**Fix.** `SyncScheduler.IsAccountAuthenticated` exposes the gate; `AccountSyncToggleViewModel`
+derives `IsRelevant` from it; the view binds a filtered `VisibleAccountSyncToggles`, with the
+unfiltered `AccountSyncToggles` left as the source of truth every existing caller reads — the same
+relationship `VisiblePairs` has to `Pairs`. The whole row hides when no account is signed in.
+
+**Pre-existing, not a regression.** The original screenshots that started this round already showed
+`OneDrive: on` beside `Proton Drive: on`. §7 restyled these toggles without questioning what they
+were asserting, which is its own lesson: a control can be *legible* and still be wrong.
+
+### Still open
+
+The filter chips keep offering `OneDrive (0)` / `Google Drive (0)` for providers with no pairs and
+no session — the same noise, one row down. Left alone deliberately: changing which chips appear is
+a change to P9's own behaviour, not a fix to this round's.
+
+---
+
 ## Appendix A — Claims checked against the source
 
 The initial screenshot review made eleven claims. Each was checked before being written up here.

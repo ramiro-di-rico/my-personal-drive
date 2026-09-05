@@ -107,6 +107,36 @@ public class SyncPanelProviderFilterTests : IDisposable
         Assert.Contains("Account A", toggle.ActionTooltip);
     }
 
+    // Regression, reported live (docs/PLAN-UX-ROUND-2.md §11): every configured provider gets a
+    // scheduler at startup and every scheduler is started, so the panel showed five accounts as
+    // "activada" when only one was signed in. The loop was indeed running; it just skipped every
+    // cycle, which is not what "activada" says to a user.
+    [Fact]
+    public async Task OnlySignedInAccounts_GetAnAutomaticSyncToggle()
+    {
+        var accountA = BuildAccount("account-a");
+        var accountB = BuildAccount("account-b");
+        await accountA.Store.CreatePairAsync("/remote-a", _localRootA, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+
+        var signedIn = new SyncScheduler(accountA.Store, accountA.Executor, new SyncEchoSuppressor(), isAuthenticated: () => true);
+        var neverConfigured = new SyncScheduler(accountB.Store, accountB.Executor, new SyncEchoSuppressor(), isAuthenticated: () => false);
+
+        var panel = new SyncPanelViewModel(accountA.Store, accountA.Executor, new SyncCrashRecovery(accountA.Store), signedIn, "Account A");
+        panel.AddAccount(accountB.Store, accountB.Executor, new SyncCrashRecovery(accountB.Store), neverConfigured, "Account B");
+
+        // Both slots exist and keep their toggle — the unfiltered collection stays the source of
+        // truth every other caller reads.
+        Assert.Equal(2, panel.AccountSyncToggles.Count);
+
+        // ...but only the signed-in one is offered to the user.
+        var shown = Assert.Single(panel.VisibleAccountSyncToggles);
+        Assert.Equal("Account A", shown.Label);
+        Assert.True(panel.HasVisibleAccountSyncToggles);
+
+        await signedIn.DisposeAsync();
+        await neverConfigured.DisposeAsync();
+    }
+
     [Fact]
     public async Task WithASingleAccount_NoFilterChipsAreOffered()
     {

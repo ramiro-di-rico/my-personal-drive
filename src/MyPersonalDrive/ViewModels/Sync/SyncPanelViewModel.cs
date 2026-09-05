@@ -113,6 +113,19 @@ public sealed class SyncPanelViewModel : ObservableObject
     public ObservableCollection<AccountSyncToggleViewModel> AccountSyncToggles { get; }
 
     /// <summary>
+    /// The toggles actually worth showing: every provider gets a scheduler at startup whether or
+    /// not it is configured, so the unfiltered collection reported five accounts as "activada"
+    /// when only one was signed in (docs/PLAN-UX-ROUND-2.md §11). <see cref="AccountSyncToggles"/>
+    /// stays the unfiltered source of truth every existing caller reads, the same relationship
+    /// <see cref="VisiblePairs"/> has to <see cref="Pairs"/>.
+    /// </summary>
+    public IEnumerable<AccountSyncToggleViewModel> VisibleAccountSyncToggles
+        => AccountSyncToggles.Where(toggle => toggle.IsRelevant);
+
+    /// <summary>Whether any account is signed in — hides the whole toggle row when none is.</summary>
+    public bool HasVisibleAccountSyncToggles => AccountSyncToggles.Any(toggle => toggle.IsRelevant);
+
+    /// <summary>
     /// The Sync window's "filter by account" chips (docs/PLAN-CLOUD-PROVIDERS.md P9) — empty (and
     /// hidden by the view) with a single account, where every pair obviously belongs to it already,
     /// same rule <see cref="SyncPairViewModel.AccountLabel"/> itself already follows.
@@ -277,6 +290,10 @@ public sealed class SyncPanelViewModel : ObservableObject
         {
             toggle.RaiseState();
         }
+
+        // Signing in or out changes which toggles are worth showing at all, not just their state.
+        OnPropertyChanged(nameof(VisibleAccountSyncToggles));
+        OnPropertyChanged(nameof(HasVisibleAccountSyncToggles));
     }
 
     private async Task ToggleAutomaticSyncAsync()

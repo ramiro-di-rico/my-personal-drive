@@ -38,12 +38,13 @@
              the app DOES, that one changes what you SEE) read as one. Both rows are now labelled
              and given different affordances: a switch-shaped pill with a state dot here, flat
              chips there. -->
-        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center"
+                    IsVisible="{Binding HasVisibleAccountSyncToggles}">
           <TextBlock Text="Sincronización automática:"
                      FontSize="12"
                      Opacity="0.7"
                      VerticalAlignment="Center" />
-          <ItemsControl ItemsSource="{Binding AccountSyncToggles}">
+          <ItemsControl ItemsSource="{Binding VisibleAccountSyncToggles}">
             <ItemsControl.Styles>
               <Style Selector="Button.accountToggle">
                 <Setter Property="Padding" Value="10,4" />

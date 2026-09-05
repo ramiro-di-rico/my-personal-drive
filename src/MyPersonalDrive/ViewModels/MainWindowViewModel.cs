@@ -41,6 +41,13 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _rootPath;
 
     /// <summary>
+    /// True for the duration of <see cref="SwitchBrowserAccountAsync"/>. Guards
+    /// <see cref="SelectedProviderIndex"/>'s setter against the header ComboBox writing its own
+    /// transient selection back mid-switch (docs/PLAN-UX-ROUND-2.md §11.3).
+    /// </summary>
+    private bool _isSwitchingProvider;
+
+    /// <summary>
     /// One browsable account's whole toolchain — everything <see cref="SwitchBrowserAccountAsync"/>
     /// needs to swap live. The primary account (registered by the constructor) is always
     /// <c>_browserSessions[0]</c>; <see cref="AddBrowsableAccount"/> only ever appends, mirroring
@@ -203,7 +210,20 @@ public sealed class MainWindowViewModel : ObservableObject
 
             if (i < AvailableProviders.Count)
             {
-                AvailableProviders[i] = updated;
+                // Only when something the user can see actually differs. Replacing an element is
+                // what perturbs the ComboBox's selection (see the raise at the end of this
+                // method), and a provider *switch* changes no descriptor's fields at all — so
+                // before this check every switch pointlessly replaced all five entries and made
+                // the control fight the view model for the selection (docs/PLAN-UX-ROUND-2.md
+                // §11.3). ProviderDescriptor.Equals is Id-only by design, so it cannot answer
+                // this; the displayed fields have to be compared by hand.
+                var current = AvailableProviders[i];
+                if (current.Id != updated.Id
+                    || current.IsAuthenticated != updated.IsAuthenticated
+                    || current.AccountIdentity != updated.AccountIdentity)
+                {
+                    AvailableProviders[i] = updated;
+                }
             }
             else
             {
@@ -276,6 +296,15 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             var providers = AvailableProviders;
             if (value < 0 || value >= providers.Count)
+            {
+                return;
+            }
+
+            // A write arriving mid-switch is the control echoing its own transient state, not the
+            // user choosing anything — and acting on it starts a *second* switch from inside the
+            // first. That re-entrancy is what left the picker blank after switching provider from
+            // the settings view (docs/PLAN-UX-ROUND-2.md §11.3).
+            if (_isSwitchingProvider)
             {
                 return;
             }
@@ -1744,6 +1773,23 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        _isSwitchingProvider = true;
+        try
+        {
+            await SwitchBrowserAccountCoreAsync(id);
+        }
+        finally
+        {
+            // Cleared before the final raise, so this last push is the one the control accepts and
+            // echoes back harmlessly — every echo before it was ignored as re-entrant.
+            _isSwitchingProvider = false;
+            OnPropertyChanged(nameof(SelectedProvider));
+            OnPropertyChanged(nameof(SelectedProviderIndex));
+        }
+    }
+
+    private async Task SwitchBrowserAccountCoreAsync(ProviderId id)
+    {
         var session = _browserSessions.FirstOrDefault(candidate => candidate.Provider.Id == id);
         if (session is null)
         {

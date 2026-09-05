@@ -231,7 +231,35 @@ public class SyncPanelProviderFilterTests : IDisposable
         await accountA.Store.DeletePairAsync(pairA.Id);
         await panel.RefreshCommand.ExecuteAsync();
 
-        Assert.True(panel.ProviderFilters[0].IsActive); // back to "Todos"
+        // Only Account B still holds pairs, so the row collapses entirely rather than offering a
+        // choice between two identical lists (docs/PLAN-UX-ROUND-2.md §11.4). The point this test
+        // has always guarded is unchanged and is the assertion below: the stale filter must not
+        // survive and leave the list empty.
+        Assert.Empty(panel.ProviderFilters);
+        Assert.False(panel.HasProviderFilters);
         Assert.Single(panel.VisiblePairs);
+    }
+
+    // The chips exist to narrow a mixed list. An account with no pairs offers a filter whose only
+    // outcome is an empty list, and every provider in the catalog gets a slot whether or not it is
+    // configured — which is how "OneDrive (0)" and "Google Drive (0)" ended up on screen
+    // (docs/PLAN-UX-ROUND-2.md §11.4).
+    [Fact]
+    public async Task AccountsWithNoPairs_GetNoFilterChip()
+    {
+        var accountA = BuildAccount("account-a");
+        var accountB = BuildAccount("account-b");
+        var accountC = BuildAccount("account-c");
+        await accountA.Store.CreatePairAsync("/remote-a", _localRootA, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        await accountB.Store.CreatePairAsync("/remote-b", _localRootB, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+
+        var panel = new SyncPanelViewModel(accountA.Store, accountA.Executor, new SyncCrashRecovery(accountA.Store), providerDisplayName: "Account A");
+        panel.AddAccount(accountB.Store, accountB.Executor, new SyncCrashRecovery(accountB.Store), null, "Account B");
+        panel.AddAccount(accountC.Store, accountC.Executor, new SyncCrashRecovery(accountC.Store), null, "Account C");
+        await panel.InitializeAsync();
+
+        // Todos + the two accounts that actually have pairs. Account C is configured but empty.
+        Assert.Equal(new[] { "Todos", "Account A", "Account B" }, panel.ProviderFilters.Select(chip => chip.Label));
+        Assert.DoesNotContain(panel.ProviderFilters, chip => chip.Count == 0);
     }
 }

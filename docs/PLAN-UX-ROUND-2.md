@@ -454,11 +454,48 @@ relationship `VisiblePairs` has to `Pairs`. The whole row hides when no account 
 `OneDrive: on` beside `Proton Drive: on`. §7 restyled these toggles without questioning what they
 were asserting, which is its own lesson: a control can be *legible* and still be wrong.
 
-### Still open
+### 11.3 The picker went blank again, switching provider from the settings view
 
-The filter chips keep offering `OneDrive (0)` / `Google Drive (0)` for providers with no pairs and
-no session — the same noise, one row down. Left alone deliberately: changing which chips appear is
-a change to P9's own behaviour, not a fix to this round's.
+**Symptom.** Walking the Conexión tabs — OneDrive → Google Drive → Nextcloud → Proton Drive — left
+the header picker blank on some steps and populated on others, alternating. §11.1's fix was
+necessary and not sufficient: it made the view model re-publish the right index, but did nothing
+about the control fighting it.
+
+**Two causes, both real.**
+
+1. **Every switch replaced all five descriptors.** `RefreshAvailableProviders` rewrote each
+   element unconditionally, and a provider *switch* changes no descriptor's displayed fields at
+   all. Replacing the selected element is exactly what makes Avalonia drop the selection, so the
+   refresh was manufacturing the very perturbation §11.1 then had to repair.
+   `ProviderDescriptor.Equals` is Id-only by design (P10 Appendix A2), so it cannot answer "did
+   anything visible change?" — `IsAuthenticated` and `AccountIdentity` are now compared by hand and
+   an unchanged element is left alone.
+2. **The write-back re-entered the setter.** `SelectedProviderIndex`'s setter starts a switch
+   (`_ = SwitchProviderAndReportErrorsAsync(...)`, fire and forget). The ComboBox writing its own
+   transient index back mid-switch therefore began a *second* switch from inside the first — which
+   is what produced the alternation. A `_isSwitchingProvider` guard now ignores writes arriving
+   during a switch; `SwitchBrowserAccountAsync` became a thin wrapper that sets the flag, delegates
+   to `SwitchBrowserAccountCoreAsync`, and in its `finally` clears the flag *before* the final
+   index raise, so that last push is the one the control accepts.
+
+**The lesson, stated once for the next person.** This is the fourth distinct fix to this one
+ComboBox across two plans (P10 Appendix A2 #4 took four iterations of its own). Every one of them,
+including §11.1, treated the view model as the thing to correct. The actual invariant is about the
+*collection*: **do not touch an element of a bound collection unless its content changed**, because
+a selection control cannot tell a no-op rewrite from a real one.
+
+### 11.4 Filter chips for accounts with no pairs
+
+Previously listed under "still open" and now done, at the owner's request. `RebuildProviderFilters`
+skips any account with zero pairs — every provider in the catalog gets a slot whether or not it is
+configured, which is how `OneDrive (0)` and `Google Drive (0)` reached the screen. The whole row
+also collapses when only one account holds pairs, since `Todos (3) | Proton Drive (3)` offers a
+choice between two identical lists; that is the same reasoning as the pre-existing single-account
+gate, applied to accounts that *have* pairs rather than accounts that exist.
+
+`RemovingTheFilteredAccountsLastPair_FallsBackToTodosInsteadOfGoingEmpty` changed as a result: the
+behaviour it guards (a stale filter must not survive and leave the list empty) is unchanged, but
+the chip it asserted on correctly no longer exists.
 
 ---
 

@@ -426,10 +426,29 @@ public sealed class SyncPanelViewModel : ObservableObject
         foreach (var slot in _slots)
         {
             var count = Pairs.Count(pair => pair.AccountLabel == slot.DisplayName);
+
+            // A chip for an account with no pairs is a filter whose only outcome is an empty list.
+            // Every provider in the catalog gets a slot whether or not it is configured, so before
+            // this the row offered "OneDrive (0)" and "Google Drive (0)" next to the one account
+            // that actually had pairs (docs/PLAN-UX-ROUND-2.md §11.4).
+            if (count == 0)
+            {
+                continue;
+            }
+
             ProviderFilters.Add(new ProviderFilterViewModel(slot.DisplayName, count, ApplyProviderFilterAsync, ReportError)
             {
                 IsActive = _providerFilter == slot.DisplayName,
             });
+        }
+
+        // With only one account actually holding pairs, "Todos (3) | Proton Drive (3)" offers a
+        // choice between two identical lists. Same reasoning as the single-account gate above,
+        // just applied to accounts that *have* pairs rather than accounts that exist.
+        if (ProviderFilters.Count <= 2)
+        {
+            ProviderFilters.Clear();
+            _providerFilter = null;
         }
 
         OnPropertyChanged(nameof(VisiblePairs));

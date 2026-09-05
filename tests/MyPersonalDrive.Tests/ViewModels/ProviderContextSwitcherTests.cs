@@ -168,6 +168,101 @@ public class ProviderContextSwitcherTests : IDisposable
         Assert.Equal(100L * 1024 * 1024 * 1024, vm.QuotaTotalBytes); // 100 GB for Nextcloud
     }
 
+    /// <summary>
+    /// Reported live (docs/PLAN-UX-ROUND-2.md §11.3): switching provider from the settings view
+    /// left the header picker blank on some steps and not others. Two causes, both exercised here
+    /// — RefreshAvailableProviders replaced all five descriptors on every switch even though a
+    /// switch changes none of their fields, and the ComboBox's resulting write-back re-entered
+    /// SelectedProviderIndex's setter, starting a second switch from inside the first.
+    /// </summary>
+    [Fact]
+    public async Task WalkingThroughEveryProvider_KeepsTheSelectedIndexPointingAtTheActiveOne()
+    {
+        var vm = await BuildAsync();
+
+        // The exact sequence that reproduced it, plus the starting point.
+        Assert.Equal(ProviderId.Proton, vm.SelectedProvider!.Id);
+        Assert.Equal(vm.SelectedProviderIndex, IndexOf(vm, ProviderId.Proton));
+
+        await vm.SwitchToOneDriveCommand.ExecuteAsync();
+        AssertSelectionMatchesActiveProvider(vm);
+
+        await vm.SwitchToGoogleDriveCommand.ExecuteAsync();
+        AssertSelectionMatchesActiveProvider(vm);
+
+        await vm.SwitchToNextcloudCommand.ExecuteAsync();
+        AssertSelectionMatchesActiveProvider(vm);
+
+        await vm.SwitchToProtonCommand.ExecuteAsync();
+        AssertSelectionMatchesActiveProvider(vm);
+        Assert.Equal(ProviderId.Proton, vm.SelectedProvider!.Id);
+    }
+
+    /// <summary>
+    /// A switch changes no descriptor's displayed fields, so it must not replace any element:
+    /// replacing the selected one is what makes Avalonia drop the selection in the first place.
+    /// </summary>
+    [Fact]
+    public async Task SwitchingProvider_DoesNotDisturbTheProviderCollection()
+    {
+        var vm = await BuildAsync();
+        var changes = 0;
+        vm.AvailableProviders.CollectionChanged += (_, _) => changes++;
+
+        await vm.SwitchToGoogleDriveCommand.ExecuteAsync();
+        await vm.SwitchToNextcloudCommand.ExecuteAsync();
+        await vm.SwitchToProtonCommand.ExecuteAsync();
+
+        Assert.Equal(0, changes);
+    }
+
+    /// <summary>
+    /// The ComboBox writes its own transient selection back mid-switch. Acting on it starts a
+    /// second switch from inside the first, which is the re-entrancy half of §11.3.
+    /// </summary>
+    [Fact]
+    public async Task AWriteBackArrivingMidSwitch_IsIgnoredRatherThanStartingASecondSwitch()
+    {
+        var vm = await BuildAsync();
+        var protonIndex = IndexOf(vm, ProviderId.Proton);
+
+        vm.PropertyChanged += (_, e) =>
+        {
+            // Stand in for the control echoing the old index while the switch is still running.
+            if (e.PropertyName == nameof(MainWindowViewModel.ActiveProviderDisplayName))
+            {
+                vm.SelectedProviderIndex = protonIndex;
+            }
+        };
+
+        await vm.SwitchToGoogleDriveCommand.ExecuteAsync();
+
+        Assert.True(vm.IsGoogleDriveActive);
+        AssertSelectionMatchesActiveProvider(vm);
+    }
+
+    private static int IndexOf(MainWindowViewModel vm, ProviderId id)
+    {
+        for (var i = 0; i < vm.AvailableProviders.Count; i++)
+        {
+            if (vm.AvailableProviders[i].Id == id)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    // The picker renders blank precisely when the index stops agreeing with the active provider.
+    private static void AssertSelectionMatchesActiveProvider(MainWindowViewModel vm)
+    {
+        var index = vm.SelectedProviderIndex;
+        Assert.InRange(index, 0, vm.AvailableProviders.Count - 1);
+        Assert.Equal(vm.ActiveProviderDisplayName, vm.AvailableProviders[index].DisplayName);
+        Assert.Equal(vm.SelectedProvider!.Id, vm.AvailableProviders[index].Id);
+    }
+
     [Fact]
     public async Task UnauthenticatedProvider_ShowsFallbackStatusMessage()
     {

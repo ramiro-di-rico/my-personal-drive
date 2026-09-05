@@ -106,15 +106,27 @@ public partial class MainWindow : Window
         }
     }
 
+    private readonly ExplorerSplitState _explorerSplit = new();
+
     /// <summary>
     /// Collapses/restores the local pane's star-sized column directly, since toggling `IsVisible`
     /// on its content (done via binding in XAML) has no effect on a `*` column's own width — unlike
     /// an `Auto` column, which already shrinks to 0 the moment its content stops participating in
-    /// layout. Restoring always goes back to an even split rather than whatever ratio the user last
-    /// dragged to; remembering that ratio isn't worth the extra state for a show/hide toggle.
+    /// layout. Which widths to save and restore is <see cref="ExplorerSplitState"/>'s decision, so
+    /// it can be tested without a rendered window.
     /// </summary>
     private void ApplyLocalExplorerPanelColumnWidth(bool visible)
-        => ExplorerColumnsGrid.ColumnDefinitions[2].Width = visible ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+    {
+        var remote = ExplorerColumnsGrid.ColumnDefinitions[0];
+        var local = ExplorerColumnsGrid.ColumnDefinitions[2];
+
+        var (newRemote, newLocal) = visible
+            ? _explorerSplit.Restore()
+            : _explorerSplit.Collapse(remote.Width, local.Width);
+
+        remote.Width = newRemote;
+        local.Width = newLocal;
+    }
 
     // In-process only — never crosses the app boundary, so an arbitrary string identifier (not a
     // registered clipboard/OS format) is fine as the payload's identity.

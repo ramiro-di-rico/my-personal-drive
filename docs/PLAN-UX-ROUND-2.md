@@ -629,6 +629,38 @@ cannot fail on a bad-looking result because no behaviour changed.
 
 ---
 
+## 15. Hiding the local pane made it un-showable
+
+Reported after [§14](#14-each-pane-owns-its-own-toolbar): collapsing the local pane and clicking
+the toggle again brought it back as a sliver — usually invisible — and the only way to see it was
+to drag the splitter.
+
+**Cause.** `ApplyLocalExplorerPanelColumnWidth` set only column 2, restoring it to `1*`. But
+dragging the `GridSplitter` rewrites the widths of *both* adjacent columns — which is precisely why
+`ExplorerSplitter_DoubleTapped` has always had to reset both to `1*` for its "reset to 50/50"
+gesture. So after any drag, restoring column 2 to one share left column 0 at an absolute width of
+most of the window, and one share of the leftovers is a sliver.
+
+The doc comment on that method even said restoring "always goes back to an even split rather than
+whatever ratio the user last dragged to; remembering that ratio isn't worth the extra state". It
+was not an even split — it could not be, while the other column kept its dragged width — and the
+state it declined to keep is exactly what was needed.
+
+**Fix.** Both columns are saved on collapse and restored on show, so the pane returns to the width
+it actually had. While collapsed the remote column is forced to a full share, or a dragged absolute
+width would strand empty space where the local pane used to be. Saving is guarded against a second
+collapse, because the panel's visibility is persisted and re-applied at startup — recording the
+collapsed widths as the ones to return to would have made the pane un-showable for the whole
+session.
+
+**Testable, deliberately.** The decision — which widths to save and restore — moved into
+`Views/ExplorerSplitState`. `GridLength` is a plain value type and none of this needs a rendered
+window, so the rule that was wrong is now covered by tests that fail without the fix. This matters
+more than usual here: §14 and this bug are both layout work in an environment with no screenshot
+tool, and "the tests pass" was otherwise saying nothing at all about them.
+
+---
+
 ## Appendix A — Claims checked against the source
 
 The initial screenshot review made eleven claims. Each was checked before being written up here.

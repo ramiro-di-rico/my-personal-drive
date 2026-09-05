@@ -63,7 +63,7 @@ public class MainWindowActivityPanelTests : IDisposable
 
         Assert.False(sut.IsCommandConsoleVisible);
         Assert.Equal(0, sut.CommandConsoleMaxHeight);
-        Assert.Equal("Mostrar la actividad de la CLI", sut.CommandConsoleToggleLabel);
+        Assert.Equal("Show the CLI activity", sut.CommandConsoleToggleLabel);
         Assert.False(new AppSettingsService().Load().ShowCommandConsole);
 
         // A fresh instance starts collapsed too — including the visual state that mirrors it,
@@ -73,7 +73,7 @@ public class MainWindowActivityPanelTests : IDisposable
         Assert.Equal(0, relaunched.CommandConsoleMaxHeight);
         Assert.Equal(0, relaunched.CommandConsoleOpacity);
         Assert.False(relaunched.CommandConsoleHitTestVisible);
-        Assert.Equal("Mostrar la actividad de la CLI", relaunched.CommandConsoleToggleLabel);
+        Assert.Equal("Show the CLI activity", relaunched.CommandConsoleToggleLabel);
     }
 
     [Fact]
@@ -144,6 +144,6 @@ public class MainWindowActivityPanelTests : IDisposable
         await sut.ClearActivityCommand.ExecuteAsync();
 
         Assert.Null(sut.LastLogLine);
-        Assert.Equal("No hay ningún comando de la CLI en ejecución.", sut.CommandLogText);
+        Assert.Equal("No CLI command is running.", sut.CommandLogText);
     }
 }

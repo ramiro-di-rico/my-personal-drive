@@ -126,7 +126,7 @@ public class MainWindowKindFilterTests : IDisposable
         await Chip(viewModel, FileKind.Image).ApplyCommand.ExecuteAsync();
 
         Assert.Equal(totalBefore, viewModel.Metrics.TotalSizeText);
-        Assert.Equal("4 archivos · 0 carpetas", viewModel.Metrics.Headline);
+        Assert.Equal("4 files · 0 folders", viewModel.Metrics.Headline);
     }
 
     [Fact]

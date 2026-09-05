@@ -122,7 +122,7 @@ public class MainWindowDragDropDownloadTests : IDisposable
         await sut.HandleCloudItemsDroppedAsync([new DriveItem("/my-files/report.pdf", "report.pdf", IsFolder: false)], "/home/user/Downloads");
 
         Assert.Empty(sut.TransferQueue.Items);
-        Assert.Equal("Descarga cancelada.", sut.StatusMessage);
+        Assert.Equal("Download cancelled.", sut.StatusMessage);
     }
 
     [Fact]

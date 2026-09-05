@@ -83,7 +83,7 @@ public class MainWindowTrashTests : IDisposable
         await viewModel.TrashItemAsync(new DriveItem("/my-files/Docs", "Docs", IsFolder: true));
 
         Assert.DoesNotContain(executor.Calls, c => c.Arguments.Contains("trash"));
-        Assert.Equal("Cancelado: no se movió Docs a la papelera.", viewModel.StatusMessage);
+        Assert.Equal("Cancelled: Docs was not moved to the trash.", viewModel.StatusMessage);
     }
 
     [Fact]

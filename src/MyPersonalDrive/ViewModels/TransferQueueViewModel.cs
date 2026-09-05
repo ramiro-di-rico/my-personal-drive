@@ -2,6 +2,8 @@ using System.Collections.ObjectModel;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Providers;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.ViewModels;
 
 /// <summary>
@@ -44,18 +46,18 @@ public sealed class TransferQueueViewModel : ObservableObject
 
             if (transferring == 0 && queued == 0)
             {
-                return "Sin transferencias activas";
+                return Loc.T(StringKeys.Transfer.None);
             }
 
             var parts = new List<string>();
             if (transferring > 0)
             {
-                parts.Add($"{transferring} transfiriendo");
+                parts.Add(Loc.F(StringKeys.Transfer.Transferring, transferring));
             }
 
             if (queued > 0)
             {
-                parts.Add($"{queued} en cola");
+                parts.Add(Loc.F(StringKeys.Transfer.QueuedCount, queued));
             }
 
             return string.Join(" · ", parts);

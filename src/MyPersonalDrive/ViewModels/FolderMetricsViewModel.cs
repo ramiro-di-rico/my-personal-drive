@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Localization;
 
 namespace MyPersonalDrive.ViewModels;
 
@@ -78,9 +79,9 @@ public sealed class FolderMetricsViewModel : ObservableObject
     private readonly Func<DriveItem, Task> _selectItem;
     private readonly Action<Exception>? _onError;
     private readonly TimeProvider _timeProvider;
-    private string _headline = "Sin datos.";
+    private string _headline = Localizer.Instance.T(StringKeys.Metrics.NoData);
     private string _totalSizeText = "—";
-    private string _totalSizeCaption = "en archivos de esta carpeta";
+    private string _totalSizeCaption = Localizer.Instance.T(StringKeys.Metrics.CaptionThisFolder);
     private string _scopeNote = string.Empty;
     private string _newestText = "—";
     private string _oldestText = "—";
@@ -215,9 +216,13 @@ public sealed class FolderMetricsViewModel : ObservableObject
     }
 
     public void ReportDeepScanProgress(int foldersScanned, int foldersQueued)
-        => ProgressText = foldersQueued > 0
-            ? $"{foldersScanned:n0} carpetas analizadas · {foldersQueued:n0} en cola"
-            : $"{foldersScanned:n0} carpetas analizadas";
+    {
+        var localizer = Localizer.Instance;
+        var scanned = localizer.Plural(StringKeys.Metrics.ProgressScanned, foldersScanned);
+        ProgressText = foldersQueued > 0
+            ? localizer.F(StringKeys.Metrics.ProgressQueued, scanned, foldersQueued.ToString("n0", localizer.Culture))
+            : scanned;
+    }
 
     public void EndDeepScan()
     {
@@ -232,12 +237,15 @@ public sealed class FolderMetricsViewModel : ObservableObject
         DepthNote = BuildDepthNote(metrics, _timeProvider.GetUtcNow());
         HasItems = !metrics.IsEmpty;
         Headline = metrics.IsEmpty
-            ? "Carpeta vacía."
-            : $"{Plural(metrics.FileCount, "archivo", "archivos")} · {Plural(metrics.FolderCount, "carpeta", "carpetas")}";
+            ? Loc.T(StringKeys.Metrics.EmptyFolder)
+            : Loc.F(
+                StringKeys.Metrics.Headline,
+                Loc.Plural(StringKeys.Metrics.Files, metrics.FileCount),
+                Loc.Plural(StringKeys.Metrics.Folders, metrics.FolderCount));
         TotalSizeText = ByteSize.Format(metrics.TotalSize);
-        TotalSizeCaption = metrics.IsDeep
-            ? (metrics.IsComplete ? "en total, incluidas las subcarpetas" : "analizado hasta la cancelación")
-            : "en archivos de esta carpeta";
+        TotalSizeCaption = Loc.T(metrics.IsDeep
+            ? (metrics.IsComplete ? StringKeys.Metrics.CaptionTotal : StringKeys.Metrics.CaptionPartial)
+            : StringKeys.Metrics.CaptionThisFolder);
         ScopeNote = BuildScopeNote(metrics);
         NewestText = FormatTimestamp(metrics.NewestModifiedAt);
         OldestText = FormatTimestamp(metrics.OldestModifiedAt);
@@ -267,11 +275,12 @@ public sealed class FolderMetricsViewModel : ObservableObject
             return string.Empty;
         }
 
-        var scope = metrics.IsComplete
-            ? $"Recursivo · {metrics.ScannedFolderCount:n0} carpetas analizadas"
-            : $"Parcial · {metrics.ScannedFolderCount:n0} carpetas analizadas antes de cancelar";
+        var localizer = Localizer.Instance;
+        var scope = localizer.Plural(
+            metrics.IsComplete ? StringKeys.Metrics.ScopeRecursive : StringKeys.Metrics.ScopePartial,
+            metrics.ScannedFolderCount);
 
-        return $"{scope} · {Age(now - metrics.ComputedAt)}";
+        return localizer.F(StringKeys.Metrics.DepthNote, scope, Age(now - metrics.ComputedAt));
     }
 
     /// <summary>
@@ -280,23 +289,23 @@ public sealed class FolderMetricsViewModel : ObservableObject
     /// </summary>
     private static string Age(TimeSpan elapsed)
     {
+        var localizer = Localizer.Instance;
         if (elapsed < TimeSpan.FromMinutes(2))
         {
-            return "recién calculado";
+            return localizer.T(StringKeys.Metrics.AgeJustNow);
         }
 
         if (elapsed < TimeSpan.FromHours(1))
         {
-            return $"calculado hace {(int)elapsed.TotalMinutes} min";
+            return localizer.F(StringKeys.Metrics.AgeMinutes, (int)elapsed.TotalMinutes);
         }
 
         if (elapsed < TimeSpan.FromDays(1))
         {
-            return $"calculado hace {(int)elapsed.TotalHours} h";
+            return localizer.F(StringKeys.Metrics.AgeHours, (int)elapsed.TotalHours);
         }
 
-        var days = (int)elapsed.TotalDays;
-        return days == 1 ? "calculado hace 1 día" : $"calculado hace {days} días";
+        return localizer.Plural(StringKeys.Metrics.AgeDays, (int)elapsed.TotalDays);
     }
 
     private static string BuildScopeNote(FolderMetrics metrics)
@@ -309,26 +318,23 @@ public sealed class FolderMetricsViewModel : ObservableObject
         var notes = new List<string>();
         if (!metrics.IsDeep && metrics.FolderCount > 0)
         {
-            notes.Add($"no incluye el contenido de {Plural(metrics.FolderCount, "subcarpeta", "subcarpetas")}");
+            notes.Add(Localizer.Instance.F(StringKeys.Metrics.ScopeExcludes, Localizer.Instance.Plural(StringKeys.Metrics.Subfolders, metrics.FolderCount)));
         }
 
         if (metrics.UnknownSizeCount > 0)
         {
-            notes.Add($"{Plural(metrics.UnknownSizeCount, "archivo", "archivos")} sin tamaño conocido");
+            notes.Add(Localizer.Instance.F(StringKeys.Metrics.ScopeUnknownSize, Localizer.Instance.Plural(StringKeys.Metrics.Files, metrics.UnknownSizeCount)));
         }
 
         if (notes.Count == 0)
         {
-            return "Tamaño declarado al subir los archivos.";
+            return Localizer.Instance.T(StringKeys.Metrics.ScopeDeclared);
         }
 
         var joined = string.Join("; ", notes);
         return $"{char.ToUpperInvariant(joined[0])}{joined[1..]}.";
     }
 
-    private static string Plural(int count, string singular, string plural)
-        => count == 1 ? $"1 {singular}" : $"{count:n0} {plural}";
-
     private static string FormatTimestamp(DateTimeOffset? value)
-        => value is { } timestamp ? timestamp.ToLocalTime().ToString("g") : "—";
+        => value is { } timestamp ? timestamp.ToLocalTime().ToString("g", Localizer.Instance.Culture) : "—";
 }

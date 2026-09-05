@@ -23,6 +23,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
     private string _freeSpaceText = string.Empty;
     private bool _isLoading;
     private string? _statusMessage;
+    private LocalizedText _statusText = LocalizedText.None;
     private string _searchText = string.Empty;
     private string? _selectionAnchorPath;
 
@@ -51,7 +52,11 @@ public sealed class LocalExplorerViewModel : ObservableObject
         // Long-lived, like the window itself, so subscribing without unsubscribing is not a leak.
         // Deliberately not done in ObservableObject: a row view model is recreated on every
         // listing, and the singleton would accumulate a handler per row (docs/PLAN-I18N.md §3).
-        Loc.LanguageChanged += (_, _) => OnAllPropertiesChanged();
+        Loc.LanguageChanged += (_, _) =>
+        {
+            _statusMessage = _statusText.IsEmpty ? null : _statusText.Render();
+            OnAllPropertiesChanged();
+        };
     }
 
     public ObservableCollection<LocalNodeViewModel> Items { get; }
@@ -100,11 +105,35 @@ public sealed class LocalExplorerViewModel : ObservableObject
         private set => SetProperty(ref _isLoading, value);
     }
 
+    /// <summary>
+    /// The local pane's status line. Same deferred shape as the cloud pane's
+    /// (<c>MainWindowViewModel.StatusMessage</c>): the stored form is the key, so the line follows
+    /// the language picker instead of being frozen (docs/PLAN-I18N.md §6.3).
+    /// </summary>
     public string? StatusMessage
     {
         get => _statusMessage;
-        private set => SetProperty(ref _statusMessage, value);
+        private set
+        {
+            _statusText = LocalizedText.Verbatim(value);
+            SetProperty(ref _statusMessage, value);
+        }
     }
+
+    /// <summary>The unrendered form, so tests can assert on a key instead of on prose.</summary>
+    internal LocalizedText StatusText => _statusText;
+
+    private void SetStatus(LocalizedText text)
+    {
+        _statusText = text;
+        var rendered = text.IsEmpty ? null : text.Render();
+        SetProperty(ref _statusMessage, rendered, nameof(StatusMessage));
+    }
+
+    private void SetStatus(string key, params object?[] args) => SetStatus(LocalizedText.Of(key, args));
+
+    private void SetStatusPlural(string keyPrefix, int count, params object?[] args)
+        => SetStatus(LocalizedText.Plural(keyPrefix, count, args));
 
     public AsyncCommand RefreshCommand { get; }
 
@@ -245,7 +274,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
         {
-            StatusMessage = $"No se pudo abrir '{path}': {ex.Message}";
+            SetStatus(StringKeys.Local.StatusOpenFailed, path, ex.Message);
         }
         finally
         {
@@ -379,12 +408,12 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
         var confirm = RequestConfirmationAsync;
         var question = selected.Count == 1
-            ? $"¿Eliminar '{selected[0].DisplayName}'? Esta acción no se puede deshacer."
-            : $"¿Eliminar {selected.Count} elementos seleccionados? Esta acción no se puede deshacer.";
+            ? Loc.F(StringKeys.Local.ConfirmDeleteOne, selected[0].DisplayName)
+            : Loc.Plural(StringKeys.Local.ConfirmDeleteMany, selected.Count);
 
         if (confirm is not null && !await confirm(question))
         {
-            StatusMessage = "Cancelado — no se eliminó nada.";
+            SetStatus(StringKeys.Local.StatusDeleteCancelled);
             return;
         }
 
@@ -401,9 +430,9 @@ public sealed class LocalExplorerViewModel : ObservableObject
             }
         }
 
-        StatusMessage = failures.Count == 0
-            ? $"Se eliminaron {selected.Count} elemento(s)."
-            : $"Se eliminaron {selected.Count - failures.Count} de {selected.Count} elemento(s). Fallos: {string.Join("; ", failures)}";
+        SetStatus(failures.Count == 0
+            ? LocalizedText.Plural(StringKeys.Local.StatusDeletedMany, selected.Count)
+            : LocalizedText.Of(StringKeys.Local.StatusDeletedPartial, selected.Count - failures.Count, selected.Count, string.Join("; ", failures)));
 
         await NavigateAsync(CurrentPath);
     }
@@ -455,25 +484,25 @@ public sealed class LocalExplorerViewModel : ObservableObject
     public async Task DeleteItemAsync(DriveItem item)
     {
         var confirm = RequestConfirmationAsync;
-        var question = item.IsFolder
-            ? $"¿Eliminar la carpeta '{item.Name}' y todo su contenido? Esta acción no se puede deshacer."
-            : $"¿Eliminar '{item.Name}'? Esta acción no se puede deshacer.";
+        var question = Loc.F(
+            item.IsFolder ? StringKeys.Local.ConfirmDeleteFolder : StringKeys.Local.ConfirmDeleteOne,
+            item.Name);
 
         if (confirm is not null && !await confirm(question))
         {
-            StatusMessage = $"Cancelado: no se eliminó {item.Name}.";
+            SetStatus(StringKeys.Local.StatusDeleteCancelledOne, item.Name);
             return;
         }
 
         try
         {
             _service.Delete(item.Path);
-            StatusMessage = $"Se eliminó {item.Name}.";
+            SetStatus(StringKeys.Local.StatusDeletedOne, item.Name);
             await NavigateAsync(CurrentPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            StatusMessage = $"No se pudo eliminar '{item.Name}': {ex.Message}";
+            SetStatus(StringKeys.Local.StatusDeleteFailed, item.Name, ex.Message);
         }
     }
 
@@ -482,7 +511,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         var requester = RequestRenameAsync;
         if (requester is null)
         {
-            StatusMessage = "Renombrar no está disponible.";
+            SetStatus(StringKeys.Status.RenameUnavailable);
             return;
         }
 
@@ -495,12 +524,12 @@ public sealed class LocalExplorerViewModel : ObservableObject
         try
         {
             _service.Rename(item.Path, newName);
-            StatusMessage = $"Se renombró {item.Name} a {newName}.";
+            SetStatus(StringKeys.Status.RenameDone, item.Name, newName);
             await NavigateAsync(CurrentPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            StatusMessage = $"No se pudo renombrar '{item.Name}': {ex.Message}";
+            SetStatus(StringKeys.Local.StatusRenameFailed, item.Name, ex.Message);
         }
     }
 
@@ -509,7 +538,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         var copy = RequestCopyToClipboardAsync;
         if (copy is null)
         {
-            StatusMessage = "Copiar no está disponible.";
+            SetStatus(StringKeys.Status.CopyUnavailable);
             return;
         }
 
@@ -527,7 +556,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         var handler = RequestSyncSelectedPathAsync;
         if (handler is null)
         {
-            StatusMessage = "La sincronización no está disponible.";
+            SetStatus(StringKeys.Local.StatusSyncUnavailable);
             return;
         }
 
@@ -544,9 +573,9 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
         var fields = new List<PropertyField>
         {
-            new("Nombre", item.Name),
-            new("Ruta", item.Path, IsCopyable: true),
-            new("Tipo", item.IsFolder ? "Carpeta" : "Archivo"),
+            new(Loc.T(StringKeys.Common.Name), item.Name),
+            new(Loc.T(StringKeys.Common.Path), item.Path, IsCopyable: true),
+            new(Loc.T(StringKeys.Common.Type), Loc.T(item.IsFolder ? StringKeys.Common.Folder : StringKeys.Common.File)),
         };
 
         // The mirror of the remote pane's "Ruta local" (docs/PLAN-UX-ROUND-2.md §12). These two
@@ -554,12 +583,12 @@ public sealed class LocalExplorerViewModel : ObservableObject
         // put the asymmetry straight back.
         if (FindRemotePathFor?.Invoke(item.Path) is { } remotePath)
         {
-            fields.Add(new PropertyField("Ruta remota", remotePath, IsCopyable: true));
+            fields.Add(new PropertyField(Loc.T(StringKeys.Explorer.RemotePath), remotePath, IsCopyable: true));
         }
 
         if (item.Size is not null)
         {
-            fields.Add(new PropertyField("Tamaño", ByteSize.Format(item.Size.Value)));
+            fields.Add(new PropertyField(Loc.T(StringKeys.Common.Size), ByteSize.Format(item.Size.Value)));
         }
 
         if (item.ModifiedAt is not null)

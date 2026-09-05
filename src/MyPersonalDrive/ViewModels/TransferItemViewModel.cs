@@ -1,5 +1,7 @@
 using MyPersonalDrive.Models;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.ViewModels;
 
 /// <summary>One row in <see cref="TransferQueueViewModel"/> — a single drag-and-drop transfer's status. See docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5.</summary>
@@ -40,11 +42,11 @@ public sealed class TransferItemViewModel : ObservableObject
 
     public string StatusText => Status switch
     {
-        TransferStatus.Queued => "En cola",
-        TransferStatus.Transferring => Direction == TransferDirection.Upload ? "Subiendo…" : "Descargando…",
-        TransferStatus.Done => "Listo",
-        TransferStatus.Failed => "Error",
-        TransferStatus.Cancelled => "Cancelado",
+        TransferStatus.Queued => Localizer.Instance.T(StringKeys.Transfer.Queued),
+        TransferStatus.Transferring => Localizer.Instance.T(Direction == TransferDirection.Upload ? StringKeys.Transfer.Uploading : StringKeys.Transfer.Downloading),
+        TransferStatus.Done => Localizer.Instance.T(StringKeys.Transfer.Done),
+        TransferStatus.Failed => Localizer.Instance.T(StringKeys.Transfer.Failed),
+        TransferStatus.Cancelled => Localizer.Instance.T(StringKeys.Transfer.Cancelled),
         _ => Status.ToString()
     };
 

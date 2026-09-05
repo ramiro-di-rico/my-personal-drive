@@ -112,7 +112,7 @@ public class MainWindowCliVersionTests : IDisposable
 
         viewModel.CliPath = "/opt/other/proton-drive";
 
-        Assert.Equal("Desconocida", viewModel.CliVersion);
+        Assert.Equal("Unknown", viewModel.CliVersion);
     }
 
     [Fact]
@@ -124,6 +124,6 @@ public class MainWindowCliVersionTests : IDisposable
         await viewModel.CheckCliVersionCommand.ExecuteAsync();
 
         Assert.Empty(executor.Calls);
-        Assert.Equal("Desconocida", viewModel.CliVersion);
+        Assert.Equal("Unknown", viewModel.CliVersion);
     }
 }

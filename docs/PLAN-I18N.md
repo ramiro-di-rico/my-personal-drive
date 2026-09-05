@@ -16,7 +16,7 @@
 
 ## Status
 
-> **L0-L4 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
+> **L0-L5 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
 > passing (from 1001). The AOT publish is clean — only the five warnings that predate this work —
 > and both locales are verifiably embedded in the single-file binary. **Not visually verified: this
 > environment has no working screenshot tool** (GNOME refuses `ScreenshotWindow` over D-Bus), so
@@ -63,7 +63,12 @@
       Two findings parked rather than fixed inline:
       [PLAN-TECH-DEBT.md](PLAN-TECH-DEBT.md) **B6.3** (the sync dialogs name Proton Drive whichever
       provider is syncing) and **B6.4** (a second byte formatter disagreeing with `ByteSize`).
-- [ ] **L5 — `MainWindowViewModel`.** Not started.
+- [x] **L5 — `MainWindowViewModel`, and the rest of the non-sync view models.**
+      `MainWindowViewModel` (183 sites), `LocalExplorerViewModel`, `FolderMetricsViewModel`,
+      `DriveNodeViewModel`, `TransferItemViewModel`/`TransferQueueViewModel`, and
+      `ProviderDescriptor.AccountSummary`. §6.3's three cases were applied as written; the machinery
+      is `Services/Localization/LocalizedText.cs` — see
+      [§6.5](#65-l5-what-actually-happened-to-the-three-cases).
 - [ ] **L6 — Sync surface.** Not started.
 - [ ] **L7 — Service-layer messages → typed reasons.** Not started.
 - [ ] **L8 — Culture-aware formatting, and the invariant-culture audit.** Not started.
@@ -479,6 +484,43 @@ public readonly record struct LocalizedText(string Key, params object?[] Args)
 Backing field is `LocalizedText`, the bound property renders. **Apply this only to case 3** — using
 it everywhere buys nothing and makes 292 sites harder to read. If L0 lands on the restart fallback,
 `LocalizedText` is not needed at all.
+
+### 6.5 L5: what actually happened to the three cases
+
+**Case 1, derived labels** — done as planned: the getter calls `Loc`, and
+`ObservableObject.OnAllPropertiesChanged()` makes the bindings re-read. Nothing is stored.
+
+**Case 2, transient messages** — translated at the assignment site, as planned. A "Uploading 3
+files…" that is replaced a second later does not need to survive a language change.
+
+**Case 3, persistent messages** — `LocalizedText` exists and is used, and it turned out to be
+*cheaper* than this section assumed, because the 94 `StatusMessage = $"…"` sites had to be edited
+anyway. Each became `SetStatus(key, args…)` or `SetStatusPlural(prefix, count, args…)`, which is
+the same edit count and reads better. `StatusMessage`'s plain string setter is kept for the one
+caller outside the view model (the view's drag handlers), and wraps its argument as
+`LocalizedText.Verbatim` so already-rendered text is never looked up as a key.
+
+Two consequences worth recording:
+
+- **`FormatDriveError` returns a `LocalizedText`, not a string.** It has to: a status line holding
+  a provider failure is exactly a case-3 message, and the provider's own sentence rides along as an
+  argument rather than being baked into a rendered string. The two call sites that build a list of
+  failure lines call `.Render()` explicitly.
+- **`internal LocalizedText StatusText`** exists so tests can assert on a key rather than on prose.
+  Without it the whole test suite is pinned to English copy.
+
+Selection labels needed one extra piece: the details sidebar's seven fields are stored, and the
+"None" placeholder would otherwise stay in the old language. `SelectItem` was split, with
+`RefreshSelectionLabels()` re-derivable on a language change — deliberately without `SelectItem`'s
+status-line side effect, so switching language does not re-announce the selection.
+
+**What is knowingly left stale on a language change:** the CLI console's transient text
+(`ActiveCommand`, `CommandLogText`), the viewer note, and `CliVersion`/`CliUpdateStatus`. All are
+overwritten by the next operation, and none is worth a fourth mechanism.
+
+**The test suite cost was real**: 30 tests asserted Spanish prose and now assert English, since
+English is the default locale a test host starts in. That is the honest consequence of §2.6 option
+A, not a regression.
 
 ## 7. L6 — Sync surface
 

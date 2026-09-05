@@ -133,7 +133,7 @@ public class MainWindowShareLinkTests : IDisposable
 
         Assert.False(unsupported.CanShareLink);
         Assert.False(unsupported.ShareLinkCommand.CanExecute(null));
-        Assert.Contains("no está disponible", unsupported.ShareLinkTooltip);
+        Assert.Contains("not available", unsupported.ShareLinkTooltip);
     }
 
     /// <summary>
@@ -157,7 +157,7 @@ public class MainWindowShareLinkTests : IDisposable
 
         Assert.False(googleDoc.CanDownload);
         Assert.False(googleDoc.DownloadCommand.CanExecute(null));
-        Assert.Contains("no se pueden descargar", googleDoc.DownloadTooltip);
+        Assert.Contains("cannot be downloaded", googleDoc.DownloadTooltip);
         Assert.False(googleDoc.CanPreview);
 
         Assert.True(ordinaryFile.CanDownload);

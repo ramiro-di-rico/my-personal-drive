@@ -92,7 +92,7 @@ public class SyncPairPauseTests : IDisposable
     [Fact]
     public async Task APausedPair_SaysSoInsteadOfClaimingToBeUpToDate()
     {
-        // "Up to date" on a frozen pair becomes a lie the moment anything changes, so the pause has
+        // "Al día" on a frozen pair becomes a lie the moment anything changes, so the pause has
         // to lead — it's what decides whether the rest of the status is still being kept true.
         var (_, row, _, _) = await BuildAsync();
         await row.SyncNowCommand.ExecuteAsync();

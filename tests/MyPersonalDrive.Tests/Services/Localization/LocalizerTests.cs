@@ -177,3 +177,59 @@ public class AppSettingsLanguageTests
     public void AKnownLanguageSurvivesTheRoundTrip()
         => Assert.Equal("es", new AppSettings { Language = "es" }.LanguageOrDefault());
 }
+
+/// <summary>
+/// docs/PLAN-I18N.md §6.3's third case: a message that stays on screen has to store its key, not
+/// its rendered text, or it stays frozen in whatever language it was written in.
+/// </summary>
+public class LocalizedTextTests
+{
+    [Fact]
+    public void AKeyedMessageRendersThroughTheStringTable()
+        => Assert.Equal("Upload cancelled.", LocalizedText.Of(StringKeys.Status.UploadCancelled).Render());
+
+    [Fact]
+    public void ArgumentsAreSubstituted()
+        => Assert.Equal("Renamed a to b.", LocalizedText.Of(StringKeys.Status.RenameDone, "a", "b").Render());
+
+    [Fact]
+    public void APluralMessagePutsTheCountFirst()
+        => Assert.Equal("Uploaded 2 files to /x.", LocalizedText.Plural(StringKeys.Status.UploadDone, 2, "/x").Render());
+
+    [Fact]
+    public void VerbatimTextIsNotLookedUp()
+    {
+        var text = LocalizedText.Verbatim(StringKeys.Status.UploadCancelled);
+
+        Assert.Null(text.Key);
+        Assert.Equal(StringKeys.Status.UploadCancelled, text.Render());
+    }
+
+    [Fact]
+    public void NoneIsEmptyAndRendersEmpty()
+    {
+        Assert.True(LocalizedText.None.IsEmpty);
+        Assert.Equal(string.Empty, LocalizedText.None.Render());
+    }
+
+    [Fact]
+    public void VerbatimNullIsEmpty()
+        => Assert.True(LocalizedText.Verbatim(null).IsEmpty);
+
+    /// <summary>
+    /// Equality compares what would be shown. Two instances built from the same key allocate
+    /// different <c>params</c> arrays, and reference-comparing those would report a change on
+    /// every assignment — which is what <c>SetProperty</c> uses to decide whether to notify.
+    /// </summary>
+    [Fact]
+    public void TwoMessagesWithTheSameKeyAndArgumentsAreEqual()
+        => Assert.Equal(
+            LocalizedText.Of(StringKeys.Status.RenameDone, "a", "b"),
+            LocalizedText.Of(StringKeys.Status.RenameDone, "a", "b"));
+
+    [Fact]
+    public void DifferentArgumentsAreNotEqual()
+        => Assert.NotEqual(
+            LocalizedText.Of(StringKeys.Status.RenameDone, "a", "b"),
+            LocalizedText.Of(StringKeys.Status.RenameDone, "a", "c"));
+}

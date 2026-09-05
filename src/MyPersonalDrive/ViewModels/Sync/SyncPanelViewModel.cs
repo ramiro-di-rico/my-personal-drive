@@ -131,6 +131,14 @@ public sealed class SyncPanelViewModel : ObservableObject
     public IEnumerable<SyncPairViewModel> VisiblePairs
         => _providerFilter is null ? Pairs : Pairs.Where(pair => pair.AccountLabel == _providerFilter);
 
+    /// <summary>
+    /// Whether any pair needs attention, for the badge on the sync tab. Reads <see cref="Pairs"/>
+    /// and not <see cref="VisiblePairs"/> on purpose: a failure hidden by the active filter chip is
+    /// still a failure, and the whole point of the badge is to be visible from the other views
+    /// (docs/PLAN-UX-ROUND-2.md §5).
+    /// </summary>
+    public bool HasFailingPairs => Pairs.Any(pair => pair.HasFailures);
+
     public AsyncCommand AddPairCommand { get; }
 
     public AsyncCommand RefreshCommand { get; }
@@ -340,11 +348,26 @@ public sealed class SyncPanelViewModel : ObservableObject
             // fire-and-forget is fine, OnError itself is a synchronous Action<string>.
             OnError = message => _ = AlertAsync(message),
         };
+        // The tab badge is a function of every pair's failure state, so it has to follow each
+        // row's own notifications, not just the collection's.
+        viewModel.PropertyChanged += OnPairPropertyChanged;
         Pairs.Add(viewModel);
         return viewModel;
     }
 
-    private void RemovePairViewModel(SyncPairViewModel viewModel) => Pairs.Remove(viewModel);
+    private void RemovePairViewModel(SyncPairViewModel viewModel)
+    {
+        viewModel.PropertyChanged -= OnPairPropertyChanged;
+        Pairs.Remove(viewModel);
+    }
+
+    private void OnPairPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(SyncPairViewModel.HasFailures) or nameof(SyncPairViewModel.StatusText))
+        {
+            OnPropertyChanged(nameof(HasFailingPairs));
+        }
+    }
 
     /// <summary>
     /// Rebuilds the chip row from whatever is currently in <see cref="Pairs"/> — called whenever
@@ -390,6 +413,7 @@ public sealed class SyncPanelViewModel : ObservableObject
 
         OnPropertyChanged(nameof(VisiblePairs));
         OnPropertyChanged(nameof(HasProviderFilters));
+        OnPropertyChanged(nameof(HasFailingPairs));
     }
 
     private Task ApplyProviderFilterAsync(string? accountLabel)

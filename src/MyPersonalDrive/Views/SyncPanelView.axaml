@@ -1,0 +1,155 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:syncVm="clr-namespace:MyPersonalDrive.ViewModels.Sync"
+             x:Class="MyPersonalDrive.Views.SyncPanelView"
+             x:DataType="syncVm:SyncPanelViewModel">
+
+  <!-- Lifted verbatim out of MainWindow.axaml's settings ScrollViewer, where sync was the last
+       section below the proton-drive executable path (docs/PLAN-UX-ROUND-2.md §5). First
+       UserControl in the codebase: MainWindow.axaml was the only view file, which is also why the
+       two breadcrumb bars are duplicated markup (§10). The extraction stops here on purpose. -->
+  <ScrollViewer>
+    <StackPanel Spacing="10" Margin="16">
+    <TextBlock FontSize="18" FontWeight="Bold" Text="Sincronización de carpetas" />
+    <Border Padding="16" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
+      <StackPanel Spacing="12">
+        <TextBlock Opacity="0.8"
+                   TextWrapping="Wrap"
+                   Text="Mantiene sincronizadas una carpeta remota y una local — solo descarga, solo subida, o en ambos sentidos. Funciona sola: los cambios locales se detectan en segundos, y el proveedor se vuelve a consultar cada tanto, con menos frecuencia para los pares que tardan más en analizarse. &quot;Sincronizar ahora&quot; sirve únicamente para saltear esa espera." />
+
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Classes="primary" Command="{Binding AddPairCommand}">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Path Classes="icon" Data="{StaticResource IconPlus}" />
+              <TextBlock Text="Agregar par" />
+            </StackPanel>
+          </Button>
+          <Button Command="{Binding RefreshCommand}">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+              <TextBlock Text="Actualizar" />
+            </StackPanel>
+          </Button>
+          <!-- One toggle per active account (P7 Phase A) — pausing OneDrive's automatic
+               sync must not touch Proton's, and vice versa, so this replaces a single
+               shared on/off button rather than sitting alongside it. -->
+          <ItemsControl ItemsSource="{Binding AccountSyncToggles}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" Spacing="8" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="syncVm:AccountSyncToggleViewModel">
+                <Button Content="{Binding Label}"
+                        Command="{Binding ToggleCommand}"
+                        ToolTip.Tip="Vigilar las carpetas locales y consultar esta cuenta automáticamente" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+        <!-- Filter by account (docs/PLAN-CLOUD-PROVIDERS.md P9) — same chip idiom as the
+             browser's own "filter by type" row. Hidden with a single account, where every
+             pair obviously belongs to it already. -->
+        <ItemsControl ItemsSource="{Binding ProviderFilters}"
+                      IsVisible="{Binding HasProviderFilters}"
+                      Margin="0,8,0,0">
+          <ItemsControl.Styles>
+            <Style Selector="Button.providerChip">
+              <Setter Property="Padding" Value="8,3" />
+              <Setter Property="FontSize" Value="12" />
+              <Setter Property="Margin" Value="0,0,6,6" />
+            </Style>
+            <Style Selector="Button.providerChip.active">
+              <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+              <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+              <Setter Property="FontWeight" Value="Bold" />
+            </Style>
+          </ItemsControl.Styles>
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="syncVm:ProviderFilterViewModel">
+              <Button Classes="providerChip"
+                      Classes.active="{Binding IsActive}"
+                      Command="{Binding ApplyCommand}"
+                      Content="{Binding LabelWithCount}"
+                      ToolTip.Tip="Filtrar por esta cuenta" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <ItemsControl ItemsSource="{Binding VisiblePairs}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="syncVm:SyncPairViewModel">
+              <Border Classes="hoverGroup" Padding="12" Margin="0,0,0,8" Background="{DynamicResource PanelBackgroundBrush}" CornerRadius="6">
+                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                  <StackPanel Grid.Column="0" Grid.Row="0" Spacing="4">
+                    <TextBlock FontSize="11"
+                               Opacity="0.6"
+                               FontWeight="Bold"
+                               Text="{Binding AccountLabel}"
+                               IsVisible="{Binding HasAccountLabel}" />
+                    <TextBlock FontWeight="Bold" Text="{Binding RemotePath}" />
+                    <TextBlock Opacity="0.7" TextWrapping="Wrap" Text="{Binding LocalPath}" />
+                    <TextBlock Opacity="0.6" Text="{Binding DirectionText}" />
+                    <TextBlock Text="{Binding StatusText}" />
+                    <Button Content="{Binding ConflictText}"
+                            IsVisible="{Binding HasConflicts}"
+                            Command="{Binding ResolveConflictsCommand}"
+                            HorizontalAlignment="Left"
+                            Foreground="#F5C451"
+                            ToolTip.Tip="Decidir qué hacer con cada archivo en conflicto" />
+                    <Button Content="↻ Reintentar las acciones fallidas"
+                            IsVisible="{Binding HasFailures}"
+                            Command="{Binding RetryFailedCommand}"
+                            HorizontalAlignment="Left"
+                            ToolTip.Tip="Volver a encolar las acciones que fallaron, para el próximo ciclo de sincronización" />
+                  </StackPanel>
+
+                  <StackPanel Grid.Column="1" Grid.Row="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+                    <Button Classes="rowAction" ToolTip.Tip="Previsualizar los cambios antes de sincronizar" Command="{Binding PreviewCommand}">
+                      <Path Classes="icon" Data="{StaticResource IconEye}" />
+                    </Button>
+                    <Button Classes="rowAction" ToolTip.Tip="Editar el sentido y la política de conflictos" Command="{Binding EditCommand}">
+                      <Path Classes="icon" Data="{StaticResource IconPencil}" />
+                    </Button>
+                    <Button Classes="rowAction" ToolTip.Tip="Sincronizar ahora" Command="{Binding SyncNowCommand}">
+                      <Path Classes="icon" Data="{StaticResource IconPlay}" />
+                    </Button>
+                    <Button Classes="rowAction" ToolTip.Tip="{Binding PauseTooltip}" Command="{Binding TogglePauseCommand}">
+                      <Panel>
+                        <Path Classes="icon" Data="{StaticResource IconPlay}" IsVisible="{Binding IsPaused}" />
+                        <Path Classes="icon" Data="{StaticResource IconPause}" IsVisible="{Binding !IsPaused}" />
+                      </Panel>
+                    </Button>
+                    <Button Classes="rowAction" ToolTip.Tip="Eliminar este par" Command="{Binding RemoveCommand}">
+                      <Path Classes="icon" Data="{StaticResource IconTrash}" />
+                    </Button>
+                  </StackPanel>
+
+                  <ProgressBar Grid.Column="0" Grid.ColumnSpan="2" Grid.Row="1"
+                               Margin="0,8,0,0"
+                               IsIndeterminate="True"
+                               IsVisible="{Binding IsBusy}" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <Border Padding="10"
+                Background="{DynamicResource ConsoleBackgroundBrush}"
+                CornerRadius="6"
+                IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+          <TextBlock TextWrapping="Wrap" Text="{Binding StatusMessage}" />
+        </Border>
+      </StackPanel>
+    </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

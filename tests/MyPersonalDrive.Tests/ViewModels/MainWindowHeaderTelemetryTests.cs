@@ -294,6 +294,48 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         Assert.False(sut.IsSettingsView);
     }
 
+    // U5: three views, one value. The pair of booleans this replaced could represent "both" and
+    // "neither", and neither is a screen (docs/PLAN-UX-ROUND-2.md §5).
+    [Fact]
+    public async Task TopLevelViews_AreMutuallyExclusive()
+    {
+        var sut = Build();
+
+        Assert.Equal(MainView.Explorer, sut.ActiveView);
+        AssertExactlyOneViewIsActive(sut);
+
+        await sut.ShowSyncCommand.ExecuteAsync();
+        Assert.Equal(MainView.Sync, sut.ActiveView);
+        Assert.True(sut.IsSyncView);
+        AssertExactlyOneViewIsActive(sut);
+
+        await sut.ShowSettingsCommand.ExecuteAsync();
+        Assert.Equal(MainView.Settings, sut.ActiveView);
+        AssertExactlyOneViewIsActive(sut);
+
+        await sut.ShowExplorerCommand.ExecuteAsync();
+        Assert.Equal(MainView.Explorer, sut.ActiveView);
+        AssertExactlyOneViewIsActive(sut);
+    }
+
+    // The Ctrl+, toggle predates the sync view; leaving sync must land on the explorer, not
+    // silently keep the user where they were.
+    [Fact]
+    public async Task SettingsShortcut_FromTheSyncView_OpensSettings_ThenReturnsToTheExplorer()
+    {
+        var sut = Build();
+        await sut.ShowSyncCommand.ExecuteAsync();
+
+        await sut.ToggleSettingsCommand.ExecuteAsync();
+        Assert.True(sut.IsSettingsView);
+
+        await sut.ToggleSettingsCommand.ExecuteAsync();
+        Assert.True(sut.IsExplorerView);
+    }
+
+    private static void AssertExactlyOneViewIsActive(MainWindowViewModel sut)
+        => Assert.Equal(1, new[] { sut.IsExplorerView, sut.IsSyncView, sut.IsSettingsView }.Count(active => active));
+
     [Fact]
     public void SettingsShortcut_KeyGesturesAreValid()
     {

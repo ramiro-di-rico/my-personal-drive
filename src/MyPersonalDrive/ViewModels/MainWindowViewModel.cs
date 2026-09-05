@@ -99,7 +99,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _selectedOwner = "Ninguno";
     private string _selectedShared = "Ninguno";
     private bool _hasSelection;
-    private bool _isSettingsView;
+    private MainView _activeView = MainView.Explorer;
     private bool _isViewerVisible;
     private bool _isViewerLoading;
     private string _viewerTitle = "Visor";
@@ -429,6 +429,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ShowIconsViewCommand = new AsyncCommand(() => SetViewModeAsync(DriveViewMode.Icons), onError: HandleUnexpectedError);
         ShowGalleryViewCommand = new AsyncCommand(() => SetViewModeAsync(DriveViewMode.Gallery), onError: HandleUnexpectedError);
         ShowSettingsCommand = new AsyncCommand(ShowSettingsAsync, onError: HandleUnexpectedError);
+        ShowSyncCommand = new AsyncCommand(ShowSyncAsync, onError: HandleUnexpectedError);
         CheckCliVersionCommand = new AsyncCommand(CheckCliVersionAsync, CanCheckCliVersion, HandleUnexpectedError);
         CheckForCliUpdateCommand = new AsyncCommand(CheckForCliUpdateAsync, CanCheckForCliUpdate, HandleUnexpectedError);
         SwitchToProtonCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.Proton), () => !IsLoading && !IsProtonActive, HandleUnexpectedError);
@@ -534,6 +535,9 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand ShowExplorerCommand { get; }
 
     public AsyncCommand ShowSettingsCommand { get; }
+
+    /// <summary>Opens the sync pair list.</summary>
+    public AsyncCommand ShowSyncCommand { get; }
 
     /// <summary>Opens the text viewer on the row currently selected in the listing.</summary>
     public AsyncCommand ViewSelectedFileCommand { get; }
@@ -901,15 +905,31 @@ public sealed class MainWindowViewModel : ObservableObject
     public bool IsGalleryView => ViewMode == DriveViewMode.Gallery;
 
     /// <summary>
-    /// Which of the two top-level views is on screen. The explorer (folder browser) and the
-    /// settings view (CLI connection + sync pairs) share one window instead of stacking dialogs,
-    /// so this is a plain view switch, not a navigation stack.
+    /// Which top-level view is on screen. One value rather than the pair of independent booleans
+    /// this used to be: with a third view (sync, promoted out of the settings scroll in
+    /// docs/PLAN-UX-ROUND-2.md §5) two booleans can represent "both" and "neither", neither of
+    /// which is a screen. The viewer is deliberately not a member — it is an overlay on the
+    /// explorer, not a sibling of it.
     /// </summary>
-    public bool IsSettingsView
+    public MainView ActiveView
     {
-        get => _isSettingsView;
-        private set => SetProperty(ref _isSettingsView, value);
+        get => _activeView;
+        private set
+        {
+            if (SetProperty(ref _activeView, value))
+            {
+                OnPropertyChanged(nameof(IsExplorerView));
+                OnPropertyChanged(nameof(IsSettingsView));
+                OnPropertyChanged(nameof(IsSyncView));
+            }
+        }
     }
+
+    public bool IsExplorerView => _activeView == MainView.Explorer;
+
+    public bool IsSettingsView => _activeView == MainView.Settings;
+
+    public bool IsSyncView => _activeView == MainView.Sync;
 
     /// <summary>
     /// The startup update check, for the composition root to fire and forget. Kept off the
@@ -3434,13 +3454,20 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task ShowExplorerAsync()
     {
-        IsSettingsView = false;
+        ActiveView = MainView.Explorer;
+        await Task.CompletedTask;
+    }
+
+    /// <summary>Switches to the sync pair list, now a top-level view (docs/PLAN-UX-ROUND-2.md §5).</summary>
+    private async Task ShowSyncAsync()
+    {
+        ActiveView = MainView.Sync;
         await Task.CompletedTask;
     }
 
     private async Task ShowSettingsAsync()
     {
-        IsSettingsView = true;
+        ActiveView = MainView.Settings;
 
         // Read it on the way in, so the settings view is never showing a stale or empty version,
         // but only once per configured path — the CLI costs a whole process launch (~3.5s cold).

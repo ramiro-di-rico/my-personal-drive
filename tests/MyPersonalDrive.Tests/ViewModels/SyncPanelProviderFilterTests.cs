@@ -48,6 +48,43 @@ public class SyncPanelProviderFilterTests : IDisposable
         return new Account(store, executor);
     }
 
+    // U5 (docs/PLAN-UX-ROUND-2.md §5): the sync tab carries a badge so a pair that has been
+    // failing since last week is discoverable without opening the view. It reads every pair, not
+    // just the ones the active filter chip lets through.
+    [Fact]
+    public async Task HasFailingPairs_IsTrue_WhenAnyPairFailed_EvenIfTheFilterHidesIt()
+    {
+        var accountA = BuildAccount("account-a");
+        var accountB = BuildAccount("account-b");
+        await accountA.Store.CreatePairAsync("/remote-a", _localRootA, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        var failing = await accountB.Store.CreatePairAsync("/remote-b", _localRootB, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+        await accountB.Store.UpdatePairStatusAsync(failing.Id, DateTimeOffset.UtcNow, SyncPairStatus.Error, "2 acción(es) fallaron");
+
+        var panel = new SyncPanelViewModel(accountA.Store, accountA.Executor, new SyncCrashRecovery(accountA.Store), providerDisplayName: "Account A");
+        panel.AddAccount(accountB.Store, accountB.Executor, new SyncCrashRecovery(accountB.Store), null, "Account B");
+        await panel.InitializeAsync();
+
+        Assert.True(panel.HasFailingPairs);
+
+        // Filtering to the healthy account hides the failing row from the list, but not the badge:
+        // a failure you filtered out of view is still a failure.
+        await panel.ProviderFilters.Single(chip => chip.Label == "Account A").ApplyCommand.ExecuteAsync();
+        Assert.DoesNotContain(panel.VisiblePairs, pair => pair.Id == failing.Id);
+        Assert.True(panel.HasFailingPairs);
+    }
+
+    [Fact]
+    public async Task HasFailingPairs_IsFalse_WhenEveryPairIsHealthy()
+    {
+        var accountA = BuildAccount("account-a");
+        await accountA.Store.CreatePairAsync("/remote-a", _localRootA, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+
+        var panel = new SyncPanelViewModel(accountA.Store, accountA.Executor, new SyncCrashRecovery(accountA.Store), providerDisplayName: "Account A");
+        await panel.InitializeAsync();
+
+        Assert.False(panel.HasFailingPairs);
+    }
+
     [Fact]
     public async Task WithASingleAccount_NoFilterChipsAreOffered()
     {

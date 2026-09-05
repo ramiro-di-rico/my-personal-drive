@@ -102,38 +102,109 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         Assert.True(sut.IsSystemTheme);
     }
 
+    // Asserts on ConnectionStatusKind, not ConnectionStatus: the kind is the stable token the view
+    // binds its classes to, while the status text is user-facing copy that U4 translated. Testing
+    // the copy made these tests fail on a pure wording change (docs/PLAN-UX-ROUND-2.md §2).
     [Fact]
     public void ConnectionTelemetry_ReflectsOnlineAndDisconnectedStates()
     {
         var sutAuthenticated = Build(isAuthenticated: true);
-        Assert.Equal("Online", sutAuthenticated.ConnectionStatus);
+        Assert.Equal("Online", sutAuthenticated.ConnectionStatusKind);
         Assert.True(sutAuthenticated.IsOnline);
         Assert.False(sutAuthenticated.IsDisconnected);
+        Assert.False(sutAuthenticated.IsConnectionActionable);
 
         var sutDisconnected = Build(isAuthenticated: false);
-        Assert.Equal("Disconnected", sutDisconnected.ConnectionStatus);
+        Assert.Equal("Disconnected", sutDisconnected.ConnectionStatusKind);
         Assert.True(sutDisconnected.IsDisconnected);
         Assert.False(sutDisconnected.IsOnline);
+        Assert.True(sutDisconnected.IsConnectionActionable);
     }
 
     [Fact]
     public void ConnectionTelemetry_ReflectsRateLimitedWarning()
     {
         var sut = Build(isAuthenticated: true);
-        Assert.Equal("Online", sut.ConnectionStatus);
+        Assert.Equal("Online", sut.ConnectionStatusKind);
 
         sut.StatusMessage = "Rate limit exceeded (HTTP 429). Please wait.";
         // Setting StatusMessage cleared IsWarning; telemetry classifies off the typed DriveErrorKind
         // a real DriveException(Kind: RateLimited) would have left in _lastErrorKind, not off this
         // message text, so simulate both directly.
-        typeof(MainWindowViewModel).GetField("_lastErrorKind", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .SetValue(sut, DriveErrorKind.RateLimited);
-        typeof(MainWindowViewModel).GetProperty("IsWarning", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .SetValue(sut, true);
-        sut.UpdateConnectionTelemetry();
+        SetErrorKind(sut, DriveErrorKind.RateLimited);
+        SetWarning(sut);
 
-        Assert.Equal("Rate-Limited", sut.ConnectionStatus);
+        Assert.Equal("RateLimited", sut.ConnectionStatusKind);
         Assert.True(sut.IsRateLimited);
+    }
+
+    // U2: the header used to keep saying "Online" while the body reported a failed load, because
+    // only RateLimited had a branch. Any failure of the connection itself now demotes the badge.
+    [Theory]
+    [InlineData(DriveErrorKind.Network)]
+    [InlineData(DriveErrorKind.Timeout)]
+    [InlineData(DriveErrorKind.NotAuthenticated)]
+    [InlineData(DriveErrorKind.PermissionDenied)]
+    [InlineData(DriveErrorKind.Busy)]
+    public void ConnectionTelemetry_DemotesToDegraded_WhenAConnectionFailureIsStanding(DriveErrorKind kind)
+    {
+        var sut = Build(isAuthenticated: true);
+        Assert.Equal("Online", sut.ConnectionStatusKind);
+
+        sut.StatusMessage = "Failed to load /my-files: Invalid access token";
+        SetErrorKind(sut, kind);
+        SetWarning(sut);
+
+        Assert.Equal("Degraded", sut.ConnectionStatusKind);
+        Assert.True(sut.IsDegraded);
+        Assert.False(sut.IsOnline);
+        Assert.True(sut.IsConnectionActionable);
+    }
+
+    // A path that no longer exists says nothing about the connection — the badge must stay Online,
+    // or every stale bookmark would look like an outage.
+    [Fact]
+    public void ConnectionTelemetry_StaysOnline_WhenTheFailureIsAboutOnePath()
+    {
+        var sut = Build(isAuthenticated: true);
+
+        sut.StatusMessage = "Warning: The path '/my-files/gone' no longer exists.";
+        SetErrorKind(sut, DriveErrorKind.NotFound);
+        SetWarning(sut);
+
+        Assert.Equal("Online", sut.ConnectionStatusKind);
+        Assert.False(sut.IsConnectionActionable);
+    }
+
+    // U1: a warning the user cannot act on is a dead end. An expired session offers sign-in;
+    // anything else offers a retry.
+    [Fact]
+    public void StatusAction_OffersReconnect_WhenTheSessionExpired()
+    {
+        var sut = Build(isAuthenticated: true);
+        Assert.False(sut.HasStatusAction);
+
+        sut.StatusMessage = "Failed to load /my-files: Invalid access token";
+        SetErrorKind(sut, DriveErrorKind.NotAuthenticated);
+        SetWarning(sut);
+
+        Assert.True(sut.HasStatusAction);
+        Assert.Equal("Reconectar", sut.StatusActionLabel);
+        Assert.Same(sut.AuthenticateCommand, sut.StatusActionCommand);
+    }
+
+    [Fact]
+    public void StatusAction_OffersRetry_ForATransientFailure()
+    {
+        var sut = Build(isAuthenticated: true);
+
+        sut.StatusMessage = "Failed to load /my-files: connection reset";
+        SetErrorKind(sut, DriveErrorKind.Network);
+        SetWarning(sut);
+
+        Assert.True(sut.HasStatusAction);
+        Assert.Equal("Reintentar", sut.StatusActionLabel);
+        Assert.Same(sut.RefreshCommand, sut.StatusActionCommand);
     }
 
     [Fact]
@@ -153,8 +224,60 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         Assert.Equal(1024 * 1024 * 300, sut.QuotaUsedBytes); // 300 MB
         Assert.Equal(500L * 1024 * 1024 * 1024, sut.QuotaTotalBytes); // 500 GB
         Assert.True(sut.QuotaPercent > 0.0);
+        Assert.True(sut.IsQuotaUsageKnown);
         Assert.Contains("300", sut.QuotaDisplay);
         Assert.Contains("500", sut.QuotaDisplay);
+
+        // A folder is present, so the sum covers the root's own files only — a lower bound, and
+        // labelled as one rather than dressed up with a percentage (U3).
+        Assert.StartsWith("≥", sut.QuotaDisplay);
+        Assert.DoesNotContain("%", sut.QuotaDisplay);
+    }
+
+    // The bug U3 fixes: files whose size the provider never reported summed to 0, and the header
+    // announced "0 B / 500 GB (0% used)" above a folder full of them.
+    [Fact]
+    public void StorageQuota_ReportsUnknown_WhenNoFileHasASize()
+    {
+        var sut = Build();
+
+        sut.DisplayItems(new List<DriveItem>
+        {
+            new DriveItem("Notas.gdoc", "/my-files/Notas.gdoc", false, null),
+            new DriveItem("Plan.gsheet", "/my-files/Plan.gsheet", false, null)
+        });
+
+        Assert.False(sut.IsQuotaUsageKnown);
+        Assert.Equal(0.0, sut.QuotaPercent);
+        Assert.StartsWith("—", sut.QuotaDisplay);
+        Assert.DoesNotContain("0 B", sut.QuotaDisplay);
+    }
+
+    // ...but a genuinely empty root is a real zero, and must not be hidden behind the em dash.
+    [Fact]
+    public void StorageQuota_ReportsAnExactZero_WhenTheRootIsActuallyEmpty()
+    {
+        var sut = Build();
+
+        sut.DisplayItems(new List<DriveItem>());
+
+        Assert.True(sut.IsQuotaUsageKnown);
+        Assert.Equal(0, sut.QuotaUsedBytes);
+        Assert.Contains("0 B", sut.QuotaDisplay);
+        Assert.Contains("%", sut.QuotaDisplay);
+    }
+
+    private static void SetErrorKind(MainWindowViewModel sut, DriveErrorKind kind)
+        => typeof(MainWindowViewModel)
+            .GetField("_lastErrorKind", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(sut, kind);
+
+    private static void SetWarning(MainWindowViewModel sut)
+    {
+        typeof(MainWindowViewModel)
+            .GetProperty("IsWarning", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(sut, true);
+        sut.UpdateConnectionTelemetry();
     }
 
     [Fact]

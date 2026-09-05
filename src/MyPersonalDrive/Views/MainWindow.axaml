@@ -142,13 +142,23 @@
                     <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding AccountSummary}" VerticalAlignment="Center" FontSize="10" Opacity="0.6" />
                   </StackPanel>
-                  <Ellipse Grid.Column="2" Width="7" Height="7" VerticalAlignment="Center">
+                  <!-- A ring, not a filled dot: the header's connection badge a few pixels away is
+                       a filled dot, and the two measure different things — this one is "hay sesión
+                       iniciada", that one is "se puede llegar al proveedor" (U2). Same colour
+                       vocabulary, deliberately different shape. -->
+                  <Ellipse Grid.Column="2"
+                           Width="9"
+                           Height="9"
+                           StrokeThickness="2"
+                           Fill="Transparent"
+                           VerticalAlignment="Center"
+                           ToolTip.Tip="Estado de la sesión en este proveedor">
                     <Ellipse.Styles>
                       <Style Selector="Ellipse.auth">
-                        <Setter Property="Fill" Value="#28A745" />
+                        <Setter Property="Stroke" Value="#28A745" />
                       </Style>
                       <Style Selector="Ellipse.unauth">
-                        <Setter Property="Fill" Value="#6C757D" />
+                        <Setter Property="Stroke" Value="#6C757D" />
                       </Style>
                     </Ellipse.Styles>
                     <Classes.auth>
@@ -166,11 +176,28 @@
 
         <!-- Center / Right Telemetry, Quota & Theme Switcher -->
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-          <!-- Connection Status Telemetry Badge -->
-          <Border Background="{DynamicResource CardBackgroundBrush}"
-                  CornerRadius="6"
+          <!-- Connection Status Telemetry Badge. A Button, not a Border: when the state is one the
+               user can act on (Disconnected / Degraded) it retries or re-authenticates, so the app
+               stops reporting a problem it won't help with (U2). Hit-testing is switched off in the
+               healthy states so it reads as a plain badge. -->
+          <Button Name="ConnectionBadge"
                   Padding="8,4"
+                  CornerRadius="6"
+                  Command="{Binding StatusActionCommand}"
+                  IsHitTestVisible="{Binding IsConnectionActionable}"
+                  Classes.actionable="{Binding IsConnectionActionable}"
                   ToolTip.Tip="{Binding ConnectionStatusDescription}">
+            <Button.Styles>
+              <Style Selector="Button#ConnectionBadge">
+                <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+              </Style>
+              <Style Selector="Button#ConnectionBadge.actionable">
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="BorderBrush" Value="#DC3545" />
+              </Style>
+            </Button.Styles>
             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
               <Ellipse Width="8" Height="8" VerticalAlignment="Center">
                 <Ellipse.Styles>
@@ -186,6 +213,9 @@
                   <Style Selector="Ellipse.disconnected">
                     <Setter Property="Fill" Value="#DC3545" />
                   </Style>
+                  <Style Selector="Ellipse.degraded">
+                    <Setter Property="Fill" Value="#FD7E14" />
+                  </Style>
                 </Ellipse.Styles>
                 <Classes.online>
                   <Binding Path="IsOnline" />
@@ -199,21 +229,38 @@
                 <Classes.disconnected>
                   <Binding Path="IsDisconnected" />
                 </Classes.disconnected>
+                <Classes.degraded>
+                  <Binding Path="IsDegraded" />
+                </Classes.degraded>
               </Ellipse>
               <TextBlock Text="{Binding ConnectionStatus}" FontSize="12" FontWeight="Medium" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding StatusActionLabel}"
+                         FontSize="11"
+                         FontWeight="SemiBold"
+                         Opacity="0.75"
+                         VerticalAlignment="Center"
+                         IsVisible="{Binding IsConnectionActionable}" />
             </StackPanel>
-          </Border>
+          </Button>
 
           <!-- Storage Quota Gauge -->
           <Border Background="{DynamicResource CardBackgroundBrush}"
                   CornerRadius="6"
                   Padding="8,4"
-                  ToolTip.Tip="{Binding QuotaDisplay}">
+                  ToolTip.Tip="{Binding QuotaTooltip}">
             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
               <Path Classes="icon" Data="{StaticResource IconDatabase}" Width="14" Height="14" VerticalAlignment="Center" Opacity="0.7" />
               <StackPanel Spacing="2" VerticalAlignment="Center">
                 <TextBlock Text="{Binding QuotaDisplay}" FontSize="11" FontWeight="Medium" />
-                <ProgressBar Value="{Binding QuotaPercent}" Minimum="0" Maximum="100" Height="4" Width="90" CornerRadius="2" />
+                <!-- Hidden rather than shown at zero while the usage is unknown: an empty bar reads
+                     as "nothing used", which is exactly the claim we can't make (U3). -->
+                <ProgressBar Value="{Binding QuotaPercent}"
+                             Minimum="0"
+                             Maximum="100"
+                             Height="4"
+                             Width="90"
+                             CornerRadius="2"
+                             IsVisible="{Binding IsQuotaUsageKnown}" />
               </StackPanel>
             </StackPanel>
           </Border>
@@ -1043,17 +1090,31 @@
                     CornerRadius="4"
                     Classes.warning="{Binding IsWarning}"
                     IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-              <StackPanel Orientation="Horizontal" Spacing="8">
-                <Path Name="WarningIcon"
-                      Classes="icon"
-                      Data="{StaticResource IconWarning}"
-                      Stroke="#856404"
-                      VerticalAlignment="Center"
-                      IsVisible="{Binding IsWarning}" />
-                <TextBlock Name="StatusText"
-                           TextWrapping="Wrap"
-                           Text="{Binding StatusMessage}"
-                           VerticalAlignment="Center" />
+              <!-- Rows, not a single horizontal strip: the message wraps, and the recovery button
+                   below it must not be pushed off the panel's width when it does (U1). -->
+              <StackPanel Spacing="6">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Path Name="WarningIcon"
+                        Classes="icon"
+                        Data="{StaticResource IconWarning}"
+                        Stroke="#856404"
+                        VerticalAlignment="Top"
+                        Margin="0,2,0,0"
+                        IsVisible="{Binding IsWarning}" />
+                  <TextBlock Name="StatusText"
+                             TextWrapping="Wrap"
+                             Text="{Binding StatusMessage}"
+                             VerticalAlignment="Center" />
+                </StackPanel>
+                <Button Name="StatusActionButton"
+                        Classes="primary"
+                        HorizontalAlignment="Left"
+                        Padding="10,4"
+                        FontSize="12"
+                        IsVisible="{Binding HasStatusAction}"
+                        Content="{Binding StatusActionLabel}"
+                        Command="{Binding StatusActionCommand}"
+                        ToolTip.Tip="Reintenta la última operación, o vuelve a iniciar sesión si la sesión expiró" />
               </StackPanel>
               <Border.Styles>
                 <Style Selector="Border#StatusBorder">

@@ -140,6 +140,12 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _connectionStatusDescription = "Connected";
     private long _quotaUsedBytes;
     private long _quotaTotalBytes = 500L * 1024 * 1024 * 1024;
+
+    // Tri-state, because a long defaulting to 0 cannot tell "empty account" from "the provider
+    // never told us" — and the app was rendering both as "0 B / 500 GB (0% used)" above a folder
+    // full of files (docs/PLAN-UX-ROUND-2.md §3).
+    private bool _quotaUsedIsKnown;
+    private bool _quotaUsedIsPartial;
     private DriveErrorKind _lastErrorKind = DriveErrorKind.Unknown;
     private bool _isStatusPanelVisible;
     private bool _isLocalExplorerPanelVisible;
@@ -651,19 +657,99 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public bool IsRateLimited => _connectionStatusKind == "RateLimited";
 
+    /// <summary>
+    /// Authenticated, but the last operation against the provider failed for a reason that makes
+    /// the connection itself suspect. Exists so the header stops claiming "Online" in the same
+    /// frame the body reports a failed load (docs/PLAN-UX-ROUND-2.md §2).
+    /// </summary>
+    public bool IsDegraded => _connectionStatusKind == "Degraded";
+
+    /// <summary>
+    /// True when the header badge is offering recovery rather than just reporting state — it
+    /// becomes a button in exactly the two cases the user can do something about.
+    /// </summary>
+    public bool IsConnectionActionable => IsDisconnected || IsDegraded;
+
+    /// <summary>
+    /// Whether the standing warning has a remedy the app can offer. A warning the user cannot act
+    /// on is a dead end, which is the whole point of U1 (docs/PLAN-UX-ROUND-2.md §1).
+    /// </summary>
+    public bool HasStatusAction => _isWarning;
+
+    /// <summary>
+    /// Which remedy, derived from the typed <see cref="DriveErrorKind"/> rather than from
+    /// <see cref="StatusMessage"/>'s text (AGENTS.md: "Errors are typed").
+    /// </summary>
+    public string StatusActionLabel => NeedsReauthentication ? "Reconectar" : "Reintentar";
+
+    public AsyncCommand StatusActionCommand => NeedsReauthentication ? AuthenticateCommand : RefreshCommand;
+
+    private bool NeedsReauthentication => _lastErrorKind == DriveErrorKind.NotAuthenticated || !IsAuthenticated;
+
     public long QuotaUsedBytes => _quotaUsedBytes;
 
     public long QuotaTotalBytes => _quotaTotalBytes;
 
-    public double QuotaPercent => _quotaTotalBytes > 0 ? Math.Min(100.0, (double)_quotaUsedBytes / _quotaTotalBytes * 100.0) : 0.0;
+    public double QuotaPercent => _quotaUsedIsKnown && _quotaTotalBytes > 0
+        ? Math.Min(100.0, (double)_quotaUsedBytes / _quotaTotalBytes * 100.0)
+        : 0.0;
 
-    public double QuotaProgress => _quotaTotalBytes > 0 ? Math.Clamp((double)_quotaUsedBytes / _quotaTotalBytes, 0.0, 1.0) : 0.0;
+    public double QuotaProgress => _quotaUsedIsKnown && _quotaTotalBytes > 0
+        ? Math.Clamp((double)_quotaUsedBytes / _quotaTotalBytes, 0.0, 1.0)
+        : 0.0;
 
-    public string QuotaDisplay => _quotaTotalBytes > 0
-        ? $"{ByteSize.Format(_quotaUsedBytes)} / {ByteSize.Format(_quotaTotalBytes)} ({QuotaPercent:F0}% used)"
-        : ByteSize.Format(_quotaUsedBytes);
+    /// <summary>True once we have actually seen a root listing we could sum. Drives the gauge's visibility.</summary>
+    public bool IsQuotaUsageKnown => _quotaUsedIsKnown;
 
-    public string QuotaSummary => $"{ByteSize.Format(_quotaUsedBytes)} / {ByteSize.Format(_quotaTotalBytes)}";
+    /// <summary>
+    /// The header gauge. Three shapes, because there are three states and conflating them is the
+    /// bug: unknown renders an em dash, a lower bound renders "≥", and only an exact figure gets a
+    /// percentage. A percentage of a lower bound is noise, so it is omitted rather than qualified.
+    /// </summary>
+    public string QuotaDisplay
+    {
+        get
+        {
+            var total = ByteSize.Format(_quotaTotalBytes);
+
+            if (!_quotaUsedIsKnown)
+            {
+                return $"— / {total}";
+            }
+
+            var used = ByteSize.Format(_quotaUsedBytes);
+            return _quotaUsedIsPartial
+                ? $"≥ {used} / {total}"
+                : $"{used} / {total} ({QuotaPercent:F0} % usado)";
+        }
+    }
+
+    /// <summary>
+    /// Explains what the gauge above actually measured, including that the total is a per-provider
+    /// constant rather than anything the account reported.
+    /// </summary>
+    public string QuotaTooltip
+    {
+        get
+        {
+            const string TotalCaveat =
+                "El total es un valor fijo por proveedor: todavía no se consulta la cuota real de la cuenta.";
+
+            if (!_quotaUsedIsKnown)
+            {
+                return $"Uso desconocido: el proveedor no informó tamaños para la carpeta raíz. {TotalCaveat}";
+            }
+
+            return _quotaUsedIsPartial
+                ? "Mínimo estimado: suma únicamente los archivos de la raíz con tamaño conocido, sin el "
+                  + $"contenido de las subcarpetas. {TotalCaveat}"
+                : $"Suma de los archivos de la raíz. {TotalCaveat}";
+        }
+    }
+
+    public string QuotaSummary => _quotaUsedIsKnown
+        ? $"{ByteSize.Format(_quotaUsedBytes)} / {ByteSize.Format(_quotaTotalBytes)}"
+        : $"— / {ByteSize.Format(_quotaTotalBytes)}";
 
     /// <summary>Human-readable result of the last update check, or the progress of a running install.</summary>
     public string CliUpdateStatus
@@ -3105,31 +3191,39 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (!IsAuthenticated)
         {
-            _connectionStatus = "Disconnected";
+            _connectionStatus = "Desconectado";
             _connectionStatusKind = "Disconnected";
-            _connectionStatusDescription = $"Disconnected — {_provider.DisplayName} not authenticated.";
+            _connectionStatusDescription = $"Desconectado — no hay sesión iniciada en {_provider.DisplayName}.";
         }
         else if (_isWarning && _lastErrorKind == DriveErrorKind.RateLimited)
         {
-            _connectionStatus = "Rate-Limited";
+            _connectionStatus = "Limitado";
             _connectionStatusKind = "RateLimited";
-            _connectionStatusDescription = $"{_provider.DisplayName} rate limited.";
+            _connectionStatusDescription = $"{_provider.DisplayName} está limitando el ritmo de las peticiones.";
+        }
+        else if (_isWarning && IsConnectionFailure(_lastErrorKind))
+        {
+            // Deliberately ahead of the Syncing branch: a sync running on top of a broken
+            // connection is not the headline, the broken connection is.
+            _connectionStatus = "Con errores";
+            _connectionStatusKind = "Degraded";
+            _connectionStatusDescription = $"La última operación contra {_provider.DisplayName} falló: {_statusMessage}";
         }
         else if ((_isSyncInProgress is not null && _isSyncInProgress()) || IsLoading || IsDeepScanRunning)
         {
-            _connectionStatus = "Syncing";
+            _connectionStatus = "Sincronizando";
             _connectionStatusKind = "Syncing";
             _connectionStatusDescription = IsDeepScanRunning
-                ? $"Scanning {_currentPath} metrics..."
+                ? $"Analizando las métricas de {_currentPath}..."
                 : IsLoading
-                    ? $"Loading {CurrentPath}..."
-                    : "Active file synchronization in progress.";
+                    ? $"Cargando {CurrentPath}..."
+                    : "Sincronización de archivos en curso.";
         }
         else
         {
-            _connectionStatus = "Online";
+            _connectionStatus = "En línea";
             _connectionStatusKind = "Online";
-            _connectionStatusDescription = $"Connected to {_provider.DisplayName}.";
+            _connectionStatusDescription = $"Conectado a {_provider.DisplayName}.";
         }
 
         OnPropertyChanged(nameof(ConnectionStatus));
@@ -3139,7 +3233,25 @@ public sealed class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(IsSyncing));
         OnPropertyChanged(nameof(IsDisconnected));
         OnPropertyChanged(nameof(IsRateLimited));
+        OnPropertyChanged(nameof(IsDegraded));
+        OnPropertyChanged(nameof(IsConnectionActionable));
+        OnPropertyChanged(nameof(HasStatusAction));
+        OnPropertyChanged(nameof(StatusActionLabel));
+        OnPropertyChanged(nameof(StatusActionCommand));
     }
+
+    /// <summary>
+    /// Error kinds that say something about the connection rather than about the request. A
+    /// <see cref="DriveErrorKind.NotFound"/> on one path means the path is gone; a
+    /// <see cref="DriveErrorKind.Network"/> means nothing else will work either, and the header
+    /// should stop saying "En línea".
+    /// </summary>
+    private static bool IsConnectionFailure(DriveErrorKind kind) => kind is
+        DriveErrorKind.Network
+        or DriveErrorKind.Timeout
+        or DriveErrorKind.NotAuthenticated
+        or DriveErrorKind.PermissionDenied
+        or DriveErrorKind.Busy;
 
     public void UpdateQuotaMetrics()
     {
@@ -3157,7 +3269,19 @@ public sealed class MainWindowViewModel : ObservableObject
         // is currently browsed would make the gauge jump to near-zero on every navigation.
         if (_currentPath == _rootPath)
         {
-            _quotaUsedBytes = _loadedItems.Where(i => !i.IsFolder && i.Size.HasValue).Sum(i => i.Size!.Value);
+            var files = _loadedItems.Where(i => !i.IsFolder).ToList();
+            var sized = files.Where(i => i.Size.HasValue).ToList();
+
+            _quotaUsedBytes = sized.Sum(i => i.Size!.Value);
+
+            // "No files at all" is a real zero. "Files, none of which reported a size" is not —
+            // that's a provider that doesn't populate the field (Google-native Docs have no size
+            // whatsoever, PLAN-CLOUD-PROVIDERS.md §8.4) and summing it yields a confident 0 B.
+            _quotaUsedIsKnown = files.Count == 0 || sized.Count > 0;
+
+            // Almost always true, and honestly so: the sum covers the root's own files only, so
+            // any subfolder at all makes it a lower bound rather than a total.
+            _quotaUsedIsPartial = sized.Count < files.Count || _loadedItems.Any(i => i.IsFolder);
         }
 
         OnPropertyChanged(nameof(QuotaUsedBytes));
@@ -3165,7 +3289,9 @@ public sealed class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(QuotaPercent));
         OnPropertyChanged(nameof(QuotaProgress));
         OnPropertyChanged(nameof(QuotaDisplay));
+        OnPropertyChanged(nameof(QuotaTooltip));
         OnPropertyChanged(nameof(QuotaSummary));
+        OnPropertyChanged(nameof(IsQuotaUsageKnown));
     }
 
     public async Task SetThemeAsync(string theme)

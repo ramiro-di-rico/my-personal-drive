@@ -24,7 +24,16 @@ internal static class CliErrorClassifier
             return DriveErrorKind.Busy;
         }
 
-        if (Contains(text, "login first") || Contains(text, "not authenticated") || Contains(text, "not logged in"))
+        // "invalid access token" observed live against a real account (docs/PLAN-UX-ROUND-2.md §1):
+        // it fell through to Unknown, so the app reported a generic "Failed to load" and left the
+        // header telemetry claiming Online while every request was failing. Token wording is the
+        // CLI's way of saying the session is over, which is NotAuthenticated by any other name.
+        if (Contains(text, "login first")
+            || Contains(text, "not authenticated")
+            || Contains(text, "not logged in")
+            || Contains(text, "access token")
+            || Contains(text, "token expired")
+            || Contains(text, "unauthorized"))
         {
             return DriveErrorKind.NotAuthenticated;
         }

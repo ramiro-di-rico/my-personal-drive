@@ -349,6 +349,34 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         Assert.Equal(Avalonia.Input.KeyModifiers.Meta, cmdGesture.KeyModifiers);
     }
 
+    // U8 (docs/PLAN-UX-ROUND-2.md §8): the Conexión tabs used to bind only Is*Active, so a provider
+    // that had never been configured was indistinguishable from a signed-in one.
+    [Fact]
+    public void ProviderTabs_ExposeAuthState_SeparatelyFromWhichTabIsSelected()
+    {
+        var sut = Build(isAuthenticated: true);
+
+        // Proton is both the active provider and the authenticated one...
+        Assert.True(sut.IsProtonActive);
+        Assert.True(sut.IsProtonAuthenticated);
+
+        // ...while the rest are neither: selection and session are different axes.
+        Assert.False(sut.IsOneDriveActive);
+        Assert.False(sut.IsOneDriveAuthenticated);
+        Assert.False(sut.IsGoogleDriveAuthenticated);
+        Assert.False(sut.IsNextcloudAuthenticated);
+        Assert.False(sut.IsS3Authenticated);
+    }
+
+    [Fact]
+    public void ProviderTabs_ReadTheActiveProvidersLiveAuthState_NotOnlyThePersistedFlag()
+    {
+        var sut = Build(isAuthenticated: false);
+
+        Assert.True(sut.IsProtonActive);
+        Assert.False(sut.IsProtonAuthenticated);
+    }
+
     [Fact]
     public void SelectedProvider_ReflectsActiveProvider_AndListsAvailable()
     {

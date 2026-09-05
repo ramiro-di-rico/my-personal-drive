@@ -310,13 +310,14 @@ provider.
 **Do.** Reuse `AvailableProviders`/`ProviderDescriptor` to put the same green/grey dot on each
 Conexión tab. This is a binding change, not new state.
 
-> **Doc discrepancy to resolve.**
-> [PLAN-CLOUD-PROVIDERS.md](PLAN-CLOUD-PROVIDERS.md) §P10 (around line 977) states that
-> `IsGoogleDriveAuthenticated` / `GoogleDriveAccountLabel` "already existed from an earlier
-> UI-scaffolding commit". A search of the source found **no `Is<Provider>Authenticated` property
-> of any kind**; the only auth flag is `MainWindowViewModel.IsAuthenticated` (`:945`), for the
-> active provider, backed by `AppSettings.IsProviderAuthenticated(_provider.Id)` (`:1597`).
-> Confirm which is true and correct whichever document is wrong before building on it.
+> **Doc discrepancy — checked, and this document was the one that was wrong.**
+> An earlier draft of §8 claimed [PLAN-CLOUD-PROVIDERS.md](PLAN-CLOUD-PROVIDERS.md) §P10 was
+> mistaken about `IsGoogleDriveAuthenticated` existing. It is not: the flag lives on
+> **`Services/AppSettings.cs:70`**, alongside `IsProviderAuthenticated`/`SetProviderAuthenticated`
+> (`:153`, `:164`), and `GoogleDriveAccountLabel` is a real `MainWindowViewModel` property
+> (`:301`). The search that produced the claim was scoped to `ViewModels/` and missed the settings
+> record. PLAN-CLOUD-PROVIDERS.md needs no correction; this note is kept rather than deleted
+> because the mistake is instructive — a scoped grep reported as an absence proof.
 
 ## 9. U9 — Search affordances
 

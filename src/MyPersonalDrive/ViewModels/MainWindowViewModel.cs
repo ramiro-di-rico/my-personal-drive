@@ -210,6 +210,18 @@ public sealed class MainWindowViewModel : ObservableObject
                 AvailableProviders.Add(updated);
             }
         }
+
+        RaiseProviderAuthStates();
+    }
+
+    /// <summary>Notifies the Conexión tabs' auth dots (docs/PLAN-UX-ROUND-2.md §8).</summary>
+    private void RaiseProviderAuthStates()
+    {
+        OnPropertyChanged(nameof(IsProtonAuthenticated));
+        OnPropertyChanged(nameof(IsOneDriveAuthenticated));
+        OnPropertyChanged(nameof(IsGoogleDriveAuthenticated));
+        OnPropertyChanged(nameof(IsNextcloudAuthenticated));
+        OnPropertyChanged(nameof(IsS3Authenticated));
     }
 
     public ProviderDescriptor? SelectedProvider
@@ -287,6 +299,30 @@ public sealed class MainWindowViewModel : ObservableObject
     public bool IsNextcloudActive => _provider.Id == ProviderId.Nextcloud;
 
     public bool IsS3Active => _provider.Id == ProviderId.S3;
+
+    /// <summary>
+    /// Whether each provider has a stored session, for the dot on its Conexión tab. The tabs
+    /// previously showed only which one was *selected* (<see cref="IsProtonActive"/> and friends),
+    /// so a provider that had never been configured looked identical to a signed-in one
+    /// (docs/PLAN-UX-ROUND-2.md §8). The state itself is not new — it is the same
+    /// <c>AppSettings.IsProviderAuthenticated</c> the header dropdown's dot already reads through
+    /// <see cref="ProviderDescriptor.IsAuthenticated"/>; it just never reached these buttons.
+    /// Spelled out per provider to match the <c>Is*Active</c> family directly above.
+    /// </summary>
+    public bool IsProtonAuthenticated => IsProviderAuthenticated(ProviderId.Proton);
+
+    public bool IsOneDriveAuthenticated => IsProviderAuthenticated(ProviderId.OneDrive);
+
+    public bool IsGoogleDriveAuthenticated => IsProviderAuthenticated(ProviderId.GoogleDrive);
+
+    public bool IsNextcloudAuthenticated => IsProviderAuthenticated(ProviderId.Nextcloud);
+
+    public bool IsS3Authenticated => IsProviderAuthenticated(ProviderId.S3);
+
+    // The live IsAuthenticated for the active provider, the persisted flag for the others: the
+    // active one can have been signed out this session without that having been written back yet.
+    private bool IsProviderAuthenticated(ProviderId id)
+        => _provider.Id == id ? IsAuthenticated : _settings.Load().IsProviderAuthenticated(id);
 
     /// <summary>Whether the active provider has a version/self-update story to show — false for a provider with no external binary (docs/PLAN-CLOUD-PROVIDERS.md §5 item 2).</summary>
     public bool HasDiagnostics => _provider.Diagnostics is not null;
@@ -1058,6 +1094,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 PersistSettings();
                 RaiseCommandStates();
                 UpdateConnectionTelemetry();
+                RaiseProviderAuthStates();
             }
         }
     }

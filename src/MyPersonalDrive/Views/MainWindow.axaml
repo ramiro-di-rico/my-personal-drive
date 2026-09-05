@@ -1564,13 +1564,55 @@
         <StackPanel Spacing="10">
           <TextBlock FontSize="18" FontWeight="Bold" Text="Conexión" />
 
-          <!-- Provider picker: which backend is active. -->
+          <!-- Provider picker: which backend is active, and — since U8
+               (docs/PLAN-UX-ROUND-2.md §8) — which ones have a session at all. These tabs used to
+               bind only Is*Active, so a provider that had never been configured looked exactly
+               like a signed-in one. The ring matches the header dropdown's own auth indicator,
+               the same shape for the same meaning. -->
           <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button Classes.primary="{Binding IsProtonActive}" Content="Proton Drive" Command="{Binding SwitchToProtonCommand}" />
-            <Button Classes.primary="{Binding IsOneDriveActive}" Content="OneDrive" Command="{Binding SwitchToOneDriveCommand}" />
-            <Button Classes.primary="{Binding IsGoogleDriveActive}" Content="Google Drive" Command="{Binding SwitchToGoogleDriveCommand}" />
-            <Button Classes.primary="{Binding IsNextcloudActive}" Content="Nextcloud" Command="{Binding SwitchToNextcloudCommand}" />
-            <Button Classes.primary="{Binding IsS3Active}" Content="Custom S3" Command="{Binding SwitchToS3Command}" />
+            <StackPanel.Styles>
+              <Style Selector="Ellipse.providerAuth">
+                <Setter Property="Width" Value="8" />
+                <Setter Property="Height" Value="8" />
+                <Setter Property="StrokeThickness" Value="2" />
+                <Setter Property="Fill" Value="Transparent" />
+                <Setter Property="Stroke" Value="#6C757D" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+              </Style>
+              <Style Selector="Ellipse.providerAuth.auth">
+                <Setter Property="Stroke" Value="#28A745" />
+              </Style>
+            </StackPanel.Styles>
+            <Button Classes.primary="{Binding IsProtonActive}" Command="{Binding SwitchToProtonCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="Proton Drive" VerticalAlignment="Center" />
+                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsProtonAuthenticated}" ToolTip.Tip="Sesión iniciada" />
+              </StackPanel>
+            </Button>
+            <Button Classes.primary="{Binding IsOneDriveActive}" Command="{Binding SwitchToOneDriveCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="OneDrive" VerticalAlignment="Center" />
+                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsOneDriveAuthenticated}" ToolTip.Tip="Sesión iniciada" />
+              </StackPanel>
+            </Button>
+            <Button Classes.primary="{Binding IsGoogleDriveActive}" Command="{Binding SwitchToGoogleDriveCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="Google Drive" VerticalAlignment="Center" />
+                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsGoogleDriveAuthenticated}" ToolTip.Tip="Sesión iniciada" />
+              </StackPanel>
+            </Button>
+            <Button Classes.primary="{Binding IsNextcloudActive}" Command="{Binding SwitchToNextcloudCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="Nextcloud" VerticalAlignment="Center" />
+                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsNextcloudAuthenticated}" ToolTip.Tip="Sesión iniciada" />
+              </StackPanel>
+            </Button>
+            <Button Classes.primary="{Binding IsS3Active}" Command="{Binding SwitchToS3Command}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="Custom S3" VerticalAlignment="Center" />
+                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsS3Authenticated}" ToolTip.Tip="Sesión iniciada" />
+              </StackPanel>
+            </Button>
           </StackPanel>
 
           <!-- Proton's card: CLI path, auth, version, self-update. -->

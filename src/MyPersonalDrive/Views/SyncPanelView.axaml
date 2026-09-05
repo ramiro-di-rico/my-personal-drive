@@ -30,10 +30,30 @@
               <TextBlock Text="Actualizar" />
             </StackPanel>
           </Button>
-          <!-- One toggle per active account (P7 Phase A) — pausing OneDrive's automatic
-               sync must not touch Proton's, and vice versa, so this replaces a single
-               shared on/off button rather than sitting alongside it. -->
+        </StackPanel>
+
+        <!-- U7 (docs/PLAN-UX-ROUND-2.md §7): these toggles used to sit on the action row above,
+             immediately over the filter chips below, rendered as same-sized pills naming the same
+             providers — so two controls that do entirely different things (this one changes what
+             the app DOES, that one changes what you SEE) read as one. Both rows are now labelled
+             and given different affordances: a switch-shaped pill with a state dot here, flat
+             chips there. -->
+        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+          <TextBlock Text="Sincronización automática:"
+                     FontSize="12"
+                     Opacity="0.7"
+                     VerticalAlignment="Center" />
           <ItemsControl ItemsSource="{Binding AccountSyncToggles}">
+            <ItemsControl.Styles>
+              <Style Selector="Button.accountToggle">
+                <Setter Property="Padding" Value="10,4" />
+                <Setter Property="CornerRadius" Value="12" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="BorderBrush" Value="{DynamicResource AccentMutedBrush}" />
+              </Style>
+            </ItemsControl.Styles>
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>
                 <StackPanel Orientation="Horizontal" Spacing="8" />
@@ -41,9 +61,30 @@
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="syncVm:AccountSyncToggleViewModel">
-                <Button Content="{Binding Label}"
+                <Button Classes="accountToggle"
                         Command="{Binding ToggleCommand}"
-                        ToolTip.Tip="Vigilar las carpetas locales y consultar esta cuenta automáticamente" />
+                        ToolTip.Tip="{Binding ActionTooltip}">
+                  <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Ellipse Width="7" Height="7" VerticalAlignment="Center">
+                      <Ellipse.Styles>
+                        <Style Selector="Ellipse.running">
+                          <Setter Property="Fill" Value="#28A745" />
+                        </Style>
+                        <Style Selector="Ellipse.stopped">
+                          <Setter Property="Fill" Value="#6C757D" />
+                        </Style>
+                      </Ellipse.Styles>
+                      <Classes.running>
+                        <Binding Path="IsRunning" />
+                      </Classes.running>
+                      <Classes.stopped>
+                        <Binding Path="!IsRunning" />
+                      </Classes.stopped>
+                    </Ellipse>
+                    <TextBlock Text="{Binding Label}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding StateText}" Opacity="0.6" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
@@ -52,9 +93,13 @@
         <!-- Filter by account (docs/PLAN-CLOUD-PROVIDERS.md P9) — same chip idiom as the
              browser's own "filter by type" row. Hidden with a single account, where every
              pair obviously belongs to it already. -->
-        <ItemsControl ItemsSource="{Binding ProviderFilters}"
-                      IsVisible="{Binding HasProviderFilters}"
-                      Margin="0,8,0,0">
+        <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding HasProviderFilters}">
+          <TextBlock Text="Mostrar:"
+                     FontSize="12"
+                     Opacity="0.7"
+                     VerticalAlignment="Center"
+                     Margin="0,0,0,6" />
+        <ItemsControl ItemsSource="{Binding ProviderFilters}">
           <ItemsControl.Styles>
             <Style Selector="Button.providerChip">
               <Setter Property="Padding" Value="8,3" />
@@ -82,6 +127,7 @@
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
+        </StackPanel>
 
         <ItemsControl ItemsSource="{Binding VisiblePairs}">
           <ItemsControl.ItemTemplate>

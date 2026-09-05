@@ -85,6 +85,28 @@ public class SyncPanelProviderFilterTests : IDisposable
         Assert.False(panel.HasFailingPairs);
     }
 
+    // U7 (docs/PLAN-UX-ROUND-2.md §7): the account toggles and the filter chips sat adjacent,
+    // same size, naming the same providers, while doing entirely different things. The toggle's
+    // label no longer bakes the state and the action glyph into one string — the row is labelled
+    // "Sincronización automática:" and the state has its own property.
+    [Fact]
+    public async Task TheAccountToggle_SeparatesTheAccountName_FromItsState()
+    {
+        var accountA = BuildAccount("account-a");
+        await accountA.Store.CreatePairAsync("/remote-a", _localRootA, SyncDirection.RemoteToLocal, ConflictPolicy.Ask);
+
+        var panel = new SyncPanelViewModel(accountA.Store, accountA.Executor, new SyncCrashRecovery(accountA.Store), providerDisplayName: "Account A");
+        await panel.InitializeAsync();
+
+        var toggle = Assert.Single(panel.AccountSyncToggles);
+        Assert.Equal("Account A", toggle.Label);
+        Assert.DoesNotContain(":", toggle.Label);
+        // No scheduler was passed, so automatic sync is not running.
+        Assert.Equal("pausada", toggle.StateText);
+        Assert.Contains("Activar", toggle.ActionTooltip);
+        Assert.Contains("Account A", toggle.ActionTooltip);
+    }
+
     [Fact]
     public async Task WithASingleAccount_NoFilterChipsAreOffered()
     {

@@ -280,6 +280,38 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         sut.UpdateConnectionTelemetry();
     }
 
+    // U9 (docs/PLAN-UX-ROUND-2.md §9): the search box hid rows without saying how many it hid, and
+    // the only way back was selecting the text and deleting it.
+    [Fact]
+    public async Task Search_ReportsItsResultCount_AndCanBeCleared()
+    {
+        var sut = Build();
+        sut.DisplayItems(new List<DriveItem>
+        {
+            new DriveItem("informe.pdf", "/my-files/informe.pdf", false, 10),
+            new DriveItem("informe-final.pdf", "/my-files/informe-final.pdf", false, 20),
+            new DriveItem("fotos", "/my-files/fotos", true, null),
+        });
+
+        // Nothing typed: no count label and nothing to clear, so neither costs any space.
+        Assert.False(sut.HasSearchText);
+        Assert.Equal(string.Empty, sut.SearchResultText);
+        Assert.False(sut.ClearSearchCommand.CanExecute(null));
+
+        sut.SearchText = "informe";
+        Assert.True(sut.HasSearchText);
+        Assert.Equal("2 resultados", sut.SearchResultText);
+        Assert.True(sut.ClearSearchCommand.CanExecute(null));
+
+        sut.SearchText = "informe-final";
+        Assert.Equal("1 resultado", sut.SearchResultText);
+
+        await sut.ClearSearchCommand.ExecuteAsync();
+        Assert.Equal(string.Empty, sut.SearchText);
+        Assert.False(sut.HasSearchText);
+        Assert.Equal(3, sut.RootItems.Count);
+    }
+
     [Fact]
     public async Task SettingsShortcut_TogglesBetweenExplorerAndSettings()
     {

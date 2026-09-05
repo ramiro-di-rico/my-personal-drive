@@ -35,17 +35,6 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Deep paths would otherwise overflow the breadcrumb bar's fixed width with no way to see
-    /// the folder you're actually in. Rather than truncating segments (which hides the middle of
-    /// the path you might want to click back into), it scrolls — and always to the current
-    /// folder, which is what you care about after navigating. Posted after the items collection
-    /// actually changes so the ScrollViewer's Extent already reflects the new content; setting
-    /// Offset past the max clamps to the real end.
-    /// </summary>
-    private void ScrollBreadcrumbToEnd(object? sender, EventArgs e)
-        => Dispatcher.UIThread.Post(() => BreadcrumbScroll.Offset = new Vector(double.MaxValue, 0), DispatcherPriority.Background);
-
-    /// <summary>
     /// Enter (or Space) on the focused row does what clicking it does: select a file, open a folder.
     /// The ListBox gives arrow-key movement between rows for free, but activation is the row's own
     /// Button, which is not focusable — making it focusable instead would put the row's five action
@@ -551,8 +540,6 @@ public partial class MainWindow : Window
         viewModel.LocalExplorer.RequestCopyToClipboardAsync = CopyToClipboardAsync;
         viewModel.LocalExplorer.RequestShowPropertiesAsync = ShowPropertiesAsync;
 
-        viewModel.BreadcrumbItems.CollectionChanged -= ScrollBreadcrumbToEnd;
-        viewModel.BreadcrumbItems.CollectionChanged += ScrollBreadcrumbToEnd;
 
         // ExplorerColumnsGrid.ColumnDefinitions[2] is star-sized so the splitter can resize it —
         // which also means it doesn't shrink to 0 on its own just because IsVisible on its content

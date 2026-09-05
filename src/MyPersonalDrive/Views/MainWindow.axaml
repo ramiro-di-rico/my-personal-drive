@@ -359,33 +359,9 @@
           </Style>
         </Grid.Styles>
         <Border Grid.Column="0" Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
-          <StackPanel Spacing="4">
-            <!-- Which pane this is, for a first-time user: the provider dropdown up in the header
-                 is easy to miss as "this is what the left pane shows." -->
-            <StackPanel Orientation="Horizontal" Spacing="6">
-              <Path Classes="icon" Data="{StaticResource IconCloud}" Width="12" Height="12" Opacity="0.7" />
-              <TextBlock Text="{Binding ActiveProviderDisplayName}" FontSize="11" FontWeight="Bold" Opacity="0.7" />
-            </StackPanel>
-          <ScrollViewer x:Name="BreadcrumbScroll"
-                        HorizontalScrollBarVisibility="Auto"
-                        VerticalScrollBarVisibility="Disabled">
-          <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
-            <ItemsControl.ItemsPanel>
-              <ItemsPanelTemplate>
-                <StackPanel Orientation="Horizontal" Spacing="8" />
-              </ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="vm:BreadcrumbSegmentViewModel">
-                <Button Command="{Binding OpenCommand}"
-                        Content="{Binding Label}"
-                        ToolTip.Tip="{Binding Label}"
-                        IsEnabled="{Binding CanNavigate}" />
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-          </ScrollViewer>
-          </StackPanel>
+          <views:BreadcrumbBar ItemsSource="{Binding BreadcrumbItems}"
+                               Label="{Binding ActiveProviderDisplayName}"
+                               Icon="{StaticResource IconCloud}" />
         </Border>
 
         <Button Grid.Column="1" ToolTip.Tip="Volver atrás" Command="{Binding BackCommand}">
@@ -456,10 +432,25 @@
             <!-- Quick filter over the folder's names (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1's
                  "Global Quick Search") — narrows what's already loaded, no CLI call, combines with
                  the kind chips below rather than replacing them. -->
+            <!-- U9 (docs/PLAN-UX-ROUND-2.md §9): the box used to hide rows without saying how many
+                 it hid, and the only way out was selecting the text and deleting it. -->
             <TextBox Width="200"
                      PlaceholderText="Buscar en esta carpeta…"
-                     Text="{Binding SearchText, Mode=TwoWay}"
-                     Margin="0,0,8,0" />
+                     Text="{Binding SearchText, Mode=TwoWay}" />
+            <Button Command="{Binding ClearSearchCommand}"
+                    IsVisible="{Binding HasSearchText}"
+                    Padding="6,2"
+                    Margin="4,0,0,0"
+                    VerticalAlignment="Center"
+                    ToolTip.Tip="Limpiar la búsqueda">
+              <Path Classes="icon" Data="{StaticResource IconClear}" Width="12" Height="12" />
+            </Button>
+            <TextBlock Text="{Binding SearchResultText}"
+                       IsVisible="{Binding HasSearchText}"
+                       VerticalAlignment="Center"
+                       Opacity="0.7"
+                       FontSize="12"
+                       Margin="6,0,8,0" />
             <TextBlock Text="Ordenar por:" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
             <Button Classes="sortKey" Classes.active="{Binding IsSortedByName}" Command="{Binding SortByNameCommand}">
               <StackPanel Orientation="Horizontal" Spacing="4">
@@ -890,35 +881,28 @@
             </Grid.Styles>
             <Border Grid.Column="0" Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
               <StackPanel Spacing="4">
-                <!-- Which pane this is, for a first-time user — mirrors the provider label on the
-                     cloud pane's own breadcrumb card. -->
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                  <Path Classes="icon" Data="{StaticResource IconHome}" Width="12" Height="12" Opacity="0.7" />
-                  <TextBlock Text="Este equipo (local)" FontSize="11" FontWeight="Bold" Opacity="0.7" />
-                </StackPanel>
-              <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
-                  <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                      <StackPanel Orientation="Horizontal" Spacing="8" />
-                    </ItemsPanelTemplate>
-                  </ItemsControl.ItemsPanel>
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:BreadcrumbSegmentViewModel">
-                      <Button Command="{Binding OpenCommand}"
-                              Content="{Binding Label}"
-                              ToolTip.Tip="{Binding Label}"
-                              IsEnabled="{Binding CanNavigate}" />
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-              </ScrollViewer>
+                <views:BreadcrumbBar ItemsSource="{Binding BreadcrumbItems}"
+                                     Label="Este equipo (local)"
+                                     Icon="{StaticResource IconHome}" />
               <!-- Quick filter over this folder's names — the local pane's counterpart to the
                    cloud pane's own search box (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1). -->
-              <TextBox Width="200"
-                       HorizontalAlignment="Left"
-                       PlaceholderText="Buscar en esta carpeta…"
-                       Text="{Binding SearchText, Mode=TwoWay}" />
+              <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Left">
+                <TextBox Width="200"
+                         PlaceholderText="Buscar en esta carpeta…"
+                         Text="{Binding SearchText, Mode=TwoWay}" />
+                <Button Command="{Binding ClearSearchCommand}"
+                        IsVisible="{Binding HasSearchText}"
+                        Padding="6,2"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="Limpiar la búsqueda">
+                  <Path Classes="icon" Data="{StaticResource IconClear}" Width="12" Height="12" />
+                </Button>
+                <TextBlock Text="{Binding SearchResultText}"
+                           IsVisible="{Binding HasSearchText}"
+                           VerticalAlignment="Center"
+                           Opacity="0.7"
+                           FontSize="12" />
+              </StackPanel>
               </StackPanel>
             </Border>
 

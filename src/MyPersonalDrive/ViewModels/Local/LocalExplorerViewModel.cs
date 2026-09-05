@@ -45,6 +45,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         ToggleHiddenFilesCommand = new AsyncCommand(ToggleHiddenFilesAsync, () => !IsLoading, onError);
         SelectAllCommand = new AsyncCommand(SelectAllAsync, () => Items.Count > 0, onError);
         DeleteSelectedCommand = new AsyncCommand(DeleteSelectedAsync, () => SelectedCount > 0, onError);
+        ClearSearchCommand = new AsyncCommand(ClearSearchAsync, () => HasSearchText, onError);
     }
 
     public ObservableCollection<LocalNodeViewModel> Items { get; }
@@ -97,6 +98,9 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
     public AsyncCommand DeleteSelectedCommand { get; }
 
+    /// <summary>Empties this pane's search box (docs/PLAN-UX-ROUND-2.md §9).</summary>
+    public AsyncCommand ClearSearchCommand { get; }
+
     /// <summary>How many rows are currently selected — docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2.</summary>
     public int SelectedCount => Items.Count(i => i.IsSelected);
 
@@ -139,7 +143,41 @@ public sealed class LocalExplorerViewModel : ObservableObject
             if (SetProperty(ref _searchText, value))
             {
                 RenderItems();
+                OnPropertyChanged(nameof(HasSearchText));
+                OnPropertyChanged(nameof(SearchResultText));
+                ClearSearchCommand.RaiseCanExecuteChanged();
             }
+        }
+    }
+
+    private async Task ClearSearchAsync()
+    {
+        SearchText = string.Empty;
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Whether a search term is narrowing the list, for the clear button. A filter that hides rows
+    /// without saying so — and with no way back but selecting the text and deleting it — was the
+    /// specific complaint (docs/PLAN-UX-ROUND-2.md §9).
+    /// </summary>
+    public bool HasSearchText => !string.IsNullOrWhiteSpace(_searchText);
+
+    /// <summary>
+    /// How many rows survived the search, phrased the way the kind chips already phrase their own
+    /// counts. Empty when nothing is being searched, so the label costs no space in the common case.
+    /// </summary>
+    public string SearchResultText
+    {
+        get
+        {
+            if (!HasSearchText)
+            {
+                return string.Empty;
+            }
+
+            var shown = Items.Count;
+            return shown == 1 ? "1 resultado" : $"{shown} resultados";
         }
     }
 
@@ -211,6 +249,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         }
 
         RaiseSelectionChanged();
+        OnPropertyChanged(nameof(SearchResultText));
     }
 
     /// <summary>

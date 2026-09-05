@@ -455,6 +455,7 @@ public sealed class MainWindowViewModel : ObservableObject
         DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity, HandleUnexpectedError);
         ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, HandleUnexpectedError);
         ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
+        ClearSearchCommand = new AsyncCommand(ClearSearchAsync, () => HasSearchText, HandleUnexpectedError);
         SortByNameCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Name), onError: HandleUnexpectedError);
         SortBySizeCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Size), onError: HandleUnexpectedError);
         SortByModifiedCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Modified), onError: HandleUnexpectedError);
@@ -569,6 +570,9 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand ClearActivityCommand { get; }
 
     public AsyncCommand ShowExplorerCommand { get; }
+
+    /// <summary>Empties the folder search box (docs/PLAN-UX-ROUND-2.md §9).</summary>
+    public AsyncCommand ClearSearchCommand { get; }
 
     public AsyncCommand ShowSettingsCommand { get; }
 
@@ -875,7 +879,34 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _searchText, value))
             {
                 RenderItems();
+                OnPropertyChanged(nameof(HasSearchText));
+                OnPropertyChanged(nameof(SearchResultText));
+                ClearSearchCommand.RaiseCanExecuteChanged();
             }
+        }
+    }
+
+    /// <summary>
+    /// Whether a search term is narrowing the listing, for the clear button. A filter that hides
+    /// rows without saying so — and with no way back but selecting the text and deleting it — was
+    /// the specific complaint (docs/PLAN-UX-ROUND-2.md §9).
+    /// </summary>
+    public bool HasSearchText => !string.IsNullOrWhiteSpace(_searchText);
+
+    /// <summary>
+    /// How many rows survived the search, phrased the way the kind chips already phrase their own
+    /// counts. Empty when nothing is being searched, so the label costs no space in the common case.
+    /// </summary>
+    public string SearchResultText
+    {
+        get
+        {
+            if (!HasSearchText)
+            {
+                return string.Empty;
+            }
+
+            return RootItems.Count == 1 ? "1 resultado" : $"{RootItems.Count} resultados";
         }
     }
 
@@ -3085,6 +3116,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ViewSelectedFileCommand.RaiseCanExecuteChanged();
         SelectAllRowsCommand.RaiseCanExecuteChanged();
         RaiseSelectionSummaryChanged();
+        OnPropertyChanged(nameof(SearchResultText));
 
         // Computed here rather than at each call site so the cached paint and the CLI result both
         // update it, and so the numbers can never disagree with the rows actually on screen.
@@ -3486,6 +3518,12 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task SetViewModeAsync(DriveViewMode mode)
     {
         ViewMode = mode;
+        await Task.CompletedTask;
+    }
+
+    private async Task ClearSearchAsync()
+    {
+        SearchText = string.Empty;
         await Task.CompletedTask;
     }
 

@@ -11,21 +11,68 @@
 > session surfaced two of the items below) and
 > [PLAN-TECH-DEBT.md](PLAN-TECH-DEBT.md#7-mapping-to-plan-local-syncmd).
 >
-> No implementation branch yet. Current branch at time of writing: `feature/google-drive-provider`.
+> Implementation branch: `feature/ux-round-2`, branched from `feature/google-drive-provider`.
 
 ## Status
 
-- [ ] **U1 — Recoverable error surface.** Not started.
-- [ ] **U2 — Consolidate the three connection/identity indicators.** Not started.
-- [ ] **U3 — Stop the quota gauge asserting `0 B` when the size is unknown.** Not started.
-- [ ] **U4 — Single UI language.** Not started. Blocks nothing, blocked by nothing, but must be
-      one atomic pass — see §5.
-- [ ] **U5 — Promote sync to a top-level view.** Not started.
-- [ ] **U6 — Per-action detail for sync failures.** Not started. Depends on U5 for its home.
-- [ ] **U7 — Disambiguate the two chip rows in the sync section.** Not started.
-- [ ] **U8 — Per-provider auth state on the Conexión tabs.** Not started.
-- [ ] **U9 — Search affordances (result count, clear).** Not started.
-- [ ] **U10 — Deduplicate the two breadcrumb implementations.** Not started.
+> **Implemented on branch `feature/ux-round-2`, 2026-09-05.** All ten items landed; 1001 tests
+> passing (from 974 at the start). Verified by unit tests plus a stub-CLI launch; **not visually
+> verified — this environment has no screenshot tool**, so the rendering of every layout change
+> below is unconfirmed and wants a human pass.
+
+- [x] **U1 — Recoverable error surface.** The status card carries an action button whose verb comes
+      from the typed `DriveErrorKind`: "Reconectar" (`AuthenticateCommand`) on
+      `NotAuthenticated`, "Reintentar" (`RefreshCommand`) otherwise (`HasStatusAction`,
+      `StatusActionLabel`, `StatusActionCommand`). Root cause found in passing:
+      `CliErrorClassifier` did not recognise "invalid access token", so an expired session
+      classified as `Unknown` — see [§1](#1-u1--recoverable-error-surface).
+- [x] **U2 — Consolidate the three connection/identity indicators.** The account indicator is a
+      ring (session) and the connection indicator a filled dot (reachability); the connection badge
+      became a `Button` that recovers when actionable; a new `Degraded` state
+      (`IsConnectionFailure`) stops the header claiming "En línea" while a connection failure is
+      standing. A `NotFound` on one path deliberately does not demote it.
+- [x] **U3 — Stop the quota gauge asserting `0 B`.** Usage is tri-state (`_quotaUsedIsKnown` /
+      `_quotaUsedIsPartial`): em dash when unknown, `≥ X` when the sum covers only the root's own
+      sized files, a percentage only when exact. Progress bar hidden while unknown;
+      `QuotaTooltip` says the total is a per-provider constant.
+- [x] **U4 — Single UI language: Spanish.** 419 insertions / 419 deletions across the `.axaml`,
+      ViewModels and Services, with no modified line lacking a string literal, plus a follow-up
+      pass over `MainWindow.axaml.cs` (~75 strings across every code-built dialog) that a scoping
+      mistake left out of the first sweep. Exposed a latent bug: `SyncPairViewModel.HasFailures`
+      substring-matched `LastError` for failure wording — removed in U6.
+- [x] **U5 — Promote sync to a top-level view.** Third tab beside Explorador and Visor; markup
+      lifted into `Views/SyncPanelView.axaml`, the first `UserControl` in the codebase. The two
+      independent booleans became one `MainView` value. The tab carries a failure badge
+      (`SyncPanelViewModel.HasFailingPairs`), which reads `Pairs` and not `VisiblePairs`.
+- [x] **U6 — Per-action detail for sync failures.** `RequestFailureReviewAsync` →
+      `ShowFailuresAsync`, mirroring the conflict flow, showing path, operation, attempts and the
+      provider's own sentence verbatim, with per-action retry/discard alongside the kept
+      retry-all. New `SyncStateStore.RetryFailedAsync(pairId, ids)` and `DiscardFailedAsync`.
+      Removes U4's string matching in favour of `FailedCount`, with a regression test.
+- [x] **U7 — Disambiguate the two chip rows.** Both rows labelled by role
+      ("Sincronización automática:" / "Mostrar:") and given different affordances. The toggle label
+      stopped baking name, state and action glyph into one string —
+      `Label` / `StateText` / `ActionTooltip`.
+- [x] **U8 — Per-provider auth state on the Conexión tabs.** New `Is*Authenticated` properties
+      feeding the same session ring the header dropdown uses. The active provider reports its live
+      flag rather than the persisted one.
+- [x] **U9 — Search affordances.** `HasSearchText`, `SearchResultText` and a `ClearSearchCommand`
+      in both panes; the count follows the rendered rows so it cannot disagree with the screen.
+- [x] **U10 — Deduplicate the breadcrumbs.** One `Views/BreadcrumbBar` `UserControl` with
+      `ItemsSource` / `Label` / `Icon`. The scroll-to-current-folder behaviour moved in from
+      `MainWindow`'s code-behind, where an `x:Name` binding meant only the remote pane could have
+      it — so the local pane gains it.
+
+### Follow-ups this round deliberately did not take
+
+- **No visual verification.** Every layout change (U1's two-row status card, U2's badge button,
+  U5's tab and lifted view, U7's two labelled rows, U9's inline count, U10's shared bar) built,
+  loaded and ran, but was never *looked at*. Spacing, wrapping and overflow at the real window
+  width are unverified.
+- **`ClearStaleFailedActionsAsync` and discard.** U6's discard deletes queue rows directly. It
+  coexists with the stale-clearing path but the interaction was not exercised together.
+- **`AccountSyncToggleViewModel` still duplicates the panel's primary-slot toggle logic**, as its
+  own doc comment says. U7 restyled it without addressing that.
 
 **Investigated and dismissed:** the recursive folder scan *does* have cancellation
 (`CancelDeepScanCommand`, "Cancelar análisis" button, a real `CancellationToken` threaded to

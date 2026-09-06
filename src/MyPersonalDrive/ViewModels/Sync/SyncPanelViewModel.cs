@@ -78,6 +78,22 @@ public sealed class SyncPanelViewModel : ObservableObject
         AccountSyncToggles = new ObservableCollection<AccountSyncToggleViewModel>();
         ProviderFilters = new ObservableCollection<ProviderFilterViewModel>();
 
+        // The sync view had no subscription at all, so every label in it — the pair directions,
+        // the status lines, the account toggles, the filter chips — stayed in whichever language
+        // the panel was built in until the pairs were reloaded (docs/PLAN-UX-ROUND-3.md X8). Long
+        // lived, like the window, so subscribing without unsubscribing is not a leak; the children
+        // are told individually for the reason ObservableObject.RefreshLocalizedText explains.
+        Localizer.Instance.LanguageChanged += (_, _) =>
+        {
+            _statusMessage = _status.IsEmpty ? string.Empty : _status.Render();
+            OnAllPropertiesChanged();
+
+            foreach (var child in Pairs.Cast<ObservableObject>().Concat(AccountSyncToggles).Concat(ProviderFilters))
+            {
+                child.RefreshLocalizedText();
+            }
+        };
+
         AddPairCommand = new AsyncCommand(() => AddPairAsync(), () => !IsBusy, ReportError);
         RefreshCommand = new AsyncCommand(LoadPairsAsync, () => !IsBusy, ReportError);
         ToggleAutomaticSyncCommand = new AsyncCommand(ToggleAutomaticSyncAsync, () => Primary.Scheduler is not null, ReportError);

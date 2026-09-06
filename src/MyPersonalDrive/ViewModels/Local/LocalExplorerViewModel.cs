@@ -57,6 +57,12 @@ public sealed class LocalExplorerViewModel : ObservableObject
         {
             _statusMessage = _statusText.IsEmpty ? null : _statusText.Render();
             OnAllPropertiesChanged();
+
+            // The rows are their own binding sources; the notification above does not reach them.
+            foreach (var row in Items)
+            {
+                row.RefreshLocalizedText();
+            }
         };
     }
 

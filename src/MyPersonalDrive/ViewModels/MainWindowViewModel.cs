@@ -1353,6 +1353,21 @@ public sealed class MainWindowViewModel : ObservableObject
         RefreshSelectionLabels();
         UpdateConnectionTelemetry();
         OnAllPropertiesChanged();
+
+        // Every child that is its own binding source has to be told separately: the notification
+        // above reaches bindings whose source is this view model, and a chip's LabelWithCount and
+        // a row's tooltips are bound against the chip and the row. Switching to Spanish used to
+        // leave "All (14) Folders (8)" over a fully translated toolbar until something re-listed
+        // the folder (docs/PLAN-UX-ROUND-3.md X8).
+        foreach (var chip in KindFilters)
+        {
+            chip.RefreshLocalizedText();
+        }
+
+        foreach (var node in RootItems)
+        {
+            node.RefreshLocalizedText();
+        }
     }
 
     public bool IsWarning

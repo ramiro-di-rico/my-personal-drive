@@ -20,7 +20,6 @@ public sealed class KindFilterViewModel : ObservableObject
     {
         Kind = kind;
         Count = count;
-        Label = kind is null ? Localizer.Instance.T(StringKeys.Common.All) : FileKindClassifier.DisplayName(kind.Value);
         ApplyCommand = new AsyncCommand(() => apply(kind), onError: onError);
     }
 
@@ -28,7 +27,14 @@ public sealed class KindFilterViewModel : ObservableObject
 
     public int Count { get; }
 
-    public string Label { get; }
+    /// <summary>
+    /// Read at get time, not stored at construction. Storing it froze the chip row in whichever
+    /// language was active when the folder was last listed: switching to Spanish left "All (14)
+    /// Folders (8)" on screen until something re-listed the folder (docs/PLAN-UX-ROUND-3.md X8).
+    /// </summary>
+    public string Label => Kind is null
+        ? Localizer.Instance.T(StringKeys.Common.All)
+        : FileKindClassifier.DisplayName(Kind.Value);
 
     public string LabelWithCount => $"{Label} ({Count:n0})";
 

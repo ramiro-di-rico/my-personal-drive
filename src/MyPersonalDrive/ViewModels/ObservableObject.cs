@@ -30,6 +30,16 @@ public abstract class ObservableObject : INotifyPropertyChanged
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty));
 
     /// <summary>
+    /// Tells this view model's bindings to re-read everything, after the interface language
+    /// changed. Parents call it on the children they own — a filter chip, a listing row, a sync
+    /// pair — because a child subscribing to the localizer itself would leave a handler on a
+    /// process-lifetime singleton for every row ever rendered, which is the reason
+    /// <see cref="LocalExplorerViewModel"/>'s own subscription carries a comment saying so
+    /// (docs/PLAN-I18N.md §3).
+    /// </summary>
+    internal void RefreshLocalizedText() => OnAllPropertiesChanged();
+
+    /// <summary>
     /// For properties with no backing field of their own — computed ones whose value depends on
     /// state living elsewhere, which <see cref="SetProperty{T}"/> can't observe.
     /// </summary>

@@ -89,8 +89,15 @@ The localization tests are the safety net and they are specific:
 | `PlaceholderSetsMatchEnglishPerKey` | A `{0}` was dropped or invented. Would crash at runtime. |
 | `NoLocaleValueIsEmptyOrWhitespace` | An untranslated value was blanked instead of copied. |
 | `EveryPluralKeyHasBothOneAndOther` | A `.one` without its `.other`. |
+| `SpanishAndEnglishOnlyMatchWhereTheyShould` | A value is byte-identical across locales — usually copied rather than translated. Genuinely language-neutral values (a `"{0}: {1}"` template, a unit, a proper noun) go in that test's `LanguageNeutral` list. |
+| `StringKeysConstantsAreExactlyTheEnglishKeySet` | You added a key to `en.json` with no constant, or a constant with no key. This one only fires when adding *new* strings, not when adding a locale. |
 
 Fix the file, not the test.
+
+Two more gates exist and should not fire for a locale-only change, but will tell you immediately if
+a translation attempt strayed into the markup: `NoMarkupCarriesALiteralUserFacingString` and
+`NoBindingCarriesALiteralStringFormat`. If either fires, you edited a `.axaml` — don't; the value
+belongs in the JSON.
 
 ### 5. Verify it actually publishes
 
@@ -145,7 +152,13 @@ Some languages need more than a JSON file. Say so up front rather than shipping 
 - **Sorting.** `DriveItemSorter` sorts names. A locale with its own collation (Swedish å/ä/ö,
   Turkish dotted/dotless i) will sort differently once `CurrentCulture` changes. Usually the desired
   behavior — but check it deliberately, and check nothing that parses machine data got swept along
-  (PLAN-I18N.md §10).
+  (PLAN-I18N.md §10). The CA1304/CA1305 warnings in `.editorconfig` are what keep that split
+  honest; a build that starts emitting them is telling you a formatting site lost its explicit
+  provider.
+- **Turkish specifically.** `tr-TR`'s dotless-i breaks `ToUpper()`/`ToLower()` round-trips on ASCII
+  identifiers. Everything in this repo that case-folds machine data does so with an explicit
+  `StringComparison`, and CA1310 keeps it that way — but this is the locale that finds any site
+  that slipped through.
 
 ## Anti-patterns
 

@@ -15,6 +15,8 @@ public class LocalizationTests
 {
     private static readonly Regex Placeholder = new(@"\{\d+", RegexOptions.Compiled);
 
+    internal static IReadOnlyDictionary<string, string> LoadLocale(string code) => Load(code);
+
     private static IReadOnlyDictionary<string, string> Load(string code)
     {
         var loader = typeof(Localizer).Assembly

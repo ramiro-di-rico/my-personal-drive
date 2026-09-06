@@ -1,7 +1,7 @@
 # MyPersonalDrive — Technical Reference
 
 > Reference document describing the current state of the application (branch
-> `feature/google-drive-provider`, commit `b87afac`).
+> `feature/i18n`, commit `871ccd6`).
 > Meant to give full context to any future chat/session without having to re-read all the code.
 
 ---
@@ -70,6 +70,12 @@ src/MyPersonalDrive/
     RemoteHashAlgorithm.cs         # None|Sha1|Sha256|QuickXor
     UploadConflictStrategy.cs      # enum None|KeepBoth|Replace|Skip
   Services/
+    Localization/                  # the interface's string table (see §7.4)
+      Language.cs / LanguageCatalog.cs   # the languages this build ships; degrade-to-English
+      StringKeys.cs                # every key, as a constant; a test pins it against en.json
+      Localizer.cs                 # the singleton: T/F/Plural, Culture, SetLanguage
+      LocalizedText.cs             # a key plus its arguments, rendered on read
+      Locales/en.json, es.json     # embedded resources, globbed
     Providers/
       ICloudDriveProvider.cs       # the facade every consumer talks to (see §5); exposes Paths
       IDriveOperations.cs / IDriveAuthenticator.cs / IRemoteViewInvalidator.cs / IProviderDiagnostics.cs
@@ -584,6 +590,37 @@ current pattern; if more dialogs are added, consider extracting them into their 
 
 ---
 
+### 7.6 Localization
+
+The interface ships in **English (default) and Spanish**, chosen in Settings and applied without a
+restart. See [PLAN-I18N.md](PLAN-I18N.md) for the design and
+[`.claude/skills/add-language/SKILL.md`](../.claude/skills/add-language/SKILL.md) for adding a
+third.
+
+- **Not `.resx`.** Satellite assemblies resolve by reflection, which `PublishAot` /
+  `TrimMode=partial` is hostile to. One flat embedded JSON per language, loaded through
+  `AppJsonContext`.
+- **Markup** binds `{Binding Loc[some.key]}` — `ObservableObject.Loc` makes every view model a
+  binding source, so these stay *compiled* bindings. The one template typed against a model rather
+  than a view model (`ProviderDescriptor`, in the header) names the singleton explicitly with
+  `Source={x:Static loc:Localizer.Instance}` plus `x:DataType`.
+- **A message that stays on screen stores its key, not its text** — `LocalizedText`, held by every
+  status line (`MainWindowViewModel`, `LocalExplorerViewModel`, `SyncPanelViewModel`,
+  `SyncPairViewModel`). Rendering at read time is what makes them follow the picker.
+- **Services name reasons, the UI words them.** `SyncPairValidator` and `LocalFolderInspector`
+  return a `SyncPairIssue`; `SyncIssuePresenter` and `DriveErrorPresenter` do the wording. A
+  service may use the string table for pure presentation copy (file-kind labels, sync progress),
+  but never for an exception message, the CLI console or the crash log — those stay English and
+  greppable, and a provider's own sentence is shown verbatim as the detail half of a localized
+  frame.
+- **Culture is split deliberately.** `Localizer.Culture` formats what a person reads; machine data
+  (paths, SQLite, CLI and API payloads, `settings.json`) is explicitly
+  `CultureInfo.InvariantCulture`. `.editorconfig` turns CA1304/CA1305/CA1310 on as warnings so the
+  split cannot erode.
+- **Three gates** in `tests/.../Localization/`: every locale is key-for-key identical to English
+  with matching placeholders; `StringKeys` matches `en.json` exactly; and no `.axaml` carries a
+  literal user-facing attribute or a word-bearing `StringFormat` outside a short allowlist.
+
 ## 8. Packaging
 
 - `scripts/publish-linux.sh` → AOT `dotnet publish` for linux-x64, copies `libSkiaSharp.so`,
@@ -682,3 +719,8 @@ constructor) and on demand from the settings view.
   only by an atomic rename.
 - Anything touching `RootItems` / bound properties must run on the UI thread
   (`Dispatcher.UIThread.InvokeAsync` / `.Post`).
+- **No user-facing string is a literal.** Markup binds `Loc[key]`; code calls `Loc.T`/`F`/`Plural`.
+  A message that persists on screen stores a `LocalizedText`, not rendered text.
+- **`Localizer.Culture` for what a person reads; `CultureInfo.InvariantCulture` for machine data.**
+  Neither is the machine's ambient culture, and an unqualified `Parse`/`ToString` is a build
+  warning.

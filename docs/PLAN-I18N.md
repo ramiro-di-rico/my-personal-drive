@@ -16,13 +16,16 @@
 
 ## Status
 
-> **L0-L8 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
+> **L0-L9 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
 > passing (from 1001). The AOT publish is clean — only the five warnings that predate this work —
 > and both locales are verifiably embedded in the single-file binary. **Not visually verified: this
 > environment has no working screenshot tool** (GNOME refuses `ScreenshotWindow` over D-Bus), so
 > the Settings layout with the picker, and the language actually changing on screen, are both
 > unconfirmed by eye and want a human pass. The counts in §0.1 were taken on `feature/ux-round-2`
 > and are slightly low against the merged `main`, which added the per-pane toolbars.
+>
+> **Final state: 578 keys, English and Spanish, 1086 tests passing (from 1001).** Every phase's AOT
+> publish was clean, and both locales are present in the single-file binary.
 >
 > L3 turned up one thing worth carrying forward: `{Binding Loc[key]}` needs the DataContext to be
 > a view model, and one `DataTemplate` in the header is typed against `ProviderDescriptor`. That
@@ -93,7 +96,12 @@
       [PLAN-TECH-DEBT.md](PLAN-TECH-DEBT.md) **B6.4**, the third byte formatter. The audit found
       **two real latent bugs**, both machine data formatted through the ambient culture: the local
       trash folder's `yyyy-MM-dd` name and the corrupt-settings quarantine file's timestamp.
-- [ ] **L9 — The no-literals lint gate.** Not started.
+- [x] **L9 — The no-literals lint gate.** Three tests in
+      `tests/.../Localization/NoHardcodedStringsTests.cs`: no `.axaml` carries a literal
+      `Text`/`Content`/`PlaceholderText`/`Header`/`ToolTip.Tip`, no binding carries a word-bearing
+      `StringFormat`, and no value is byte-identical across locales outside a list of
+      language-neutral templates. The allowlist is **seven entries** — the `DRIVE` wordmark, a `·`
+      separator and the five provider names — which is what this phase was waiting for.
 
 ---
 

@@ -1730,9 +1730,13 @@
               <StackPanel Spacing="6">
                 <TextBlock FontWeight="SemiBold" Text="{Binding Loc[settings.syncfolder.label]}" />
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                  <!-- Stretch and no MaxWidth. A stretched control that a MaxWidth stops from
+                       filling its cell is CENTRED, not left-aligned, which left this field floating
+                       in the middle of the card with its browse button pinned far away
+                       (docs/PLAN-UX-ROUND-3.md X7 — introduced there and found on the first
+                       screenshot of the round). The field fills the row, up to its own button. -->
                   <TextBox Grid.Column="0"
                            MinWidth="200"
-                           MaxWidth="420"
                            HorizontalAlignment="Stretch"
                            PlaceholderText="{Binding Loc[settings.syncfolder.placeholder]}"
                            Text="{Binding DefaultSyncFolder, Mode=TwoWay}" />
@@ -1830,9 +1834,9 @@
               <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
               <TextBlock Text="{Binding Loc[settings.proton.clipath.label]}" />
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <!-- See the sync-folder field above: stretch without a MaxWidth, or it centres. -->
                 <TextBox Grid.Column="0"
                          MinWidth="200"
-                         MaxWidth="420"
                          HorizontalAlignment="Stretch"
                          PlaceholderText="{Binding Loc[settings.proton.clipath.placeholder]}"
                          Text="{Binding CliPath, Mode=TwoWay}" />
@@ -1923,8 +1927,7 @@
                          TextWrapping="Wrap"
                          Text="{Binding Loc[settings.onedrive.clientid.hint]}" />
               <TextBox MinWidth="200"
-                       MaxWidth="420"
-                       HorizontalAlignment="Left"
+                       HorizontalAlignment="Stretch"
                        PlaceholderText="{Binding Loc[settings.onedrive.clientid.placeholder]}"
                        Text="{Binding OneDriveClientId, Mode=TwoWay}" />
 
@@ -1985,15 +1988,13 @@
                          TextWrapping="Wrap"
                          Text="{Binding Loc[settings.googledrive.hint]}" />
               <TextBlock Text="{Binding Loc[settings.googledrive.clientid.label]}" />
-              <TextBox MaxWidth="420"
-                       HorizontalAlignment="Left"
-                       MinWidth="200"
+              <TextBox MinWidth="200"
+                       HorizontalAlignment="Stretch"
                        PlaceholderText="{Binding Loc[settings.googledrive.clientid.placeholder]}"
                        Text="{Binding GoogleDriveClientId, Mode=TwoWay}" />
               <TextBlock Text="{Binding Loc[settings.googledrive.clientsecret.label]}" />
-              <TextBox MaxWidth="420"
-                       HorizontalAlignment="Left"
-                       MinWidth="200"
+              <TextBox MinWidth="200"
+                       HorizontalAlignment="Stretch"
                        PlaceholderText="{Binding Loc[settings.googledrive.clientsecret.placeholder]}"
                        PasswordChar="*"
                        Text="{Binding GoogleDriveClientSecret, Mode=TwoWay}" />

@@ -164,10 +164,10 @@
                            ToolTip.Tip="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Loc[header.session.tooltip]}">
                     <Ellipse.Styles>
                       <Style Selector="Ellipse.auth">
-                        <Setter Property="Stroke" Value="#28A745" />
+                        <Setter Property="Stroke" Value="{DynamicResource StatusOkBrush}" />
                       </Style>
                       <Style Selector="Ellipse.unauth">
-                        <Setter Property="Stroke" Value="#6C757D" />
+                        <Setter Property="Stroke" Value="{DynamicResource StatusOfflineBrush}" />
                       </Style>
                     </Ellipse.Styles>
                     <Classes.auth>
@@ -213,26 +213,26 @@
               </Style>
               <Style Selector="Button#ConnectionBadge.actionable">
                 <Setter Property="Cursor" Value="Hand" />
-                <Setter Property="BorderBrush" Value="#DC3545" />
+                <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
               </Style>
             </Button.Styles>
             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
               <Ellipse Width="8" Height="8" VerticalAlignment="Center">
                 <Ellipse.Styles>
                   <Style Selector="Ellipse.online">
-                    <Setter Property="Fill" Value="#28A745" />
+                    <Setter Property="Fill" Value="{DynamicResource StatusOkBrush}" />
                   </Style>
                   <Style Selector="Ellipse.syncing">
-                    <Setter Property="Fill" Value="#007ACC" />
+                    <Setter Property="Fill" Value="{DynamicResource StatusSyncingBrush}" />
                   </Style>
                   <Style Selector="Ellipse.ratelimited">
-                    <Setter Property="Fill" Value="#FFC107" />
+                    <Setter Property="Fill" Value="{DynamicResource StatusWarningBrush}" />
                   </Style>
                   <Style Selector="Ellipse.disconnected">
-                    <Setter Property="Fill" Value="#DC3545" />
+                    <Setter Property="Fill" Value="{DynamicResource StatusErrorBrush}" />
                   </Style>
                   <Style Selector="Ellipse.degraded">
-                    <Setter Property="Fill" Value="#FD7E14" />
+                    <Setter Property="Fill" Value="{DynamicResource StatusDegradedBrush}" />
                   </Style>
                 </Ellipse.Styles>
                 <Classes.online>
@@ -371,7 +371,7 @@
           <TextBlock Text="{Binding Loc[nav.sync]}" />
           <Ellipse Width="8"
                    Height="8"
-                   Fill="#DC3545"
+                   Fill="{DynamicResource StatusErrorBrush}"
                    VerticalAlignment="Center"
                    IsVisible="{Binding SyncPanel.HasFailingPairs}"
                    ToolTip.Tip="{Binding Loc[nav.sync.failures.tooltip]}" />
@@ -1123,7 +1123,7 @@
                   <Path Name="WarningIcon"
                         Classes="icon"
                         Data="{StaticResource IconWarning}"
-                        Stroke="#856404"
+                        Stroke="{DynamicResource WarningCardForegroundBrush}"
                         VerticalAlignment="Top"
                         Margin="0,2,0,0"
                         IsVisible="{Binding IsWarning}" />
@@ -1147,10 +1147,10 @@
                   <Setter Property="Background" Value="Transparent" />
                 </Style>
                 <Style Selector="Border#StatusBorder.warning">
-                  <Setter Property="Background" Value="#FFF3CD" />
+                  <Setter Property="Background" Value="{DynamicResource WarningCardBackgroundBrush}" />
                 </Style>
                 <Style Selector="Border#StatusBorder.warning TextBlock#StatusText">
-                  <Setter Property="Foreground" Value="#856404" />
+                  <Setter Property="Foreground" Value="{DynamicResource WarningCardForegroundBrush}" />
                 </Style>
               </Border.Styles>
             </Border>
@@ -1602,11 +1602,11 @@
                 <Setter Property="Height" Value="8" />
                 <Setter Property="StrokeThickness" Value="2" />
                 <Setter Property="Fill" Value="Transparent" />
-                <Setter Property="Stroke" Value="#6C757D" />
+                <Setter Property="Stroke" Value="{DynamicResource StatusOfflineBrush}" />
                 <Setter Property="VerticalAlignment" Value="Center" />
               </Style>
               <Style Selector="Ellipse.providerAuth.auth">
-                <Setter Property="Stroke" Value="#28A745" />
+                <Setter Property="Stroke" Value="{DynamicResource StatusOkBrush}" />
               </Style>
             </StackPanel.Styles>
             <Button Classes.primary="{Binding IsProtonActive}" Command="{Binding SwitchToProtonCommand}">

@@ -69,10 +69,10 @@
                     <Ellipse Width="7" Height="7" VerticalAlignment="Center">
                       <Ellipse.Styles>
                         <Style Selector="Ellipse.running">
-                          <Setter Property="Fill" Value="#28A745" />
+                          <Setter Property="Fill" Value="{DynamicResource StatusOkBrush}" />
                         </Style>
                         <Style Selector="Ellipse.stopped">
-                          <Setter Property="Fill" Value="#6C757D" />
+                          <Setter Property="Fill" Value="{DynamicResource StatusOfflineBrush}" />
                         </Style>
                       </Ellipse.Styles>
                       <Classes.running>
@@ -149,7 +149,7 @@
                             IsVisible="{Binding HasConflicts}"
                             Command="{Binding ResolveConflictsCommand}"
                             HorizontalAlignment="Left"
-                            Foreground="#F5C451"
+                            Foreground="{DynamicResource StatusWarningBrush}"
                             ToolTip.Tip="{Binding Loc[sync.conflicts.tooltip]}" />
                     <!-- The detail view comes first and the blind retry-all second, deliberately:
                          the row used to offer only the second, so the user was asked to retry
@@ -158,7 +158,7 @@
                             IsVisible="{Binding HasFailures}"
                             Command="{Binding ReviewFailuresCommand}"
                             HorizontalAlignment="Left"
-                            Foreground="#E06C6C"
+                            Foreground="{DynamicResource StatusErrorBrush}"
                             ToolTip.Tip="{Binding Loc[sync.failures.tooltip]}" />
                     <Button Content="{Binding Loc[sync.retryfailed]}"
                             IsVisible="{Binding HasFailures}"

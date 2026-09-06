@@ -38,6 +38,9 @@
       Spanish literals left in `Services/` is gone. See §8.
 - [x] **B6.4** — folded into `ByteSize.Format` during [PLAN-I18N.md](PLAN-I18N.md) L8, which
       also moved `ByteSize` from invariant to the interface language's culture.
+- [ ] **B3.1** — `FakeCliExecutor.Calls` is a bare `List<T>` read while a fire-and-forget refresh
+      may still be appending to it. Found as a one-in-five flake during
+      [PLAN-UX-ROUND-3.md](PLAN-UX-ROUND-3.md); see §5.
 
 ---
 
@@ -384,6 +387,33 @@ Target: ~60 tests, all offline, no CLI and no network. Add `dotnet test` to
 `scripts/` and to any future CI.
 
 ---
+
+### B3.1 — `FakeCliExecutor.Calls` is read while a background refresh may still be writing it
+
+**Where.** `tests/MyPersonalDrive.Tests/Fakes/FakeCliExecutor.cs:19` — `public List<RecordedCall>
+Calls { get; } = [];`, appended at `:58` from whichever thread ran the command.
+
+**What goes wrong.** Several view-model actions end with a fire-and-forget refresh — trash, upload
+and rename all do — so the refresh's own CLI call can still be running when the test's assertions
+start. `Assert.Contains(executor.Calls, …)` then enumerates a `List<T>` another thread is adding
+to, which either throws `InvalidOperationException` ("collection was modified") or reads a
+half-published list.
+
+Observed once in five consecutive suite runs, on
+`MainWindowMultiSelectTests.TrashSelectedCommand_AsksOnceWhenTheSelectionIncludesAFolder_ThenTrashesEveryItem`
+(2026-09-06). The test passes in isolation and passed three full runs immediately after, which is
+the signature of a race rather than a broken assertion. The failure message was not captured, so
+the mechanism above is inferred from the shape of the code and is **not confirmed**.
+
+**Why it wasn't fixed here.** It is test infrastructure, and the round it surfaced in was UX work
+with an unrelated diff. Both plausible fixes are more than a line: make `Calls` a
+`ConcurrentBag`/lock-guarded list (changes every assertion that indexes it), or give the fake a way
+to await its outstanding commands so tests can join the background refresh before asserting. The
+second is better — it removes the race instead of hiding it — and it wants doing once, for every
+test, rather than at one call site.
+
+**What it blocks.** Nothing, but it will keep costing a random red run in CI, which is how test
+suites lose their authority.
 
 ## 6. Batch B4 — Persistence and state (1.5 d) · TD-8
 

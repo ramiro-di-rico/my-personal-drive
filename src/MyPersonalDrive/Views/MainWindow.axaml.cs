@@ -8,6 +8,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using MyPersonalDrive.Models;
+using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Localization;
 using MyPersonalDrive.ViewModels;
 using MyPersonalDrive.ViewModels.Local;
@@ -1274,10 +1275,10 @@ public partial class MainWindow : Window
         var lines = new List<string>
         {
             TwoClauses(
-                Loc.Plural(StringKeys.Dialog.PreviewDownloadFiles, stats.FilesToDownload, FormatBytes(stats.BytesToDownload)),
+                Loc.Plural(StringKeys.Dialog.PreviewDownloadFiles, stats.FilesToDownload, ByteSize.Format(stats.BytesToDownload)),
                 Loc.Plural(StringKeys.Dialog.PreviewDownloadFolders, stats.FoldersToCreateLocally)),
             TwoClauses(
-                Loc.Plural(StringKeys.Dialog.PreviewUploadFiles, stats.FilesToUpload, FormatBytes(stats.BytesToUpload)),
+                Loc.Plural(StringKeys.Dialog.PreviewUploadFiles, stats.FilesToUpload, ByteSize.Format(stats.BytesToUpload)),
                 Loc.Plural(StringKeys.Dialog.PreviewUploadFolders, stats.FoldersToCreateRemotely)),
             TwoClauses(
                 Loc.Plural(StringKeys.Dialog.PreviewTrashLocal, stats.ToDeleteLocal),
@@ -1753,11 +1754,4 @@ public partial class MainWindow : Window
         _ => Loc.T(StringKeys.Dialog.ConflictsReasonDefault),
     };
 
-    private static string FormatBytes(long bytes)
-        => bytes switch
-        {
-            < 1024 => $"{bytes} B",
-            < 1024 * 1024 => $"{bytes / 1024.0:F1} KB",
-            _ => $"{bytes / 1024.0 / 1024.0:F1} MB"
-        };
 }

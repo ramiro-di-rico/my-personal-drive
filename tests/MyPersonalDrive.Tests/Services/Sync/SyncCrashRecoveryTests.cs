@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Sync;
@@ -9,7 +10,7 @@ public class SyncCrashRecoveryTests : IDisposable
 {
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"mypersonaldrive-recovery-tests-{Guid.NewGuid():N}.db");
     private readonly string _localRoot = Path.Combine(Path.GetTempPath(), $"mypersonaldrive-recovery-local-{Guid.NewGuid():N}");
-    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
+    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture);
 
     public void Dispose()
     {

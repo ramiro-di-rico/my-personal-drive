@@ -156,7 +156,7 @@ public sealed class SyncStateStore
         command.Parameters.AddWithValue("@ConflictPolicy", conflictPolicy.ToString());
         command.Parameters.AddWithValue("@ExcludeGlobs", (object?)JoinGlobs(excludeGlobs) ?? DBNull.Value);
         command.Parameters.AddWithValue("@MirrorDeletes", mirrorDeletes ? 1 : 0);
-        var id = Convert.ToInt32(await command.ExecuteScalarAsync(ct));
+        var id = Convert.ToInt32(await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
 
         return new SyncPair(id, remotePath, localPath, direction, conflictPolicy, IsEnabled: true, IsPaused: false,
             excludeGlobs ?? [], LastSyncAt: null, SyncPairStatus.Never, LastError: null, mirrorDeletes);

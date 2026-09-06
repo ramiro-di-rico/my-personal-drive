@@ -33,8 +33,8 @@
 - [ ] **B4 (persistence/state), B5 (async lifecycle), B6 (observability)** — not started.
 - [ ] **B6.3** — the sync preview/conflict dialogs name Proton Drive whichever provider is
       syncing. Found during [PLAN-I18N.md](PLAN-I18N.md) L4; see §8.
-- [ ] **B6.4** — a second byte formatter in `MainWindow.axaml.cs` disagreeing with
-      `Services/ByteSize`. Fold in during PLAN-I18N.md L8; see §8.
+- [x] **B6.4** — folded into `ByteSize.Format` during [PLAN-I18N.md](PLAN-I18N.md) L8, which
+      also moved `ByteSize` from invariant to the interface language's culture.
 
 ---
 
@@ -530,6 +530,11 @@ is about now that the interface language moves `CurrentCulture`.
 **Why it wasn't fixed here:** folding it into `ByteSize.Format` changes the text the preview
 dialog shows, which is a visible change and wants its own before/after. It belongs with L8, which
 is going over every formatting site anyway.
+
+**Done** in L8. The preview dialog's sizes now come from `ByteSize.Format`, which also means they
+follow the interface language rather than the machine's ambient culture. The thresholds differ
+slightly from the deleted formatter's (binary steps throughout, and a GB step it lacked), so the
+same file can render a different string than before — the intended before/after.
 
 ---
 

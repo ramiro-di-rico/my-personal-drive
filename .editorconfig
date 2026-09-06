@@ -1,0 +1,14 @@
+root = true
+
+[*.cs]
+# Globalization analyzers, on because the interface language now moves CurrentCulture
+# (docs/PLAN-I18N.md §10). A Parse or ToString with no explicit provider is the hazard: under a
+# Spanish culture "1.5" parses as 15 and 1.5 formats as "1,5", which silently corrupts anything
+# read from or written to CLI output, an API payload, SQLite or settings.json.
+#
+# The fix at a call site is always one of two things, and which one is a real decision:
+#   - machine data  -> CultureInfo.InvariantCulture
+#   - presentation  -> Localizer.Instance.Culture
+dotnet_diagnostic.CA1304.severity = warning   # specify CultureInfo
+dotnet_diagnostic.CA1305.severity = warning   # specify IFormatProvider
+dotnet_diagnostic.CA1310.severity = warning   # string comparison with explicit StringComparison

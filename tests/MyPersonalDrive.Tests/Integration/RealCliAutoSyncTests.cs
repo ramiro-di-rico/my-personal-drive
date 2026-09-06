@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
@@ -72,7 +73,7 @@ public sealed class RealCliAutoSyncTests : IDisposable
     [IntegrationFact]
     public async Task ALocalEdit_IsSyncedWithoutAnyoneAskingForIt()
     {
-        var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-03-01T12:00:00Z"));
+        var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture));
         var rootName = _remoteRoot[("/my-files/".Length)..];
         await _service.CreateFolderAsync("/my-files", rootName);
 

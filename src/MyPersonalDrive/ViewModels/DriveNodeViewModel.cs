@@ -86,7 +86,7 @@ public sealed class DriveNodeViewModel : ObservableObject
     /// </summary>
     public FileKind FileKind { get; }
 
-    public string? SizeText => Item.Size is null ? null : $"{Item.Size:n0} bytes";
+    public string? SizeText => Item.Size is { } size ? Loc.F(StringKeys.Common.Bytes, size.ToString("n0", Loc.Culture)) : null;
 
     /// <summary>
     /// A folder's recursive size, once someone has paid for the scan that produced it
@@ -108,7 +108,7 @@ public sealed class DriveNodeViewModel : ObservableObject
 
     public bool HasDeepSize => !string.IsNullOrEmpty(DeepSizeText);
 
-    public string? ModifiedText => Item.ModifiedAt?.ToLocalTime().ToString("g");
+    public string? ModifiedText => Item.ModifiedAt?.ToLocalTime().ToString("g", Loc.Culture);
 
     public string? OwnerText => Item.Owner;
 

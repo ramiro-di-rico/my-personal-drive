@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Providers;
@@ -26,11 +27,11 @@ public class DeltaRemoteScannerTests : IDisposable
     private SyncStateStore CreateStateStore() => new(_dbPath);
 
     private static NodeFingerprint Fingerprint(string relativePath, bool isFolder = false, string? contentHash = "hash", string? nodeId = "id")
-        => new(relativePath, isFolder, isFolder ? null : 10, DateTimeOffset.Parse("2026-01-01T00:00:00Z"), nodeId, isFolder ? null : contentHash,
+        => new(relativePath, isFolder, isFolder ? null : 10, DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture), nodeId, isFolder ? null : contentHash,
             isFolder || contentHash is null ? null : RemoteHashAlgorithm.QuickXor);
 
     private static DriveItem Item(string path, string name, bool isFolder = false, string? contentHash = "hash", string? nodeId = "id")
-        => new(path, name, isFolder, isFolder ? null : 10, DateTimeOffset.Parse("2026-01-01T00:00:00Z"), NodeId: nodeId, ContentHash: isFolder ? null : contentHash);
+        => new(path, name, isFolder, isFolder ? null : 10, DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture), NodeId: nodeId, ContentHash: isFolder ? null : contentHash);
 
     [Fact]
     public async Task ScanAsync_WithNoBaseline_UpsertsEveryChangeReported()

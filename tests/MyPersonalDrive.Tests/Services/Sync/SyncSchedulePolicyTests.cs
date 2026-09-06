@@ -1,3 +1,4 @@
+using System.Globalization;
 using MyPersonalDrive.Services.Sync;
 using Xunit;
 
@@ -5,7 +6,7 @@ namespace MyPersonalDrive.Tests.Services.Sync;
 
 public class SyncSchedulePolicyTests
 {
-    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-03-01T12:00:00Z");
+    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture);
 
     private static PairScheduleState State(
         DateTimeOffset? lastRunAt = null,

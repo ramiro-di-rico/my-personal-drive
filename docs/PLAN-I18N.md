@@ -16,7 +16,7 @@
 
 ## Status
 
-> **L0-L7 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
+> **L0-L8 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
 > passing (from 1001). The AOT publish is clean — only the five warnings that predate this work —
 > and both locales are verifiably embedded in the single-file binary. **Not visually verified: this
 > environment has no working screenshot tool** (GNOME refuses `ScreenshotWindow` over D-Bus), so
@@ -84,7 +84,15 @@
       copy, `LocalFileWatcher`'s degradation notice and `SyncScheduler`'s retry notice went through
       the string table. **§9's boundary moved slightly** — see
       [§9.1](#91-what-l7-actually-drew-the-line-around).
-- [ ] **L8 — Culture-aware formatting, and the invariant-culture audit.** Not started.
+- [x] **L8 — Culture-aware formatting, and the invariant-culture audit.** `.editorconfig` turns
+      CA1304/CA1305/CA1310 on as warnings; the sweep behind them is done and the build is clean.
+      Seven flagged sites plus two the analyzer could not see, each classified as machine data
+      (invariant) or presentation (`Localizer.Culture`). `ByteSize` moved from invariant to the
+      interface language's culture — it is presentation, and a Spanish interface should say
+      "1,2 GB". `CultureHazardTests` pins both halves. Also folded in
+      [PLAN-TECH-DEBT.md](PLAN-TECH-DEBT.md) **B6.4**, the third byte formatter. The audit found
+      **two real latent bugs**, both machine data formatted through the ambient culture: the local
+      trash folder's `yyyy-MM-dd` name and the corrupt-settings quarantine file's timestamp.
 - [ ] **L9 — The no-literals lint gate.** Not started.
 
 ---
@@ -630,6 +638,32 @@ Two parts, and **the audit is not optional**:
 
 A regression test that runs the existing formatting tests under `es-AR` as
 `DefaultThreadCurrentCulture` is the cheapest proof this landed.
+
+### 10.1 What the audit actually found
+
+Seven sites the analyzers flagged, plus two they could not see (both inside interpolated strings).
+Each was classified, and the classification was the whole exercise:
+
+**Machine data, now explicitly invariant** — and two of these were live bugs waiting for someone to
+pick a language:
+
+- `SyncExecutor.MoveToLocalTrash` names the local trash folder `yyyy-MM-dd`. It is a path. Under a
+  culture with a different calendar it changes shape, and yesterday's trash stops being comparable
+  with today's — which is what crash recovery walks.
+- `AppSettingsService.QuarantineCorruptFile` stamps the quarantined file the same way.
+- `SqliteMigrationRunner`'s two `Convert.ToInt32` reads and `SyncStateStore`'s `last_insert_rowid`.
+
+**Presentation, now on `Localizer.Culture`**: `ByteSize.Format` (which had a comment explicitly
+justifying invariant — correct before there was a language picker, wrong after), the two panes'
+`ModifiedText`, and the properties dialog's timestamp.
+
+The test project needed the same pass: 54 `DateTimeOffset.Parse` calls in fixtures had no explicit
+provider, and `CultureHazardTests` moves the process culture, so one of them could have started
+failing depending on test order. Fixed rather than suppressed.
+
+**The durable half is the analyzers**, not the sweep — a sweep is a snapshot. `.editorconfig` turns
+CA1304/CA1305/CA1310 on as warnings across the repo, and the build is clean, so the next
+unqualified `Parse` shows up as a warning rather than as a bug report from a Spanish user.
 
 ## 11. L9 — The no-literals lint gate
 

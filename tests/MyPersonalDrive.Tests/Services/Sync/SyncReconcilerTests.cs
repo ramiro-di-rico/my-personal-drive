@@ -1,3 +1,4 @@
+using System.Globalization;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Sync;
 using Xunit;
@@ -11,9 +12,9 @@ namespace MyPersonalDrive.Tests.Services.Sync;
 /// </summary>
 public class SyncReconcilerTests
 {
-    private static readonly DateTimeOffset Timestamp = DateTimeOffset.Parse("2026-07-31T18:00:00Z");
-    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
-    private static readonly DateTimeOffset T1 = DateTimeOffset.Parse("2026-01-02T00:00:00Z");
+    private static readonly DateTimeOffset Timestamp = DateTimeOffset.Parse("2026-07-31T18:00:00Z", CultureInfo.InvariantCulture);
+    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture);
+    private static readonly DateTimeOffset T1 = DateTimeOffset.Parse("2026-01-02T00:00:00Z", CultureInfo.InvariantCulture);
 
     private static NodeFingerprint FileFp(string path, long size = 100, string? hash = "hash-a", DateTimeOffset? modifiedAt = null)
         => new(path, false, size, modifiedAt ?? T0, null, hash);

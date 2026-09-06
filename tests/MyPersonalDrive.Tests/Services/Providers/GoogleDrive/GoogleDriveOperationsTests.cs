@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Providers;
@@ -96,7 +97,7 @@ public class GoogleDriveOperationsTests : IDisposable
         Assert.False(file.IsFolder);
         Assert.Equal(42, file.Size);
         Assert.Equal("abc123", file.ContentHash);
-        Assert.Equal(DateTimeOffset.Parse("2026-01-02T03:04:05Z"), file.ModifiedAt);
+        Assert.Equal(DateTimeOffset.Parse("2026-01-02T03:04:05Z", CultureInfo.InvariantCulture), file.ModifiedAt);
         Assert.Equal("/notes.txt", file.Path);
         Assert.False(file.IsRemoteOnlyDocument);
     }

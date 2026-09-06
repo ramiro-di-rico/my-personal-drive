@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 
 namespace MyPersonalDrive.Services;
@@ -65,7 +66,10 @@ public sealed class AppSettingsService
     {
         try
         {
-            var quarantinePath = $"{_settingsPath}.corrupt-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}";
+            // A filename, not a date shown to anyone: invariant, so it does not change shape
+            // with the interface language (docs/PLAN-I18N.md §10).
+            var stamp = DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+            var quarantinePath = $"{_settingsPath}.corrupt-{stamp}";
             File.Move(_settingsPath, quarantinePath, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

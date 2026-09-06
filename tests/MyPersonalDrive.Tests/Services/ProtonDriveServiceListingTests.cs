@@ -1,3 +1,4 @@
+using System.Globalization;
 using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Tests.Fakes;
@@ -86,7 +87,7 @@ public class ProtonDriveServiceListingTests
         Assert.StartsWith("rHChrZ", item.NodeId);
         Assert.Null(item.Size);
         // Folders fall back to the top-level modificationTime (see Appendix A #2).
-        Assert.Equal(DateTimeOffset.Parse("2026-06-09T22:07:26.000Z"), item.ModifiedAt);
+        Assert.Equal(DateTimeOffset.Parse("2026-06-09T22:07:26.000Z", CultureInfo.InvariantCulture), item.ModifiedAt);
     }
 
     [Fact]
@@ -110,7 +111,7 @@ public class ProtonDriveServiceListingTests
         // ModifiedAt must come from activeRevision.claimedModificationTime (the real local
         // mtime at upload time), never the top-level modificationTime (a server-side revision
         // event time, which in the source data used for this fixture was ~18s later).
-        Assert.Equal(DateTimeOffset.Parse("2026-06-06T14:02:28.502Z"), item.ModifiedAt);
+        Assert.Equal(DateTimeOffset.Parse("2026-06-06T14:02:28.502Z", CultureInfo.InvariantCulture), item.ModifiedAt);
 
         Assert.Equal("a2abbf57e75de3b7da1312f64080090b5a0514f0", item.ContentHash);
         Assert.StartsWith("rHChrZ", item.NodeId);

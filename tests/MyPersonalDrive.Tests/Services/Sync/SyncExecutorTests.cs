@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
@@ -98,7 +99,7 @@ public class SyncExecutorTests : IDisposable
         var downloadedPath = Path.Combine(_localRoot, "a.txt");
         Assert.True(File.Exists(downloadedPath));
         Assert.Equal("hello", await File.ReadAllTextAsync(downloadedPath));
-        Assert.Equal(DateTime.Parse("2026-01-01T00:00:00.000Z").ToUniversalTime(), File.GetLastWriteTimeUtc(downloadedPath));
+        Assert.Equal(DateTime.Parse("2026-01-01T00:00:00.000Z", CultureInfo.InvariantCulture).ToUniversalTime(), File.GetLastWriteTimeUtc(downloadedPath));
     }
 
     [Fact]
@@ -519,7 +520,7 @@ public class SyncExecutorTests : IDisposable
         // blind enqueueing left one extra row per run, each with a fresh retry budget: measured CLI
         // attempts went 1, 3, 6, 10, 15. Automatic sync runs ~288 times a day, so this had to
         // become flat before F4 added more surface on top of it.
-        var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-03-01T12:00:00Z"));
+        var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture));
         var executor = new FakeCliExecutor();
         executor.RespondForPath(RemoteRoot, $"[{FileEntry("a.txt", "hello")}]");
 
@@ -1031,7 +1032,7 @@ public class SyncExecutorTests : IDisposable
         // Housekeeping runs before anything that can throw, on purpose: a pair whose scan fails
         // every cycle is exactly the one generating the most log noise, and if pruning sat after the
         // scan it would be the one pair that never got tidied.
-        var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-03-01T12:00:00Z"));
+        var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture));
         var executor = new FakeCliExecutor();
         var stateStore = new SyncStateStore(_dbPath);
         var pair = await CreatePairAsync(stateStore);
@@ -1173,7 +1174,7 @@ public class SyncExecutorTests : IDisposable
     [Fact]
     public async Task RunAsync_TransientFailure_SchedulesARetry_InsteadOfFailingTheRowPermanently()
     {
-        var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-03-01T12:00:00Z"));
+        var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture));
         var executor = new FakeCliExecutor();
         executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}]");
         executor.EnqueueOutput(_ => throw new DriveException("download", 1, "", "connection reset", "connection reset", DriveErrorKind.Network));
@@ -1196,7 +1197,7 @@ public class SyncExecutorTests : IDisposable
     [Fact]
     public async Task RunAsync_AuthFailure_FailsTheRowPermanentlyAndAbortsTheRest()
     {
-        var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-03-01T12:00:00Z"));
+        var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture));
         var executor = new FakeCliExecutor();
         executor.EnqueueOutput($"[{FileEntry("a.txt", "hello")}, {FileEntry("b.txt", "world")}]");
         executor.EnqueueOutput(_ => throw new DriveException("download", 1, "", "You need to login first", "You need to login first", DriveErrorKind.NotAuthenticated));

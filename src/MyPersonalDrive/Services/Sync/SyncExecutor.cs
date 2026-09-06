@@ -1,3 +1,4 @@
+using System.Globalization;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Providers;
 
@@ -903,7 +904,7 @@ public sealed class SyncExecutor
             return; // already gone — nothing to do
         }
 
-        var trashRoot = Path.Combine(pair.LocalPath, ".mypersonaldrive-trash", DateTimeOffset.UtcNow.ToString("yyyy-MM-dd"));
+        var trashRoot = Path.Combine(pair.LocalPath, ".mypersonaldrive-trash", DateTimeOffset.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
         var trashPath = Path.Combine(trashRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(trashPath)!);
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
@@ -29,7 +30,7 @@ public class DriveCacheServiceTests : IDisposable
         connection.Open();
         var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
-        var version = Convert.ToInt32(command.ExecuteScalar());
+        var version = Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
 
         Assert.True(version >= 3, "Expected at least the DriveItems+NodeId/ContentHash+sync-tables migrations to have applied.");
     }
@@ -57,7 +58,7 @@ public class DriveCacheServiceTests : IDisposable
     public async Task AddOrUpdateItem_ThenGetCachedItems_RoundTripsNodeIdContentHashAndModifiedAt()
     {
         var sut = new DriveCacheService(_dbPath);
-        var modifiedAt = DateTimeOffset.Parse("2026-06-06T14:02:28.502Z");
+        var modifiedAt = DateTimeOffset.Parse("2026-06-06T14:02:28.502Z", CultureInfo.InvariantCulture);
         var item = new DriveItem(
             Path: "/my-files/report.pdf",
             Name: "report.pdf",

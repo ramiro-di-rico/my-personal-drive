@@ -593,7 +593,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
         if (item.ModifiedAt is not null)
         {
-            fields.Add(new PropertyField("Modificado", item.ModifiedAt.Value.ToLocalTime().ToString("g")));
+            fields.Add(new PropertyField(Loc.T(StringKeys.Common.Modified), item.ModifiedAt.Value.ToLocalTime().ToString("g", Loc.Culture)));
         }
 
         await show(item.Name, fields);

@@ -7,10 +7,11 @@ namespace MyPersonalDrive.Services;
 /// way the rest of the desktop labels them (KB/MB/GB), which is the convention a user comparing
 /// this against their file manager will recognize.
 ///
-/// Formatted with <see cref="CultureInfo.InvariantCulture"/> on purpose: the app's copy is Spanish
-/// but its numbers are not localized anywhere else (see <c>DriveNodeViewModel.SizeText</c>), and a
-/// culture-dependent decimal separator would make these values differ between a developer's machine
-/// and CI for no benefit.
+/// Formatted with <see cref="Localization.Localizer.Culture"/> — the interface language's culture,
+/// not the machine's. This is presentation: a Spanish interface should say "1,2 GB". It was
+/// invariant until the app grew a language picker, which is exactly the distinction
+/// docs/PLAN-I18N.md §10 is about — machine data stays invariant, what a person reads follows the
+/// language they chose.
 /// </summary>
 public static class ByteSize
 {
@@ -22,12 +23,12 @@ public static class ByteSize
         {
             // Not reachable from CLI-reported sizes, but a negative total would mean an overflow
             // upstream, and printing "-1 B" is a better bug report than throwing inside a binding.
-            return string.Create(CultureInfo.InvariantCulture, $"{bytes} B");
+            return string.Create(Localization.Localizer.Instance.Culture, $"{bytes} B");
         }
 
         if (bytes < 1024)
         {
-            return string.Create(CultureInfo.InvariantCulture, $"{bytes} B");
+            return string.Create(Localization.Localizer.Instance.Culture, $"{bytes} B");
         }
 
         double value = bytes;
@@ -41,7 +42,7 @@ public static class ByteSize
         // One decimal below 10 ("1.2 GB"), none above ("512 MB") — the extra digit stops mattering
         // once the leading digits carry the magnitude.
         return value < 10
-            ? string.Create(CultureInfo.InvariantCulture, $"{value:0.0} {Units[unit]}")
-            : string.Create(CultureInfo.InvariantCulture, $"{value:0} {Units[unit]}");
+            ? string.Create(Localization.Localizer.Instance.Culture, $"{value:0.0} {Units[unit]}")
+            : string.Create(Localization.Localizer.Instance.Culture, $"{value:0} {Units[unit]}");
     }
 }

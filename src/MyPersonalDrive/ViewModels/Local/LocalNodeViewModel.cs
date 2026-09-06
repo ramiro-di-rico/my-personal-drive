@@ -2,6 +2,8 @@ using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
 using MyPersonalDrive.ViewModels.Sync;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.ViewModels.Local;
 
 /// <summary>
@@ -47,7 +49,7 @@ public sealed class LocalNodeViewModel : ObservableObject
 
     public string? SizeText => Item.Size is null ? null : ByteSize.Format(Item.Size.Value);
 
-    public string? ModifiedText => Item.ModifiedAt?.ToLocalTime().ToString("g");
+    public string? ModifiedText => Item.ModifiedAt?.ToLocalTime().ToString("g", Loc.Culture);
 
     /// <summary>The configured sync pair whose local side is this row, or null if none exists.</summary>
     public SyncPairViewModel? SyncPair { get; }

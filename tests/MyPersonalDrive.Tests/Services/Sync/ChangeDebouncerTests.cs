@@ -1,3 +1,4 @@
+using System.Globalization;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
 using Xunit;
@@ -6,7 +7,7 @@ namespace MyPersonalDrive.Tests.Services.Sync;
 
 public class ChangeDebouncerTests
 {
-    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-03-01T12:00:00Z");
+    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture);
     private static readonly TimeSpan Quiet = TimeSpan.FromSeconds(2);
 
     [Fact]

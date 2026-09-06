@@ -22,6 +22,15 @@
 > with `--no-incremental`, which the i18n round established as the only way to actually re-run the
 > Avalonia XAML compiler.
 >
+> **X2's gestures are confirmed in the running app, 2026-09-06** — click-to-select and
+> double-click-to-open, in all three view modes, verified by the user. The confirmation came with a
+> defect: the double-click handlers had been attached with `RoutingStrategies.Tunnel`, and
+> `DoubleTappedEvent` routes `Bubble` alone, so they were never called and the context menu's
+> "Open" was the only way into a folder. A handler attached to a phase its event does not route is
+> silent — it compiles, it stores, it never runs — so the fix ships with a gate that compares every
+> `AddHandler` strategy in the code-behind against the event's own. What this confirms is X2's
+> interaction model; the layout items below are still unlooked at.
+>
 > **Still not visually verified.** Screen capture does not work in this environment and this round
 > did not get around it: the session is Wayland with no `grim`/`scrot`/`xwd`/ImageMagick,
 > `ffmpeg -f x11grab` against the XWayland window returned a fully black frame, and PIL's X11 grab
@@ -45,7 +54,8 @@
       `SelectCommand` + `ActivateCommand` on both panes' node view models; the pointer handlers stop
       resolving rows by `ListBoxItem` and walk up to whatever is bound to a node, so the same three
       handlers serve list rows and tiles. Both tile scrollers accept drops. `Ctrl+A` landed with X5.
-      See [§2](#2-x2--icons-and-gallery-are-second-class-view-modes).
+      **Confirmed working in all three modes by the user, 2026-09-06**, after the routing fix
+      described in the status note above. See [§2](#2-x2--icons-and-gallery-are-second-class-view-modes).
 - [x] **X3 — No empty state and no "nothing matched" state.** `IsListingEmpty` /
       `IsListingFilteredToNothing` in both panes, three distinct messages, and a "clear search and
       filters" button on the two situations that have a remedy. Gated on `_hasRenderedListing` so it
@@ -536,8 +546,9 @@ pass is available, these five pictures close the open questions above, and nothi
 2. **Explorer at ~900px wide**, status panel visible. Settles all of X7 — which of the fixed widths
    actually clip, and where the window minimum should sit.
 3. **An empty folder, and a search that matches nothing.** Settles X3's "the pane says nothing".
-4. **Icons mode with something selected in list mode first, then switched.** Settles whether the
-   selection survives the switch and how a selected tile reads.
+4. ~~**Icons mode with something selected in list mode first, then switched.**~~ Partly answered:
+   the gestures are confirmed working in all three modes. What a *selected tile* looks like — the
+   `AccentMutedBrush` fill against the tile's own hover state — is still unlooked at.
 5. **Settings, scrolled to the Nextcloud card.** Settles X10's duplicate content assignment.
 
 Until those exist, every item in this document is a source-level finding. The ones marked **needs a

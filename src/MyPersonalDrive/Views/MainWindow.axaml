@@ -283,24 +283,18 @@
             </StackPanel>
           </Button>
 
-          <!-- Storage Quota Gauge -->
+          <!-- Storage usage. No bar and no denominator: both were drawn from a per-provider
+               constant rather than from the account (docs/PLAN-UX-ROUND-4.md Y2), so the whole
+               gauge now hides when there is no usage figure to show. -->
           <Border Background="{DynamicResource CardBackgroundBrush}"
                   CornerRadius="6"
                   Padding="8,4"
+                  IsVisible="{Binding IsQuotaUsageKnown}"
                   ToolTip.Tip="{Binding QuotaTooltip}">
             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
               <Path Classes="icon" Data="{StaticResource IconDatabase}" Width="14" Height="14" VerticalAlignment="Center" Opacity="0.7" />
               <StackPanel Spacing="2" VerticalAlignment="Center">
                 <TextBlock Text="{Binding QuotaDisplay}" FontSize="11" FontWeight="Medium" />
-                <!-- Hidden rather than shown at zero while the usage is unknown: an empty bar reads
-                     as "nothing used", which is exactly the claim we can't make (U3). -->
-                <ProgressBar Value="{Binding QuotaPercent}"
-                             Minimum="0"
-                             Maximum="100"
-                             Height="4"
-                             Width="90"
-                             CornerRadius="2"
-                             IsVisible="{Binding IsQuotaUsageKnown}" />
               </StackPanel>
             </StackPanel>
           </Border>

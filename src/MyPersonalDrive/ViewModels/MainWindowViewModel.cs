@@ -153,7 +153,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _connectionStatusKind = "Online";
     private string _connectionStatusDescription = Localizer.Instance.T(StringKeys.Connection.Initial);
     private long _quotaUsedBytes;
-    private long _quotaTotalBytes = 500L * 1024 * 1024 * 1024;
 
     // Tri-state, because a long defaulting to 0 cannot tell "empty account" from "the provider
     // never told us" — and the app was rendering both as "0 B / 500 GB (0% used)" above a folder
@@ -849,66 +848,44 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public long QuotaUsedBytes => _quotaUsedBytes;
 
-    public long QuotaTotalBytes => _quotaTotalBytes;
-
-    public double QuotaPercent => _quotaUsedIsKnown && _quotaTotalBytes > 0
-        ? Math.Min(100.0, (double)_quotaUsedBytes / _quotaTotalBytes * 100.0)
-        : 0.0;
-
-    public double QuotaProgress => _quotaUsedIsKnown && _quotaTotalBytes > 0
-        ? Math.Clamp((double)_quotaUsedBytes / _quotaTotalBytes, 0.0, 1.0)
-        : 0.0;
-
-    /// <summary>True once we have actually seen a root listing we could sum. Drives the gauge's visibility.</summary>
+    /// <summary>
+    /// Whether there is anything to show at all. Drives the whole gauge's visibility now, not just
+    /// the bar inside it: with no usage figure there is nothing left to render, because the
+    /// denominator is gone (docs/PLAN-UX-ROUND-4.md Y2).
+    /// </summary>
     public bool IsQuotaUsageKnown => _quotaUsedIsKnown;
 
     /// <summary>
-    /// The header gauge. Three shapes, because there are three states and conflating them is the
-    /// bug: unknown renders an em dash, a lower bound renders "≥", and only an exact figure gets a
-    /// percentage. A percentage of a lower bound is noise, so it is omitted rather than qualified.
+    /// The header gauge: what was measured, and nothing else.
+    ///
+    /// It used to read "— / 500 GB" — and that 500 GB was a per-provider constant, not the
+    /// account's quota. A Proton free account is 5 GB; an S3 bucket has no quota at all, and was
+    /// being told it had 5 TB. Round 2's U3 established that the app must not conflate "unknown"
+    /// with a number, and fixed the used half of this very string while the total half went on
+    /// asserting. There is no quota API on the provider seam yet, so the honest version of this
+    /// gauge has no denominator, no percentage and no bar — all three were derived from the
+    /// constant. When a provider can report a real total, it comes from the provider.
     /// </summary>
     public string QuotaDisplay
     {
         get
         {
-            var total = ByteSize.Format(_quotaTotalBytes);
-
             if (!_quotaUsedIsKnown)
             {
-                return Loc.F(StringKeys.Quota.Unknown, total);
+                return string.Empty;
             }
 
             var used = ByteSize.Format(_quotaUsedBytes);
             return _quotaUsedIsPartial
-                ? Loc.F(StringKeys.Quota.AtLeast, used, total)
-                : Loc.F(StringKeys.Quota.Exact, used, total, QuotaPercent.ToString("F0", Loc.Culture));
+                ? Loc.F(StringKeys.Quota.UsedAtLeast, used)
+                : Loc.F(StringKeys.Quota.Used, used);
         }
     }
 
-    /// <summary>
-    /// Explains what the gauge above actually measured, including that the total is a per-provider
-    /// constant rather than anything the account reported.
-    /// </summary>
-    public string QuotaTooltip
-    {
-        get
-        {
-            var totalCaveat = Loc.T(StringKeys.Quota.Caveat);
-
-            if (!_quotaUsedIsKnown)
-            {
-                return Loc.F(StringKeys.Quota.TooltipUnknown, totalCaveat);
-            }
-
-            return _quotaUsedIsPartial
-                ? Loc.F(StringKeys.Quota.TooltipPartial, totalCaveat)
-                : Loc.F(StringKeys.Quota.TooltipExact, totalCaveat);
-        }
-    }
-
-    public string QuotaSummary => _quotaUsedIsKnown
-        ? Loc.F(StringKeys.Quota.Summary, ByteSize.Format(_quotaUsedBytes), ByteSize.Format(_quotaTotalBytes))
-        : Loc.F(StringKeys.Quota.Unknown, ByteSize.Format(_quotaTotalBytes));
+    /// <summary>Explains what the figure above actually counted, and what is still not known.</summary>
+    public string QuotaTooltip => _quotaUsedIsPartial
+        ? Loc.T(StringKeys.Quota.TooltipPartial)
+        : Loc.T(StringKeys.Quota.TooltipExact);
 
     /// <summary>Human-readable result of the last update check, or the progress of a running install.</summary>
     public string CliUpdateStatus
@@ -3774,14 +3751,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public void UpdateQuotaMetrics()
     {
-        _quotaTotalBytes = _provider.Id switch
-        {
-            ProviderId.OneDrive => 1024L * 1024 * 1024 * 1024, // 1 TB
-            ProviderId.GoogleDrive => 15L * 1024 * 1024 * 1024, // 15 GB
-            ProviderId.Nextcloud => 100L * 1024 * 1024 * 1024, // 100 GB
-            ProviderId.S3 => 5120L * 1024 * 1024 * 1024, // 5 TB
-            _ => 500L * 1024 * 1024 * 1024 // 500 GB (Proton)
-        };
 
         // Only the root listing stands in for "account usage" here — there's no real quota API on
         // the provider seam yet, so this is an approximation. Recomputing it from whatever subfolder
@@ -3804,12 +3773,8 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(QuotaUsedBytes));
-        OnPropertyChanged(nameof(QuotaTotalBytes));
-        OnPropertyChanged(nameof(QuotaPercent));
-        OnPropertyChanged(nameof(QuotaProgress));
         OnPropertyChanged(nameof(QuotaDisplay));
         OnPropertyChanged(nameof(QuotaTooltip));
-        OnPropertyChanged(nameof(QuotaSummary));
         OnPropertyChanged(nameof(IsQuotaUsageKnown));
     }
 

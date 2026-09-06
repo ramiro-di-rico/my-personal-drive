@@ -222,11 +222,13 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         sut.DisplayItems(items);
 
         Assert.Equal(1024 * 1024 * 300, sut.QuotaUsedBytes); // 300 MB
-        Assert.Equal(500L * 1024 * 1024 * 1024, sut.QuotaTotalBytes); // 500 GB
-        Assert.True(sut.QuotaPercent > 0.0);
         Assert.True(sut.IsQuotaUsageKnown);
         Assert.Contains("300", sut.QuotaDisplay);
-        Assert.Contains("500", sut.QuotaDisplay);
+        // No denominator and no percentage: both came from a per-provider constant rather than from
+        // the account (docs/PLAN-UX-ROUND-4.md Y2).
+        Assert.DoesNotContain("500", sut.QuotaDisplay);
+        Assert.DoesNotContain("/", sut.QuotaDisplay);
+        Assert.DoesNotContain("%", sut.QuotaDisplay);
 
         // A folder is present, so the sum covers the root's own files only — a lower bound, and
         // labelled as one rather than dressed up with a percentage (U3).
@@ -247,10 +249,9 @@ public class MainWindowHeaderTelemetryTests : IDisposable
             new DriveItem("/my-files/Plan.gsheet", "Plan.gsheet", false, null)
         });
 
+        // Nothing measured, so the gauge has nothing to say and hides entirely.
         Assert.False(sut.IsQuotaUsageKnown);
-        Assert.Equal(0.0, sut.QuotaPercent);
-        Assert.StartsWith("—", sut.QuotaDisplay);
-        Assert.DoesNotContain("0 B", sut.QuotaDisplay);
+        Assert.Equal(string.Empty, sut.QuotaDisplay);
     }
 
     // ...but a genuinely empty root is a real zero, and must not be hidden behind the em dash.
@@ -261,10 +262,10 @@ public class MainWindowHeaderTelemetryTests : IDisposable
 
         sut.DisplayItems(new List<DriveItem>());
 
+        // An empty root is a real zero, and still says so — that is U3's distinction, kept.
         Assert.True(sut.IsQuotaUsageKnown);
         Assert.Equal(0, sut.QuotaUsedBytes);
         Assert.Contains("0 B", sut.QuotaDisplay);
-        Assert.Contains("%", sut.QuotaDisplay);
     }
 
     private static void SetErrorKind(MainWindowViewModel sut, DriveErrorKind kind)

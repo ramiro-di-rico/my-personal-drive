@@ -289,14 +289,10 @@ public static class StringKeys
     /// <summary>The header quota gauge and its tooltip (docs/PLAN-UX-ROUND-2.md §3).</summary>
     public static class Quota
     {
-        public const string AtLeast = "quota.atleast";
-        public const string Caveat = "quota.caveat";
-        public const string Exact = "quota.exact";
-        public const string Summary = "quota.summary";
         public const string TooltipExact = "quota.tooltip.exact";
+        public const string Used = "quota.used";
+        public const string UsedAtLeast = "quota.used.atleast";
         public const string TooltipPartial = "quota.tooltip.partial";
-        public const string TooltipUnknown = "quota.tooltip.unknown";
-        public const string Unknown = "quota.unknown";
     }
 
     /// <summary>The folder-metrics panel in the status sidebar.</summary>

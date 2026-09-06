@@ -75,10 +75,24 @@ public partial class MainWindow : Window
         // focus, so it has no KeyDown of its own to hang anything on).
         KeyDown += OnWindowKeyDown;
 
+        // One write per gesture, not one per tick — same reasoning as the console handle below
+        // (docs/PLAN-UX-ROUND-4.md Y6). PointerCaptureLost is the slider's end-of-drag; LostFocus
+        // covers the arrow keys, which change the value without a pointer ever being involved.
+        ViewerZoomSlider.PointerCaptureLost += (_, _) => CommitZoom();
+        ViewerZoomSlider.LostFocus += (_, _) => CommitZoom();
+
         // The console's own resize handle (docs/PLAN-UX-ROUND-3.md X7).
         ConsoleResizeHandle.PointerPressed += OnConsoleResizeStarted;
         ConsoleResizeHandle.PointerMoved += OnConsoleResizeMoved;
         ConsoleResizeHandle.PointerReleased += OnConsoleResizeFinished;
+    }
+
+    private void CommitZoom()
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.CommitViewerZoom();
+        }
     }
 
     private Point? _consoleResizeLastPoint;

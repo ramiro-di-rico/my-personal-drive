@@ -48,10 +48,9 @@
 - [x] **Y5 — A long name widened its own row.** The list-mode name column had no `TextTrimming`,
       unlike the tiles and the local pane. Visible in the screenshots as the `Lumo_generated_…` rows
       reaching further right than every other file — see [§5](#5-y5--a-long-name-widened-its-own-row).
-- [x] **Y6 — Dragging the console rewrote settings.json on every pointer move.**
-      `AppSettingsService.Update` reads the file and writes it back, and X7 called it from the
-      height setter. One drag was on the order of a hundred read-modify-write cycles. Fixed for the
-      console; **the viewer's zoom slider still does it** and is the older half of the same finding —
+- [x] **Y6 — Two continuous controls rewrote settings.json on every tick.**
+      `AppSettingsService.Update` reads the file and writes it back, and both the console's drag and
+      the viewer's zoom slider called it per intermediate value. Both commit once per gesture now —
       see [§6](#6-y6--continuous-controls-rewrote-settingsjson-on-every-tick).
 - [x] **Y7 — Six labels never followed the language picker.** Measured, not read: build the window
       in English and switch it, build another in Spanish, compare every string property. Four fixed;
@@ -261,9 +260,10 @@ read-modify-write cycles on the user's configuration file.
 from `OnConsoleResizeFinished`. A test asserts that twenty drag steps leave the file's timestamp
 untouched.
 
-**Not done.** `ViewerZoom` (`:1606-1617`) has the same shape and predates round 3 — a slider bound
-`TwoWay` that writes the file on every intermediate value. Same fix, one commit, and it needs a
-commit point the slider can supply.
+**Done for the slider too.** `ViewerZoom` had the same shape and predated round 3. Its commit points
+are the slider's `PointerCaptureLost` (end of a drag) and `LostFocus` (the arrow keys, which change
+the value with no pointer involved), plus closing the viewer — so a zoom set and then dismissed is
+still remembered.
 
 ## 7. Y7 — Six labels never followed the language picker
 

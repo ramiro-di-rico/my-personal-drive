@@ -119,6 +119,39 @@ public class MainWindowConsoleHeightTests : IDisposable
     }
 
     /// <summary>
+    /// The viewer's zoom slider had the same defect the console handle did, and predates it: a
+    /// TwoWay binding writing settings.json on every intermediate value of a drag
+    /// (docs/PLAN-UX-ROUND-4.md Y6).
+    /// </summary>
+    [Fact]
+    public void DraggingTheZoomSlider_DoesNotTouchTheConfigFile()
+    {
+        var viewModel = Build();
+        viewModel.CommitViewerZoom();
+        var settingsPath = Directory.EnumerateFiles(_tempAppData, "settings.json", SearchOption.AllDirectories).Single();
+        var writtenAt = File.GetLastWriteTimeUtc(settingsPath);
+
+        for (var step = 0; step < 20; step++)
+        {
+            viewModel.ViewerZoom = 0.5 + (step * 0.01);
+        }
+
+        Assert.Equal(writtenAt, File.GetLastWriteTimeUtc(settingsPath));
+    }
+
+    [Fact]
+    public void TheZoomSurvivesARestart_OnceTheGestureEnds()
+    {
+        var viewModel = Build();
+        viewModel.ViewerZoom = 1.25;
+
+        viewModel.CommitViewerZoom();
+
+        Assert.Equal(1.25, new AppSettingsService().Load().ViewerZoomOrDefault());
+        Assert.Equal(1.25, Build().ViewerZoom);
+    }
+
+    /// <summary>
     /// The value is read back from a file a user can edit, so the clamp lives on the read and not
     /// only on the drag. Asserted against the settings object directly: a NaN cannot even be
     /// written — System.Text.Json refuses it — so a round trip would test the serializer instead.

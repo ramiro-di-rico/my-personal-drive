@@ -496,6 +496,9 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         Assert.Equal(0.5, sut.ViewerZoom);
 
         sut.ViewerZoom = 1.0;
+        // Persisted when the gesture ends, not on every intermediate value of a drag
+        // (docs/PLAN-UX-ROUND-4.md Y6).
+        sut.CommitViewerZoom();
 
         Assert.Equal(1.0, sut.ViewerZoom);
         Assert.Equal(1.0, new AppSettingsService().Load().ViewerZoom);
@@ -509,6 +512,7 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         var sut = Build();
 
         sut.ViewerZoom = attempted;
+        sut.CommitViewerZoom();
 
         Assert.Equal(expected, sut.ViewerZoom);
         Assert.Equal(expected, new AppSettingsService().Load().ViewerZoom);

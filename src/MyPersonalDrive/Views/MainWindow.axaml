@@ -1587,7 +1587,10 @@
                         VerticalAlignment="Center"
                         IsVisible="{Binding HasViewerZoomableContent}">
               <TextBlock VerticalAlignment="Center" FontSize="12" Opacity="0.7" Text="{Binding Loc[viewer.zoom.label]}" />
-              <Slider Width="140"
+              <!-- Named so the code-behind can commit the value when the drag ends: the setter no
+                   longer writes settings.json on every tick (docs/PLAN-UX-ROUND-4.md Y6). -->
+              <Slider x:Name="ViewerZoomSlider"
+                      Width="140"
                       VerticalAlignment="Center"
                       Minimum="0.25"
                       Maximum="1.5"

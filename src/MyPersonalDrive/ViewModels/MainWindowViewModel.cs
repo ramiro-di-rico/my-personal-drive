@@ -1654,11 +1654,11 @@ public sealed class MainWindowViewModel : ObservableObject
         get => _viewerZoom;
         set
         {
-            var clamped = Math.Clamp(value, AppSettings.MinViewerZoom, AppSettings.MaxViewerZoom);
-            if (SetProperty(ref _viewerZoom, clamped))
-            {
-                _settings.Update(s => s.ViewerZoom = clamped);
-            }
+            // Not persisted here: AppSettingsService.Update reads settings.json and writes it
+            // back, and a slider raises this on every intermediate value of a drag
+            // (docs/PLAN-UX-ROUND-4.md Y6). The view commits it when the drag ends, and closing the
+            // viewer commits it too, so a zoom set with the keyboard is not lost either.
+            SetProperty(ref _viewerZoom, Math.Clamp(value, AppSettings.MinViewerZoom, AppSettings.MaxViewerZoom));
         }
     }
 
@@ -1742,6 +1742,10 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public void CommitCommandConsoleHeight()
         => _settings.Update(s => s.CommandConsoleHeight = _commandConsoleHeight);
+
+    /// <summary>Writes the zoom once, when the gesture that changed it ends. See <see cref="ViewerZoom"/>.</summary>
+    public void CommitViewerZoom()
+        => _settings.Update(s => s.ViewerZoom = _viewerZoom);
 
     public double CommandConsoleMaxHeight
     {
@@ -2765,6 +2769,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task CloseViewerAsync()
     {
+        CommitViewerZoom();
+
         _previewCts?.Cancel();
         IsViewerVisible = false;
         IsViewerLoading = false;

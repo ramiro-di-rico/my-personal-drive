@@ -1,5 +1,7 @@
 using MyPersonalDrive.Services;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.Services.Providers.Proton;
 
 public sealed class ProtonDriveCliLocator : IProtonDriveCliLocator
@@ -27,7 +29,9 @@ public sealed class ProtonDriveCliLocator : IProtonDriveCliLocator
             }
         }
 
-        throw new FileNotFoundException("No se pudo ubicar la CLI de Proton Drive. Guardá primero la ruta del ejecutable.");
+        throw new LocalizedFileNotFoundException(
+            "The Proton Drive CLI could not be located.",
+            LocalizedText.Of(StringKeys.Error.CliNotLocated));
     }
 
     private static IEnumerable<string> EnumeratePathCandidates(string executableName)

@@ -1,5 +1,7 @@
 using MyPersonalDrive.Models;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.Services.Providers.Generic;
 
 /// <summary>
@@ -89,8 +91,11 @@ public sealed class GenericCloudDriveProvider : ICloudDriveProvider, IDriveOpera
         exitCode: -1,
         stdout: string.Empty,
         stderr: string.Empty,
-        message: $"{_displayName} todavía no está conectado a un backend real — {operation} no está implementado.",
-        kind: DriveErrorKind.Unknown);
+        message: $"{_displayName} is not connected to a real backend yet — {operation} is not implemented.",
+        kind: DriveErrorKind.Unknown)
+    {
+        Detail = LocalizedText.Of(StringKeys.Error.ProviderNotImplemented, _displayName, operation),
+    };
 
     private void EnsureAuthenticated()
     {
@@ -101,8 +106,11 @@ public sealed class GenericCloudDriveProvider : ICloudDriveProvider, IDriveOpera
                 exitCode: -1,
                 stdout: string.Empty,
                 stderr: string.Empty,
-                message: $"{_displayName} requiere autenticación. Iniciá sesión para acceder a los archivos.",
-                kind: DriveErrorKind.NotAuthenticated);
+                message: $"{_displayName} requires authentication.",
+                kind: DriveErrorKind.NotAuthenticated)
+            {
+                Detail = LocalizedText.Of(StringKeys.Status.ProviderNeedsAuth, _displayName),
+            };
         }
     }
 

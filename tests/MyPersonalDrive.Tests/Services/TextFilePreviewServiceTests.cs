@@ -92,7 +92,7 @@ public class TextFilePreviewServiceTests : IDisposable
         var operations = new EmptyDownloadOperations();
         var service = new TextFilePreviewService(operations, _tempRoot);
 
-        await Assert.ThrowsAsync<IOException>(() => service.LoadAsync(TextFile()));
+        await Assert.ThrowsAnyAsync<IOException>(() => service.LoadAsync(TextFile()));
     }
 
     private sealed class EmptyDownloadOperations : IDriveOperations
@@ -113,7 +113,7 @@ public class TextFilePreviewServiceTests : IDisposable
     {
         var service = new TextFilePreviewService(new EmptyDownloadOperations(), _tempRoot);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAnyAsync<InvalidOperationException>(
             () => service.LoadAsync(new DriveItem("/my-files/logs", "logs", IsFolder: true)));
     }
 

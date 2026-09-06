@@ -671,5 +671,5 @@ public sealed class SyncPanelViewModel : ObservableObject
         _ => "↔",
     };
 
-    private void ReportError(Exception ex) => SetStatus(StringKeys.Status.UnexpectedError, ex.Message);
+    private void ReportError(Exception ex) => SetStatus(StringKeys.Status.UnexpectedError, ex.DescribeForUser().Render());
 }

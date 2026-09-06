@@ -2,6 +2,8 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using MyPersonalDrive.Models;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.Services.Providers.Proton;
 
 /// <summary>
@@ -69,8 +71,13 @@ public sealed class CliUpdateInstaller
             if (!HashesMatch(actualHash, release.Sha512CheckSum))
             {
                 throw new CliUpdateException(
-                    $"El checksum de {release.Url} no coincide. Se esperaba {Shorten(release.Sha512CheckSum)}, " +
-                    $"llegó {Shorten(actualHash)}. La CLI existente quedó intacta.");
+                    $"The checksum of {release.Url} does not match. Expected {Shorten(release.Sha512CheckSum)}, " +
+                    $"got {Shorten(actualHash)}. The existing CLI was left untouched.",
+                    LocalizedText.Of(
+                        StringKeys.Error.CliUpdateChecksumMismatch,
+                        release.Url,
+                        Shorten(release.Sha512CheckSum),
+                        Shorten(actualHash)));
             }
 
             if (!OperatingSystem.IsWindows())
@@ -189,4 +196,9 @@ public sealed class CliUpdateInstaller
 /// A refused or failed CLI update. Separate from <see cref="DriveException"/>, which means "a
 /// `proton-drive` process failed" — nothing here involves running the CLI.
 /// </summary>
-public sealed class CliUpdateException(string message) : InvalidOperationException(message);
+public sealed class CliUpdateException(string message, Localization.LocalizedText detail = default)
+    : InvalidOperationException(message), Localization.ILocalizedError
+{
+    /// <summary>See <see cref="Localization.ILocalizedError"/>.</summary>
+    public Localization.LocalizedText Detail { get; } = detail;
+}

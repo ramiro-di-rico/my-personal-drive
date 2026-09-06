@@ -154,7 +154,7 @@ public sealed class TransferQueueViewModel : ObservableObject
             catch (InvalidOperationException ex)
             {
                 item.Status = TransferStatus.Failed;
-                item.ErrorMessage = ex.Message;
+                item.ErrorMessage = ex.DescribeForUser().Render();
             }
 
             completion.SetResult(item);

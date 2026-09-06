@@ -6,6 +6,8 @@ using System.Text;
 using System.Text.Json;
 using System.Web;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.Services.Providers.OneDrive;
 
 /// <summary>
@@ -49,7 +51,9 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
     {
         if (string.IsNullOrWhiteSpace(_clientId))
         {
-            throw new InvalidOperationException("No hay un client ID de OneDrive configurado. Cargá uno en Configuración antes de iniciar sesión.");
+            throw new LocalizedInvalidOperationException(
+                "No OneDrive client ID is configured.",
+                LocalizedText.Of(StringKeys.Error.AuthNoClientId, "OneDrive"));
         }
 
         var verifier = GeneratePkceVerifier();
@@ -120,7 +124,7 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
         var stored = _tokenStore.Load();
         if (stored is null)
         {
-            throw NotAuthenticated("No hay una sesión de OneDrive guardada.");
+            throw NotAuthenticated($"There is no saved OneDrive session.", LocalizedText.Of(StringKeys.Error.AuthNoSession, "OneDrive"));
         }
 
         if (stored.ExpiresAt - DateTimeOffset.UtcNow > RefreshMargin)
@@ -134,7 +138,7 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
     /// <summary>Forces a refresh regardless of cached expiry — the 401-retry-once path in <see cref="GraphHttpClient"/>.</summary>
     public async Task<string> ForceRefreshAsync(CancellationToken cancellationToken = default)
     {
-        var stored = _tokenStore.Load() ?? throw NotAuthenticated("No hay una sesión de OneDrive guardada.");
+        var stored = _tokenStore.Load() ?? throw NotAuthenticated($"There is no saved OneDrive session.", LocalizedText.Of(StringKeys.Error.AuthNoSession, "OneDrive"));
         return await RefreshAsync(stored, cancellationToken);
     }
 
@@ -159,7 +163,7 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
 
             if (string.IsNullOrEmpty(stored.RefreshToken))
             {
-                throw NotAuthenticated("No hay un refresh token guardado; iniciá sesión de nuevo.");
+                throw NotAuthenticated("There is no saved refresh token.", LocalizedText.Of(StringKeys.Error.AuthNoRefreshToken));
             }
 
             using var request = new HttpRequestMessage(HttpMethod.Post, TokenEndpoint)
@@ -192,7 +196,7 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
         }
         catch (HttpRequestException ex)
         {
-            throw NotAuthenticated($"No se pudo renovar la sesión de OneDrive: {ex.Message}");
+            throw NotAuthenticated($"Could not renew the OneDrive session: {ex.Message}", LocalizedText.Of(StringKeys.Error.AuthRefreshFailed, "OneDrive", ex.Message));
         }
         finally
         {
@@ -229,13 +233,13 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
         }
         catch (JsonException)
         {
-            throw NotAuthenticated("El endpoint de tokens devolvió una respuesta que no se pudo interpretar.");
+            throw NotAuthenticated("The token endpoint returned an unreadable response.", LocalizedText.Of(StringKeys.Error.AuthTokenUnparsable));
         }
 
         if (token is null || !wasSuccessStatus || string.IsNullOrEmpty(token.AccessToken))
         {
             var reason = token?.ErrorDescription ?? token?.Error ?? "unknown error";
-            throw NotAuthenticated($"Falló el inicio de sesión de OneDrive: {reason}");
+            throw NotAuthenticated($"OneDrive sign-in failed: {reason}", LocalizedText.Of(StringKeys.Error.AuthSignInFailed, "OneDrive", reason));
         }
 
         return token;
@@ -321,12 +325,14 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
 
         if (error is not null)
         {
-            throw NotAuthenticated($"El inicio de sesión de OneDrive se canceló o falló: {query["error_description"] ?? error}");
+            throw NotAuthenticated(
+                $"OneDrive sign-in was cancelled or failed: {query["error_description"] ?? error}",
+                LocalizedText.Of(StringKeys.Error.AuthSignInCancelled, "OneDrive", query["error_description"] ?? error));
         }
 
         if (string.IsNullOrEmpty(code) || !string.Equals(state, expectedState, StringComparison.Ordinal))
         {
-            throw NotAuthenticated("A la redirección de inicio de sesión le faltaba el código o traía un estado inesperado — posible CSRF, no se continúa.");
+            throw NotAuthenticated("The sign-in redirect was missing its code or carried an unexpected state.", LocalizedText.Of(StringKeys.Error.AuthBadRedirect));
         }
 
         return code;
@@ -358,6 +364,14 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
     private static string Base64UrlEncode(byte[] bytes)
         => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
-    private static DriveException NotAuthenticated(string message)
-        => new("OneDrive sign-in", exitCode: 1, stdout: string.Empty, stderr: message, message, DriveErrorKind.NotAuthenticated);
+    /// <summary>
+    /// <paramref name="message"/> is what reaches the CLI console and the crash log, so it stays
+    /// English and greppable; <paramref name="detail"/> is what the interface shows
+    /// (docs/PLAN-TECH-DEBT.md B6.5).
+    /// </summary>
+    private static DriveException NotAuthenticated(string message, LocalizedText detail)
+        => new("OneDrive sign-in", exitCode: 1, stdout: string.Empty, stderr: message, message, DriveErrorKind.NotAuthenticated)
+        {
+            Detail = detail,
+        };
 }

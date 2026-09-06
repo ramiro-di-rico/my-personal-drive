@@ -346,7 +346,7 @@ public sealed class SyncPairViewModel : ObservableObject
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    OnError?.Invoke(Loc.F(StringKeys.Sync.ConflictsResolveFailed, conflict.RelativePath, ex.Message));
+                    OnError?.Invoke(Loc.F(StringKeys.Sync.ConflictsResolveFailed, conflict.RelativePath, ex.DescribeForUser().Render()));
                 }
             }
         }
@@ -551,7 +551,7 @@ public sealed class SyncPairViewModel : ObservableObject
 
     private void ReportError(Exception ex)
     {
-        SetStatus(StringKeys.Status.UnexpectedError, ex.Message);
-        OnError?.Invoke(ex.Message);
+        SetStatus(StringKeys.Status.UnexpectedError, ex.DescribeForUser().Render());
+        OnError?.Invoke(ex.DescribeForUser().Render());
     }
 }

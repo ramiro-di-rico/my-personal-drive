@@ -609,17 +609,21 @@ third.
   `SyncPairViewModel`). Rendering at read time is what makes them follow the picker.
 - **Services name reasons, the UI words them.** `SyncPairValidator` and `LocalFolderInspector`
   return a `SyncPairIssue`; `SyncIssuePresenter` and `DriveErrorPresenter` do the wording. A
-  service may use the string table for pure presentation copy (file-kind labels, sync progress),
-  but never for an exception message, the CLI console or the crash log — those stay English and
-  greppable, and a provider's own sentence is shown verbatim as the detail half of a localized
-  frame.
+  service may use the string table for pure presentation copy (file-kind labels, sync progress).
+- **An exception carries two sentences.** `ILocalizedError` gives it an English `Message` — what
+  the CLI console and the crash log see, stable and greppable — alongside a translatable `Detail`
+  for the screen. `DriveException` and `CliUpdateException` implement it; `LocalizedIOException`,
+  `LocalizedFileNotFoundException` and `LocalizedInvalidOperationException` cover framework types
+  while staying catchable as their base. The UI reads `exception.DescribeForUser()`, which falls
+  back to `Message` verbatim — so a provider's own words are never paraphrased.
 - **Culture is split deliberately.** `Localizer.Culture` formats what a person reads; machine data
   (paths, SQLite, CLI and API payloads, `settings.json`) is explicitly
   `CultureInfo.InvariantCulture`. `.editorconfig` turns CA1304/CA1305/CA1310 on as warnings so the
   split cannot erode.
-- **Three gates** in `tests/.../Localization/`: every locale is key-for-key identical to English
-  with matching placeholders; `StringKeys` matches `en.json` exactly; and no `.axaml` carries a
-  literal user-facing attribute or a word-bearing `StringFormat` outside a short allowlist.
+- **Four gates** in `tests/.../Localization/`: every locale is key-for-key identical to English
+  with matching placeholders; `StringKeys` matches `en.json` exactly; no `.axaml` carries a
+  literal user-facing attribute or a word-bearing `StringFormat` outside a seven-entry allowlist;
+  and no source file outside `Locales/` carries a Spanish sentence.
 
 ## 8. Packaging
 

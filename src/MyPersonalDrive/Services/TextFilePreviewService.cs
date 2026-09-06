@@ -3,6 +3,8 @@ using System.Text;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Providers;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.Services;
 
 /// <summary>
@@ -37,7 +39,9 @@ public sealed class TextFilePreviewService : ITextFilePreviewLoader
     {
         if (item.IsFolder)
         {
-            throw new InvalidOperationException("Las carpetas no tienen texto para previsualizar.");
+            throw new LocalizedInvalidOperationException(
+                "Folders have no text to preview.",
+                LocalizedText.Of(StringKeys.Error.PreviewFolderHasNoText));
         }
 
         var directory = Path.Combine(_tempRoot, Guid.NewGuid().ToString("N"));
@@ -53,7 +57,9 @@ public sealed class TextFilePreviewService : ITextFilePreviewLoader
             if (!File.Exists(downloadedPath))
             {
                 downloadedPath = Directory.EnumerateFiles(directory).FirstOrDefault()
-                    ?? throw new IOException($"La CLI informó éxito pero no descargó nada para '{item.Name}'.");
+                    ?? throw new LocalizedIOException(
+                        $"The CLI reported success but downloaded nothing for '{item.Name}'.",
+                        LocalizedText.Of(StringKeys.Error.CliNothingDownloaded, item.Name));
             }
 
             return Read(downloadedPath, item.Path, item.Name);

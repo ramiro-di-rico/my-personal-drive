@@ -688,7 +688,10 @@ public sealed class SyncExecutor
         var localAbsolutePath = context.Mapper.ToLocalAbsolute(relativePath);
         if (!File.Exists(localAbsolutePath))
         {
-            throw new FileNotFoundException($"'{relativePath}' desapareció localmente antes de poder subirse.", localAbsolutePath);
+            throw new LocalizedFileNotFoundException(
+                $"'{relativePath}' disappeared locally before it could be uploaded.",
+                LocalizedText.Of(StringKeys.Error.SyncVanishedBeforeUpload, relativePath),
+                localAbsolutePath);
         }
 
         await _operations.UploadFilesAsync([localAbsolutePath], context.Mapper.ToRemoteAbsolute(parent),
@@ -706,7 +709,7 @@ public sealed class SyncExecutor
     {
         if (action.SecondaryPath is null)
         {
-            throw new InvalidOperationException($"Una resolución KeepBoth para '{action.RelativePath}' no tiene ruta de copia de conflicto.");
+            throw new InvalidOperationException($"A KeepBoth resolution for '{action.RelativePath}' has no conflict-copy path.");
         }
 
         var originalLocalPath = context.Mapper.ToLocalAbsolute(action.RelativePath);
@@ -743,7 +746,7 @@ public sealed class SyncExecutor
     {
         if (action.SecondaryPath is null)
         {
-            throw new InvalidOperationException($"Un renombrado local de '{action.RelativePath}' no tiene ruta de destino.");
+            throw new InvalidOperationException($"A local rename of '{action.RelativePath}' has no destination path.");
         }
 
         var source = context.Mapper.ToLocalAbsolute(action.RelativePath);
@@ -753,12 +756,17 @@ public sealed class SyncExecutor
         {
             // It vanished between the scan and now. Failing would be wrong: the next cycle rescans
             // and will download it at the new path, which is the correct outcome anyway.
-            throw new FileNotFoundException($"'{action.RelativePath}' desapareció localmente antes de poder moverse.", source);
+            throw new LocalizedFileNotFoundException(
+                $"'{action.RelativePath}' disappeared locally before it could be moved.",
+                LocalizedText.Of(StringKeys.Error.SyncVanishedBeforeMove, action.RelativePath),
+                source);
         }
 
         if (File.Exists(destination))
         {
-            throw new IOException($"No se mueve '{action.RelativePath}' encima del archivo existente '{action.SecondaryPath}'.");
+            throw new LocalizedIOException(
+                $"Not moving '{action.RelativePath}' over the existing file '{action.SecondaryPath}'.",
+                LocalizedText.Of(StringKeys.Error.SyncWontOverwrite, action.RelativePath, action.SecondaryPath));
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
@@ -794,7 +802,7 @@ public sealed class SyncExecutor
     {
         if (action.SecondaryPath is null)
         {
-            throw new InvalidOperationException($"Un movimiento remoto de '{action.RelativePath}' no tiene ruta de destino.");
+            throw new InvalidOperationException($"A remote move of '{action.RelativePath}' has no destination path.");
         }
 
         var oldParent = ParentOf(action.RelativePath);
@@ -860,7 +868,9 @@ public sealed class SyncExecutor
             var downloadedPath = Path.Combine(tempDirectory, fileName);
             if (!File.Exists(downloadedPath))
             {
-                throw new IOException($"Se esperaba que la CLI descargara '{fileName}' en la carpeta temporal, pero no estaba ahí.");
+                throw new LocalizedIOException(
+            $"The CLI was expected to download '{fileName}' into the temporary folder, but it was not there.",
+            LocalizedText.Of(StringKeys.Error.CliDownloadMissing, fileName));
             }
 
             File.Move(downloadedPath, localAbsolutePath, overwrite: true);

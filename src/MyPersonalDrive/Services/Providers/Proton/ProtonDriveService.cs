@@ -1,6 +1,8 @@
 using System.Text.Json;
 using MyPersonalDrive.Models;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.Services.Providers.Proton;
 
 public sealed class ProtonDriveService
@@ -190,10 +192,14 @@ public sealed class ProtonDriveService
                 return ParseTextListing(output, parentPath);
 
             case ListingParseOutcome.NotJson:
-                throw new InvalidOperationException($"Se esperaba salida JSON para '{parentPath}' pero llegó texto que no es JSON. Primera línea: {FirstLine(output)}");
+                throw new LocalizedInvalidOperationException(
+                    $"JSON output was expected for '{parentPath}' but non-JSON text arrived. First line: {FirstLine(output)}",
+                    LocalizedText.Of(StringKeys.Error.CliExpectedJson, parentPath, FirstLine(output)));
 
             default:
-                throw new InvalidOperationException($"No se pudo interpretar el listado de la CLI de Proton Drive para '{parentPath}': forma de JSON no reconocida.");
+                throw new LocalizedInvalidOperationException(
+                    $"The Proton Drive CLI listing for '{parentPath}' could not be read: unrecognised JSON shape.",
+                    LocalizedText.Of(StringKeys.Error.CliUnrecognizedJson, parentPath));
         }
     }
 

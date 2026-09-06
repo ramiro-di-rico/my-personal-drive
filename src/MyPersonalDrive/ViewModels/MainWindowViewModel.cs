@@ -2399,7 +2399,7 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             ViewerNote = Loc.T(StringKeys.Status.ViewerReadFailed);
-            SetStatus(StringKeys.Status.ViewerError, item.Name, ex.Message);
+            SetStatus(StringKeys.Status.ViewerError, item.Name, ex.DescribeForUser().Render());
             IsWarning = true;
         }
         finally
@@ -2445,7 +2445,7 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             ViewerNote = Loc.T(StringKeys.Status.ViewerReadFailed);
-            SetStatus(StringKeys.Status.ViewerError, item.Name, ex.Message);
+            SetStatus(StringKeys.Status.ViewerError, item.Name, ex.DescribeForUser().Render());
             IsWarning = true;
         }
         finally
@@ -2493,7 +2493,7 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             ViewerNote = Loc.T(StringKeys.Status.ViewerReadFailed);
-            SetStatus(StringKeys.Status.ViewerError, item.Name, ex.Message);
+            SetStatus(StringKeys.Status.ViewerError, item.Name, ex.DescribeForUser().Render());
             IsWarning = true;
         }
         finally
@@ -3787,11 +3787,11 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             // Includes DriveException. The CLI's own text is the most useful thing on screen here:
             // if `--version` is not the flag this build understands, the user sees exactly that.
-            CliVersion = Loc.F(StringKeys.CliVersion.Unavailable, ex.Message);
+            CliVersion = Loc.F(StringKeys.CliVersion.Unavailable, ex.DescribeForUser().Render());
         }
         catch (FileNotFoundException ex)
         {
-            CliVersion = Loc.F(StringKeys.CliVersion.Unavailable, ex.Message);
+            CliVersion = Loc.F(StringKeys.CliVersion.Unavailable, ex.DescribeForUser().Render());
         }
         finally
         {
@@ -3913,7 +3913,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or TaskCanceledException)
         {
-            CliUpdateStatus = Loc.F(StringKeys.CliUpdate.Failed, ex.Message);
+            CliUpdateStatus = Loc.F(StringKeys.CliUpdate.Failed, ex.DescribeForUser().Render());
             IsWarning = true;
         }
         finally
@@ -4143,10 +4143,12 @@ public sealed class MainWindowViewModel : ObservableObject
                 : LocalizedText.Of(StringKeys.Error.NeedAuthToLoad, path);
         }
 
-        // The provider's own sentence is the detail half, verbatim. When it has none — a transport
-        // that failed before producing one — the typed kind still has something to say, which is
-        // what DriveErrorPresenter's table is for.
-        var detail = string.IsNullOrWhiteSpace(ex.Message) ? DriveErrorPresenter.Describe(kind) : ex.Message;
+        // Three sources, in order of how much they know. The exception's own translated sentence
+        // when it has one (PLAN-TECH-DEBT.md B6.5); otherwise the provider's own words verbatim,
+        // because paraphrasing them loses the detail that says whose problem this is; and if there
+        // are none, the typed kind still has something to say.
+        var described = ex.DescribeForUser();
+        var detail = described.IsEmpty ? DriveErrorPresenter.Describe(kind) : described.Render();
 
         if (path == "auth logout")
         {

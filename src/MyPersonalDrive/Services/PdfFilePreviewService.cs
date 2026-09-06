@@ -2,6 +2,8 @@ using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Providers;
 using SkiaSharp;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.Services;
 
 /// <summary>
@@ -37,7 +39,9 @@ public sealed class PdfFilePreviewService : IPdfFilePreviewLoader
     {
         if (item.IsFolder)
         {
-            throw new InvalidOperationException("Las carpetas no tienen PDF para previsualizar.");
+            throw new LocalizedInvalidOperationException(
+                "Folders have no PDF to preview.",
+                LocalizedText.Of(StringKeys.Error.PreviewFolderHasNoPdf));
         }
 
         var directory = Path.Combine(_tempRoot, Guid.NewGuid().ToString("N"));
@@ -52,7 +56,9 @@ public sealed class PdfFilePreviewService : IPdfFilePreviewLoader
             if (!File.Exists(downloadedPath))
             {
                 downloadedPath = Directory.EnumerateFiles(directory).FirstOrDefault()
-                    ?? throw new IOException($"La CLI informó éxito pero no descargó nada para '{item.Name}'.");
+                    ?? throw new LocalizedIOException(
+                        $"The CLI reported success but downloaded nothing for '{item.Name}'.",
+                        LocalizedText.Of(StringKeys.Error.CliNothingDownloaded, item.Name));
             }
 
             var pdfBytes = await File.ReadAllBytesAsync(downloadedPath, cancellationToken);

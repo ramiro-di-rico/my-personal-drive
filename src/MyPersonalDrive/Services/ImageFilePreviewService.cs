@@ -1,6 +1,8 @@
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Providers;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.Services;
 
 /// <summary>
@@ -33,7 +35,9 @@ public sealed class ImageFilePreviewService : IImageFilePreviewLoader
     {
         if (item.IsFolder)
         {
-            throw new InvalidOperationException("Las carpetas no tienen imagen para previsualizar.");
+            throw new LocalizedInvalidOperationException(
+                "Folders have no image to preview.",
+                LocalizedText.Of(StringKeys.Error.PreviewFolderHasNoImage));
         }
 
         var directory = Path.Combine(_tempRoot, Guid.NewGuid().ToString("N"));
@@ -48,7 +52,9 @@ public sealed class ImageFilePreviewService : IImageFilePreviewLoader
             if (!File.Exists(downloadedPath))
             {
                 downloadedPath = Directory.EnumerateFiles(directory).FirstOrDefault()
-                    ?? throw new IOException($"La CLI informó éxito pero no descargó nada para '{item.Name}'.");
+                    ?? throw new LocalizedIOException(
+                        $"The CLI reported success but downloaded nothing for '{item.Name}'.",
+                        LocalizedText.Of(StringKeys.Error.CliNothingDownloaded, item.Name));
             }
 
             var bytes = await File.ReadAllBytesAsync(downloadedPath, cancellationToken);

@@ -660,6 +660,24 @@ public static class StringKeys
     /// <summary>The framing sentences around a provider error. The provider's own message stays verbatim inside them (docs/PLAN-I18N.md §9).</summary>
     public static class Error
     {
+        public const string AuthBadRedirect = "error.auth.badredirect";
+        public const string AuthNoClientId = "error.auth.noclientid";
+        public const string AuthNoRefreshToken = "error.auth.norefreshtoken";
+        public const string AuthNoSession = "error.auth.nosession";
+        public const string AuthRefreshFailed = "error.auth.refreshfailed";
+        public const string AuthSignInCancelled = "error.auth.signincancelled";
+        public const string AuthSignInFailed = "error.auth.signinfailed";
+        public const string AuthSignInTimeout = "error.auth.signintimeout";
+        public const string AuthTokenUnparsable = "error.auth.tokenunparsable";
+        public const string CliCannotStart = "error.cli.cannotstart";
+        public const string CliDownloadMissing = "error.cli.downloadmissing";
+        public const string CliExpectedJson = "error.cli.expectedjson";
+        public const string CliNoShareLinkCommand = "error.cli.nosharelinkcommand";
+        public const string CliNotLocated = "error.cli.notlocated";
+        public const string CliNothingDownloaded = "error.cli.nothingdownloaded";
+        public const string CliUnrecognizedJson = "error.cli.unrecognizedjson";
+        public const string CliUpdateChecksumMismatch = "error.cliupdate.checksummismatch";
+        public const string HttpTimeout = "error.http.timeout";
         public const string KindAlreadyExists = "error.kind.alreadyexists";
         public const string KindBusy = "error.kind.busy";
         public const string KindConflict = "error.kind.conflict";
@@ -676,6 +694,30 @@ public static class StringKeys
         public const string LogoutFailed = "error.logoutfailed";
         public const string NeedAuth = "error.needauth";
         public const string NeedAuthToLoad = "error.needauth.load";
+        public const string OpCopyFailed = "error.op.copyfailed";
+        public const string OpCopyTimeout = "error.op.copytimeout";
+        public const string OpDeltaTooManyPages = "error.op.deltatoomanypages";
+        public const string OpEmptyDeltaPage = "error.op.emptydeltapage";
+        public const string OpEmptyListingPage = "error.op.emptylistingpage";
+        public const string OpEmptyUpload = "error.op.emptyupload";
+        public const string OpNoCopy = "error.op.nocopy";
+        public const string OpNoCreatedFolder = "error.op.nocreatedfolder";
+        public const string OpNoFreeName = "error.op.nofreename";
+        public const string OpNoId = "error.op.noid";
+        public const string OpNoParent = "error.op.noparent";
+        public const string OpNoResumableSession = "error.op.noresumablesession";
+        public const string OpNoShareLink = "error.op.nosharelink";
+        public const string OpNoUploadSession = "error.op.nouploadsession";
+        public const string OpNoUploadedFile = "error.op.nouploadedfile";
+        public const string OpSegmentNotFound = "error.op.segmentnotfound";
+        public const string OpUploadFailedAtByte = "error.op.uploadfailedatbyte";
+        public const string PreviewFolderHasNoImage = "error.preview.folderhasnoimage";
+        public const string PreviewFolderHasNoPdf = "error.preview.folderhasnopdf";
+        public const string PreviewFolderHasNoText = "error.preview.folderhasnotext";
+        public const string ProviderNotImplemented = "error.provider.notimplemented";
+        public const string SyncVanishedBeforeMove = "error.sync.vanishedbeforemove";
+        public const string SyncVanishedBeforeUpload = "error.sync.vanishedbeforeupload";
+        public const string SyncWontOverwrite = "error.sync.wontoverwrite";
     }
 
     /// <summary>Why a sync pair was refused. The validator names the reason; these word it (docs/PLAN-I18N.md §9).</summary>

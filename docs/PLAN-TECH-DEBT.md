@@ -33,8 +33,9 @@
 - [ ] **B4 (persistence/state), B5 (async lifecycle), B6 (observability)** — not started.
 - [ ] **B6.3** — the sync preview/conflict dialogs name Proton Drive whichever provider is
       syncing. Found during [PLAN-I18N.md](PLAN-I18N.md) L4; see §8.
-- [ ] **B6.5** — provider exception messages are still Spanish, and surface inside an
-      English interface. Found finishing [PLAN-I18N.md](PLAN-I18N.md); see §8.
+- [x] **B6.5** — done. `ILocalizedError` lets an exception carry an English `Message` for the
+      console and crash log *and* a translatable `Detail` for the screen; every one of the 62
+      Spanish literals left in `Services/` is gone. See §8.
 - [x] **B6.4** — folded into `ByteSize.Format` during [PLAN-I18N.md](PLAN-I18N.md) L8, which
       also moved `ByteSize` from invariant to the interface language's culture.
 
@@ -566,6 +567,20 @@ with the kind's sentence and demote the raw message to a "details" line.
 
 **What it blocks:** nothing functional. It should be settled before a third language ships, or that
 translator will be asked to leave a quarter of what the user reads untranslated.
+
+**Done.** The fix took the shape sketched above, generalised one step: rather than a field on
+`DriveException` alone, an `ILocalizedError` interface that `DriveException`, `CliUpdateException`
+and three thin wrapper types (`LocalizedIOException`, `LocalizedFileNotFoundException`,
+`LocalizedInvalidOperationException`) implement. Subclassing rather than introducing a new
+hierarchy is what keeps every existing `catch (IOException)` working.
+
+`Exception.Message` is now English at all 62 sites — which is a *gain* for the console and the
+crash log, since those were Spanish before and are meant to be stable and greppable. The
+`Detail` is what the interface shows, through `exception.DescribeForUser()`. An exception with no
+`Detail` still shows its `Message` verbatim, which is the §9 rule for a provider's own words.
+
+`NoSourceFileCarriesASpanishSentence` is the regression guard: no source file outside
+`Locales/` may carry a Spanish sentence. Verified to fail on an injected one.
 
 ---
 

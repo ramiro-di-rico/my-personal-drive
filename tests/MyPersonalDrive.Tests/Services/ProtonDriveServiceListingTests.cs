@@ -152,7 +152,7 @@ public class ProtonDriveServiceListingTests
         executor.EnqueueOutput("""{ "unexpectedField": "value" }""");
         var service = new ProtonDriveService(executor);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.LoadFolderAsync("/my-files"));
+        await Assert.ThrowsAnyAsync<InvalidOperationException>(() => service.LoadFolderAsync("/my-files"));
     }
 
     [Fact]
@@ -176,7 +176,7 @@ public class ProtonDriveServiceListingTests
         executor.EnqueueOutput("🗂 Photos\n📄 report.pdf");
         var service = new ProtonDriveService(executor, strictListingParsing: true);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.LoadFolderAsync("/my-files"));
+        await Assert.ThrowsAnyAsync<InvalidOperationException>(() => service.LoadFolderAsync("/my-files"));
     }
 
     [Fact]

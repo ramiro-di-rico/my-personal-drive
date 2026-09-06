@@ -97,7 +97,7 @@ public class ImageFilePreviewServiceTests : IDisposable
     {
         var service = new ImageFilePreviewService(new EmptyDownloadOperations(), _tempRoot);
 
-        await Assert.ThrowsAsync<IOException>(() => service.LoadAsync(ImageFile()));
+        await Assert.ThrowsAnyAsync<IOException>(() => service.LoadAsync(ImageFile()));
     }
 
     [Fact]
@@ -105,7 +105,7 @@ public class ImageFilePreviewServiceTests : IDisposable
     {
         var service = new ImageFilePreviewService(new EmptyDownloadOperations(), _tempRoot);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAnyAsync<InvalidOperationException>(
             () => service.LoadAsync(new DriveItem("/my-files/photos", "photos", IsFolder: true)));
     }
 }

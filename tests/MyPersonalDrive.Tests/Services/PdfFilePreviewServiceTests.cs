@@ -128,7 +128,7 @@ public class PdfFilePreviewServiceTests : IDisposable
     {
         var service = new PdfFilePreviewService(new EmptyDownloadOperations(), _tempRoot);
 
-        await Assert.ThrowsAsync<IOException>(() => service.LoadAsync(PdfFile()));
+        await Assert.ThrowsAnyAsync<IOException>(() => service.LoadAsync(PdfFile()));
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public class PdfFilePreviewServiceTests : IDisposable
     {
         var service = new PdfFilePreviewService(new EmptyDownloadOperations(), _tempRoot);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAnyAsync<InvalidOperationException>(
             () => service.LoadAsync(new DriveItem("/my-files/docs", "docs", IsFolder: true)));
     }
 }

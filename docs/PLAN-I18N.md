@@ -608,14 +608,14 @@ the string table for copy that is only ever presentation. Where the wording depe
 the service made, the service returns the decision and the UI does the wording — which is what
 `SyncPairIssue` is.
 
-Concretely, still untranslated on purpose:
+Concretely, still untranslated on purpose: `CommandLogBuffer`, `SyncLogEntry` and the crash log.
 
-- Every `DriveException` message thrown by `Providers/Proton`, `Providers/OneDrive` and
-  `Providers/GoogleDrive`. These reach the user as the detail half of a localized frame
-  (`error.loadfailed`, "Could not load {0}: {1}"), and they are the sentence that says whether the
-  problem is the user's or ours. Localizing them means giving `DriveException` a key, which is a
-  bigger change than this phase, and one with no demand behind it yet.
-- `CommandLogBuffer`, `SyncLogEntry` and the crash log.
+**Superseded, after the fact.** This section originally also excluded every `DriveException` message
+the three providers throw, on the grounds that localizing them meant changing the exception
+contract. That was parked as [PLAN-TECH-DEBT.md](PLAN-TECH-DEBT.md) B6.5 and then done — see
+[§9.2](#92-b65-an-exception-carries-both-sentences). The rule that survives is the *reason* for the
+original exclusion, not the exclusion: a sentence bound for the console or the crash log must be
+stable English, and a provider's own words are shown verbatim.
 
 `DriveErrorPresenter`'s table is therefore only lightly exercised today — `FormatDriveError` falls
 back to it when a provider produced no message at all. It exists because the moment any surface
@@ -625,6 +625,38 @@ rule gets eroded.
 
 The validator tests are the visible payoff: they assert on `SyncPairIssueKind` now, not on a Spanish
 sentence, so a copy edit can no longer break a rule check.
+
+### 9.2 B6.5: an exception carries both sentences
+
+The tension §9 was working around is that one string had two readers with opposite requirements.
+The console and the crash log want a sentence that is stable, greppable and never moves with the
+user's language; the screen wants the user's language. Resolving it by picking one reader was always
+going to leave the other badly served — which it did: before this, both got Spanish.
+
+`Services/Localization/ILocalizedError` lets an exception carry both. `Message` stays English;
+`Detail` is a `LocalizedText`. `DriveException` and `CliUpdateException` implement it directly;
+three thin wrappers (`LocalizedIOException`, `LocalizedFileNotFoundException`,
+`LocalizedInvalidOperationException`) cover the handful of sites that throw a framework type.
+Subclassing rather than inventing a hierarchy is deliberate: every existing `catch (IOException)`
+keeps working, and a test pins that.
+
+The UI reads it through `exception.DescribeForUser()`, which returns the `Detail` when there is one
+and the `Message` verbatim when there is not — so a provider's own words are still never
+paraphrased. `DriveErrorPresenter`'s kind table remains the last fallback, for a transport that
+failed before producing any sentence at all.
+
+**All 62 remaining Spanish literals in `Services/` are gone**, and
+`NoSourceFileCarriesASpanishSentence` (L9) stops them coming back. Four `SyncExecutor` guard
+clauses were translated to English *without* a key on purpose: they are internal invariants
+("a local rename has no destination path"), never advice to a user.
+
+**One thing this does not reach:** `SyncStateStore` persists `ex.Message` as a failed action's
+`LastError`, and the failures dialog shows it. That string is English now rather than Spanish, which
+is an improvement, but it is stored text — following the language would mean persisting the key and
+its arguments. Not worth a schema change for a field that is usually the provider's own words
+anyway.
+
+
 
 ## 10. L8 — Culture-aware formatting, and the invariant-culture audit
 

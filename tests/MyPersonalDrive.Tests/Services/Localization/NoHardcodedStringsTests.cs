@@ -124,6 +124,75 @@ public class NoHardcodedStringsTests
     }
 
     /// <summary>
+    /// The counterpart to the markup gate, for code. Every user-facing sentence in <c>src/</c> now
+    /// lives in the locale files; a Spanish sentence anywhere else means someone wrote copy at a
+    /// call site instead of adding a key — which is how the interface ended up single-language in
+    /// the first place (PLAN-UX-ROUND-2 U4).
+    ///
+    /// A heuristic, deliberately: it looks for Spanish function words and Spanish-only characters
+    /// rather than trying to detect language properly. It is tuned to have no false positives on
+    /// the current tree; if it ever fires on something legitimate, widen <c>Allowed</c> above with
+    /// a reason rather than weakening the pattern.
+    /// </summary>
+    [Fact]
+    public void NoSourceFileCarriesASpanishSentence()
+    {
+        // Function words that do not appear as standalone words in English source, plus the
+        // characters no English string has. Two function words, or one accented character, is the
+        // threshold — one "la" could be a variable name in a string; two is prose.
+        var functionWord = new Regex(
+            @"\b(el|la|los|las|del|una|para|que|sin|con|ya|más|está|esta|por|se|un|de)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        var spanishOnly = new Regex(@"[áéíóúñ¿¡Á-Ú]", RegexOptions.Compiled);
+        var literal = new Regex(@"""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
+
+        var offenders = new List<string>();
+        var root = Path.Combine(RepositoryRoot(), "src");
+
+        foreach (var file in Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
+        {
+            // The locale files' own directory is where Spanish belongs.
+            if (file.Contains(Path.Combine("Localization", "Locales"), StringComparison.Ordinal)
+                || file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                || file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var lines = File.ReadAllLines(file);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var trimmed = lines[i].TrimStart();
+                if (trimmed.StartsWith("//", StringComparison.Ordinal) || trimmed.StartsWith('*'))
+                {
+                    continue;
+                }
+
+                foreach (Match match in literal.Matches(lines[i]))
+                {
+                    var value = match.Groups[1].Value;
+                    if (value.Length < 8)
+                    {
+                        continue;
+                    }
+
+                    if (functionWord.Matches(value).Count >= 2 || spanishOnly.IsMatch(value))
+                    {
+                        offenders.Add($"{Path.GetFileName(file)}:{i + 1}  \"{value}\"");
+                    }
+                }
+            }
+        }
+
+        Assert.True(
+            offenders.Count == 0,
+            "User-facing copy belongs in Locales/*.json, reached through a StringKeys constant — not\n" +
+            "written at the call site. An exception message needs both: an English Message for the\n" +
+            "console and crash log, and a LocalizedText Detail for the screen (ILocalizedError).\n\n  "
+            + string.Join("\n  ", offenders));
+    }
+
+    /// <summary>
     /// A smell test for copy that was pasted between locales rather than translated. Only values
     /// that are genuinely language-neutral should be byte-identical.
     /// </summary>

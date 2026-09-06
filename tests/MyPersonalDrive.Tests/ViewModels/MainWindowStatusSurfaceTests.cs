@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
@@ -75,6 +76,16 @@ public class MainWindowStatusSurfaceTests : IDisposable
             new SyncPanelViewModel(syncStore, syncExecutor, new SyncCrashRecovery(syncStore)));
     }
 
+    /// <summary>Drives a real provider failure through the view model's own error path.</summary>
+    private static void Fail(MainWindowViewModel viewModel, DriveException ex)
+        => typeof(MainWindowViewModel)
+            .GetMethod("SetFailure", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .Invoke(viewModel, [
+                typeof(MainWindowViewModel)
+                    .GetMethod("FormatDriveError", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                    .Invoke(viewModel, ["/my-files", ex])!,
+                ex]);
+
     /// <summary>
     /// The production path to a warning is a failed CLI call, which would need a dispatcher here.
     /// Same reflection seam <see cref="MainWindowHeaderTelemetryTests"/> already uses: the setter
@@ -105,7 +116,7 @@ public class MainWindowStatusSurfaceTests : IDisposable
     {
         var viewModel = Build();
 
-        RaiseWarning(viewModel, "Failed to load /my-files: invalid access token");
+        Fail(viewModel, new DriveException("filesystem list", 1, string.Empty, string.Empty, "invalid access token", DriveErrorKind.NotAuthenticated));
 
         Assert.True(viewModel.IsStatusBannerVisible);
         // The whole point of the split: never the same sentence twice on one screen.
@@ -188,6 +199,68 @@ public class MainWindowStatusSurfaceTests : IDisposable
         Assert.Equal(2, viewModel.RootItems.Count);
         Assert.False(viewModel.IsListingEmpty);
         Assert.Equal(string.Empty, viewModel.SearchText);
+    }
+
+    /// <summary>
+    /// docs/PLAN-UX-ROUND-4.md Y3. HasStatusAction was `_isWarning`, so every warning got a
+    /// recovery button — including refusals the button cannot do anything about, where "Retry"
+    /// re-runs a refresh and the same refusal comes back.
+    /// </summary>
+    [Fact]
+    public void AWarningWeRaisedOurselves_OffersNoRemedy()
+    {
+        var viewModel = Build();
+
+        // A refusal: no provider failure behind it, so nothing to retry or reconnect.
+        RaiseWarning(viewModel, "Not moving 'a.txt' over the existing file 'b.txt'.");
+
+        Assert.True(viewModel.IsStatusBannerVisible);
+        Assert.False(viewModel.HasStatusAction);
+    }
+
+    [Fact]
+    public void AFailedOperation_OffersARemedy_AndSaysWhichOne()
+    {
+        var viewModel = Build();
+
+        Fail(viewModel, new DriveException("filesystem list", 1, string.Empty, string.Empty, "network is unreachable", DriveErrorKind.Network));
+        Assert.True(viewModel.HasStatusAction);
+        Assert.Equal("Retry", viewModel.StatusActionLabel);
+
+        Fail(viewModel, new DriveException("filesystem list", 1, string.Empty, string.Empty, "invalid access token", DriveErrorKind.NotAuthenticated));
+        Assert.True(viewModel.HasStatusAction);
+        Assert.Equal("Reconnect", viewModel.StatusActionLabel);
+    }
+
+    [Fact]
+    public void AFailureTheProviderWillRefuseAgain_OffersNoRemedy()
+    {
+        var viewModel = Build();
+
+        // The path is gone. Repeating the identical request produces the identical answer.
+        Fail(viewModel, new DriveException("filesystem list", 1, string.Empty, string.Empty, "no such file", DriveErrorKind.NotFound));
+
+        Assert.True(viewModel.IsStatusBannerVisible);
+        Assert.False(viewModel.HasStatusAction);
+    }
+
+    /// <summary>
+    /// The other half of Y3: twelve failure paths — sign-in, sign-out, rename, copy, trash,
+    /// download, create folder, provider switch — set a status line and never set IsWarning, so
+    /// they read as ordinary progress and, after X1, went to the optional panel instead of the
+    /// alert strip. A failed rename was invisible with the panel hidden.
+    /// </summary>
+    [Fact]
+    public async Task AFailedRename_ReadsAsAFailure()
+    {
+        var viewModel = Build();
+        viewModel.DisplayItems([Item("a.txt")]);
+        viewModel.RequestRenameAsync = _ => Task.FromResult<string?>("b.txt");
+
+        await viewModel.RootItems.Single().RenameCommand.ExecuteAsync();
+
+        Assert.True(viewModel.IsWarning);
+        Assert.True(viewModel.IsStatusBannerVisible);
     }
 
     [Fact]

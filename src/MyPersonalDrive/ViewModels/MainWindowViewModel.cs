@@ -160,6 +160,16 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _quotaUsedIsKnown;
     private bool _quotaUsedIsPartial;
     private DriveErrorKind _lastErrorKind = DriveErrorKind.Unknown;
+
+    /// <summary>
+    /// The failure behind the standing status line, when a failure is what produced it. Null for a
+    /// warning this app raised itself — a refusal, an unsupported preview — because those have no
+    /// remedy to offer (docs/PLAN-UX-ROUND-4.md Y3). Distinct from <see cref="_lastErrorKind"/>,
+    /// which keeps the last *provider* error for the connection telemetry and is deliberately not
+    /// cleared: a stale kind is fine for "is the connection suspect", and wrong for "what should
+    /// this button do".
+    /// </summary>
+    private DriveErrorKind? _statusErrorKind;
     private bool _isStatusPanelVisible;
     private bool _isLocalExplorerPanelVisible;
 
@@ -819,7 +829,22 @@ public sealed class MainWindowViewModel : ObservableObject
     /// Whether the standing warning has a remedy the app can offer. A warning the user cannot act
     /// on is a dead end, which is the whole point of U1 (docs/PLAN-UX-ROUND-2.md §1).
     /// </summary>
-    public bool HasStatusAction => _isWarning;
+    public bool HasStatusAction => _isWarning && _statusErrorKind is { } kind && HasRemedy(kind);
+
+    /// <summary>
+    /// Which failures the app can actually offer to do something about. Reconnecting fixes a dead
+    /// session; retrying fixes a transport that was momentarily unavailable. Everything else is the
+    /// provider refusing this specific request — a path that is gone, a name already taken, a
+    /// permission the account does not have — and repeating it verbatim produces the same refusal,
+    /// so offering "Retry" would be theatre (docs/PLAN-UX-ROUND-4.md Y3).
+    /// </summary>
+    private static bool HasRemedy(DriveErrorKind kind) => kind is
+        DriveErrorKind.NotAuthenticated
+        or DriveErrorKind.Network
+        or DriveErrorKind.Timeout
+        or DriveErrorKind.Busy
+        or DriveErrorKind.RateLimited
+        or DriveErrorKind.Unknown;
 
     /// <summary>
     /// Whether the window-level alert strip is up (docs/PLAN-UX-ROUND-3.md X1). U1's recovery
@@ -1274,6 +1299,7 @@ public sealed class MainWindowViewModel : ObservableObject
             // A new message is a new thing to say, so a dismissal of the previous one does not
             // carry over to it (docs/PLAN-UX-ROUND-3.md X1).
             _statusBannerDismissed = false;
+            _statusErrorKind = null;
             IsWarning = false;
             RaiseStatusSurfaceChanged();
             UpdateConnectionTelemetry();
@@ -1314,6 +1340,20 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     private void SetStatus(string key, params object?[] args) => SetStatus(LocalizedText.Of(key, args));
+
+    /// <summary>
+    /// A provider operation failed: the message, the warning, and the kind that decides which
+    /// remedy — if any — the alert strip offers. Kept as one call because the three were three
+    /// statements at twenty call sites, and the third was simply missing
+    /// (docs/PLAN-UX-ROUND-4.md Y3).
+    /// </summary>
+    private void SetFailure(LocalizedText text, Exception ex)
+    {
+        var kind = (ex as DriveException)?.Kind ?? DriveErrorKind.Unknown;
+        SetStatus(text);
+        _statusErrorKind = kind;
+        IsWarning = true;
+    }
 
     private void SetStatusPlural(string keyPrefix, int count, params object?[] args)
         => SetStatus(LocalizedText.Plural(keyPrefix, count, args));
@@ -1868,8 +1908,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(path, ex));
-            IsWarning = true;
+            SetFailure(FormatDriveError(path, ex), ex);
         }
         catch (DbException ex)
         {
@@ -1958,7 +1997,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError("auth login", ex));
+            SetFailure(FormatDriveError("auth login", ex), ex);
         }
         finally
         {
@@ -1987,7 +2026,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError("auth logout", ex));
+            SetFailure(FormatDriveError("auth logout", ex), ex);
         }
         finally
         {
@@ -2158,7 +2197,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             _navigationHistory.Push(previousPath);
             RaiseCommandStates();
-            SetStatus(FormatDriveError(previousPath, ex));
+            SetFailure(FormatDriveError(previousPath, ex), ex);
         }
     }
 
@@ -2191,7 +2230,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 RaiseCommandStates();
             }
 
-            SetStatus(FormatDriveError(path, ex));
+            SetFailure(FormatDriveError(path, ex), ex);
         }
     }
 
@@ -2203,7 +2242,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(CurrentPath, ex));
+            SetFailure(FormatDriveError(CurrentPath, ex), ex);
         }
     }
 
@@ -2241,7 +2280,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(CurrentPath, ex));
+            SetFailure(FormatDriveError(CurrentPath, ex), ex);
         }
         finally
         {
@@ -2437,7 +2476,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(CurrentPath, ex));
+            SetFailure(FormatDriveError(CurrentPath, ex), ex);
         }
         finally
         {
@@ -2469,7 +2508,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(item.Path, ex));
+            SetFailure(FormatDriveError(item.Path, ex), ex);
         }
         finally
         {
@@ -2555,8 +2594,7 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (InvalidOperationException ex)
         {
             ViewerNote = Loc.T(StringKeys.Status.ViewerOpenFailed);
-            SetStatus(FormatDriveError(item.Path, ex));
-            IsWarning = true;
+            SetFailure(FormatDriveError(item.Path, ex), ex);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -2601,8 +2639,7 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (InvalidOperationException ex)
         {
             ViewerNote = Loc.T(StringKeys.Status.ViewerOpenFailed);
-            SetStatus(FormatDriveError(item.Path, ex));
-            IsWarning = true;
+            SetFailure(FormatDriveError(item.Path, ex), ex);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -2649,8 +2686,7 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (InvalidOperationException ex)
         {
             ViewerNote = Loc.T(StringKeys.Status.ViewerOpenFailed);
-            SetStatus(FormatDriveError(item.Path, ex));
-            IsWarning = true;
+            SetFailure(FormatDriveError(item.Path, ex), ex);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -2775,7 +2811,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(item.Path, ex));
+            SetFailure(FormatDriveError(item.Path, ex), ex);
         }
         finally
         {
@@ -2812,7 +2848,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(item.Path, ex));
+            SetFailure(FormatDriveError(item.Path, ex), ex);
         }
         finally
         {
@@ -2848,7 +2884,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(item.Path, ex));
+            SetFailure(FormatDriveError(item.Path, ex), ex);
         }
         finally
         {
@@ -2904,8 +2940,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(item.Path, ex));
-            IsWarning = true;
+            SetFailure(FormatDriveError(item.Path, ex), ex);
         }
         finally
         {
@@ -2960,7 +2995,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(folder.Path, ex));
+            SetFailure(FormatDriveError(folder.Path, ex), ex);
         }
         finally
         {
@@ -3414,8 +3449,7 @@ public sealed class MainWindowViewModel : ObservableObject
             IsAuthenticated = false;
         }
 
-        SetStatus(FormatDriveError(path, ex));
-        IsWarning = true;
+        SetFailure(FormatDriveError(path, ex), ex);
     }
 
     /// <summary>

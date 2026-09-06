@@ -186,6 +186,7 @@ public class MainWindowHeaderTelemetryTests : IDisposable
 
         sut.StatusMessage = "Failed to load /my-files: Invalid access token";
         SetErrorKind(sut, DriveErrorKind.NotAuthenticated);
+        SetStatusErrorKind(sut, DriveErrorKind.NotAuthenticated);
         SetWarning(sut);
 
         Assert.True(sut.HasStatusAction);
@@ -200,6 +201,7 @@ public class MainWindowHeaderTelemetryTests : IDisposable
 
         sut.StatusMessage = "Failed to load /my-files: connection reset";
         SetErrorKind(sut, DriveErrorKind.Network);
+        SetStatusErrorKind(sut, DriveErrorKind.Network);
         SetWarning(sut);
 
         Assert.True(sut.HasStatusAction);
@@ -271,6 +273,17 @@ public class MainWindowHeaderTelemetryTests : IDisposable
     private static void SetErrorKind(MainWindowViewModel sut, DriveErrorKind kind)
         => typeof(MainWindowViewModel)
             .GetField("_lastErrorKind", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(sut, kind);
+
+    /// <summary>
+    /// The failure behind the standing status line. Separate from <see cref="SetErrorKind"/>, which
+    /// only feeds the connection telemetry: a remedy is offered for the failure that produced *this*
+    /// message, so a refusal the app raised itself gets no button at all
+    /// (docs/PLAN-UX-ROUND-4.md Y3).
+    /// </summary>
+    private static void SetStatusErrorKind(MainWindowViewModel sut, DriveErrorKind kind)
+        => typeof(MainWindowViewModel)
+            .GetField("_statusErrorKind", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .SetValue(sut, kind);
 
     private static void SetWarning(MainWindowViewModel sut)

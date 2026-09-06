@@ -399,11 +399,14 @@ start. `Assert.Contains(executor.Calls, …)` then enumerates a `List<T>` anothe
 to, which either throws `InvalidOperationException` ("collection was modified") or reads a
 half-published list.
 
-Observed once in five consecutive suite runs, on
+Observed twice in about a dozen suite runs. The first was on
 `MainWindowMultiSelectTests.TrashSelectedCommand_AsksOnceWhenTheSelectionIncludesAFolder_ThenTrashesEveryItem`
-(2026-09-06). The test passes in isolation and passed three full runs immediately after, which is
-the signature of a race rather than a broken assertion. The failure message was not captured, so
-the mechanism above is inferred from the shape of the code and is **not confirmed**.
+(2026-09-06); the second, later the same day, was not captured by name — the run output was being
+grepped for its summary line only, which is a lesson about how to watch for this one. Both times
+the suite passed three or four full runs immediately afterwards, and the named test passes in
+isolation, which is the signature of a race rather than a broken assertion. No failure message was
+captured either time, so the mechanism above is inferred from the shape of the code and is **not
+confirmed**.
 
 **Why it wasn't fixed here.** It is test infrastructure, and the round it surfaced in was UX work
 with an unrelated diff. Both plausible fixes are more than a line: make `Calls` a

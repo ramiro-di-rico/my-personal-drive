@@ -15,6 +15,7 @@ public static class StringKeys
     public static class Common
     {
         public const string Account = "common.account";
+        public const string All = "common.all";
         public const string Add = "common.add";
         public const string Apply = "common.apply";
         public const string Browse = "common.browse";
@@ -592,6 +593,7 @@ public static class StringKeys
         public const string PairEditTitle = "dialog.pair.edit.title";
         public const string PairLocalFolderLabel = "dialog.pair.localfolder.label";
         public const string PairLocalFolderPlaceholder = "dialog.pair.localfolder.placeholder";
+        public const string PairRemoteFolderPlaceholder = "dialog.pair.remotefolder.placeholder";
         public const string PairMirrorDeletes = "dialog.pair.mirrordeletes";
         public const string PairPolicyAsk = "dialog.pair.policy.ask";
         public const string PairPolicyKeepBoth = "dialog.pair.policy.keepboth";

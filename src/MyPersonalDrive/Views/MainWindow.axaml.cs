@@ -1085,7 +1085,7 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task<NewSyncPairRequest?> PromptForNewPairAsync(SyncPanelViewModel syncPanel, string remoteRootPath, SyncPairPrefill? prefill = null)
     {
-        var remoteBox = new TextBox { PlaceholderText = "/my-files/Documents", Width = 280, Text = prefill?.RemotePath };
+        var remoteBox = new TextBox { PlaceholderText = Loc.T(StringKeys.Dialog.PairRemoteFolderPlaceholder), Width = 280, Text = prefill?.RemotePath };
         var remoteBrowseButton = new Button { Content = Loc.T(StringKeys.Common.Browse), IsVisible = syncPanel.GetRemoteFolderChildren is not null };
         var localBox = new TextBox { Width = 280, IsReadOnly = true, PlaceholderText = Loc.T(StringKeys.Dialog.PairLocalFolderPlaceholder), Text = prefill?.LocalPath };
         var browseButton = new Button { Content = Loc.T(StringKeys.Common.Browse) };

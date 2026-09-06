@@ -194,6 +194,69 @@ public class NoHardcodedStringsTests
     }
 
     /// <summary>
+    /// The language heuristic below has a floor it cannot see under: it skips literals shorter than
+    /// eight characters and needs two Spanish function words or an accent. "Todos" — the label on
+    /// the "all kinds" and "all accounts" chips — is five characters, unaccented and one word, so it
+    /// sat in the interface through the localization round, the Italian round and the whole of UX
+    /// round 3, until it turned up in a screenshot (docs/PLAN-UX-ROUND-3.md X8).
+    ///
+    /// So this gate does not ask what language a string is in. It asks where it was written: a
+    /// literal assigned to a label-shaped property is copy at the call site, and copy at the call
+    /// site cannot follow the language picker no matter which language it happens to be in. An
+    /// English literal would be just as wrong, and this catches that too.
+    /// </summary>
+    [Fact]
+    public void NoUserFacingLabelIsAssignedALiteral()
+    {
+        var assignment = new Regex(
+            @"\b(?<prop>Label|Title|Header|Caption|PlaceholderText|DisplayName|Summary|Headline)\s*=\s*(?<rhs>[^;]*)",
+            RegexOptions.Compiled);
+        var literal = new Regex(@"""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
+
+        var offenders = new List<string>();
+        var root = Path.Combine(RepositoryRoot(), "src");
+
+        foreach (var file in Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
+        {
+            // StringKeys is the key table itself: every literal in it is a key, not copy.
+            if (Path.GetFileName(file) == "StringKeys.cs"
+                || file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                || file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var lines = File.ReadAllLines(file);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var trimmed = lines[i].TrimStart();
+                if (trimmed.StartsWith("//", StringComparison.Ordinal) || trimmed.StartsWith('*'))
+                {
+                    continue;
+                }
+
+                foreach (Match match in assignment.Matches(lines[i]))
+                {
+                    foreach (Match value in literal.Matches(match.Groups["rhs"].Value))
+                    {
+                        var text = value.Groups[1].Value;
+                        if (text.Length >= 2 && text.Any(char.IsLetter) && !Allowed.Contains(text))
+                        {
+                            offenders.Add($"{Path.GetFileName(file)}:{i + 1}  {match.Groups["prop"].Value} = … \"{text}\"");
+                        }
+                    }
+                }
+            }
+        }
+
+        Assert.True(
+            offenders.Count == 0,
+            "A label assigned a literal cannot follow the language picker, whatever language it is in.\n" +
+            "Add a key and read it through Loc/StringKeys. Proper nouns go in the allowlist at the top of\n" +
+            "this file, with a reason.\n\n  " + string.Join("\n  ", offenders));
+    }
+
+    /// <summary>
     /// The counterpart to the markup gate, for code. Every user-facing sentence in <c>src/</c> now
     /// lives in the locale files; a Spanish sentence anywhere else means someone wrote copy at a
     /// call site instead of adding a key — which is how the interface ended up single-language in

@@ -100,7 +100,7 @@ public class MainWindowKindFilterTests : IDisposable
 
         viewModel.DisplayItems([Item("a.jpg", 100), Item("b.jpg", 200)]);
 
-        // Every chip would be a no-op, and "Todos" on its own is noise.
+        // Every chip would be a no-op, and "All" on its own is noise.
         Assert.Empty(viewModel.KindFilters);
     }
 

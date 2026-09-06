@@ -1,5 +1,6 @@
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Localization;
 
 namespace MyPersonalDrive.ViewModels;
 
@@ -8,7 +9,7 @@ namespace MyPersonalDrive.ViewModels;
 /// histogram the folder already produced, so the offered filters are exactly the kinds present —
 /// a chip that would filter to nothing is never shown.
 ///
-/// <see cref="Kind"/> null is the "Todos" chip: filtering is a view state, and the way out of it has
+/// <see cref="Kind"/> null is the "All" chip: filtering is a view state, and the way out of it has
 /// to be as visible as the way in.
 /// </summary>
 public sealed class KindFilterViewModel : ObservableObject
@@ -19,7 +20,7 @@ public sealed class KindFilterViewModel : ObservableObject
     {
         Kind = kind;
         Count = count;
-        Label = kind is null ? "Todos" : FileKindClassifier.DisplayName(kind.Value);
+        Label = kind is null ? Localizer.Instance.T(StringKeys.Common.All) : FileKindClassifier.DisplayName(kind.Value);
         ApplyCommand = new AsyncCommand(() => apply(kind), onError: onError);
     }
 

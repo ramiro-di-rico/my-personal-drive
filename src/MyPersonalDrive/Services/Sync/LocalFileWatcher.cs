@@ -1,5 +1,7 @@
 using MyPersonalDrive.Models;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.Services.Sync;
 
 /// <summary>
@@ -92,11 +94,10 @@ public sealed class LocalFileWatcher : IDisposable
             // scanning is strictly better than refusing to sync the pair at all; the UI is
             // expected to surface DegradedReason, including the sysctl to raise the limit.
             IsDegraded = true;
-            DegradedReason = OperatingSystem.IsLinux()
-                ? $"No se pudieron vigilar los cambios de '{_pair.LocalPath}' ({ex.Message}). Se pasa a " +
-                  "análisis periódico. Si es el límite de watches de inotify, subilo con: " +
-                  "sudo sysctl fs.inotify.max_user_watches=524288"
-                : $"No se pudieron vigilar los cambios de '{_pair.LocalPath}' ({ex.Message}). Se pasa a análisis periódico.";
+            DegradedReason = Localizer.Instance.F(
+                OperatingSystem.IsLinux() ? StringKeys.Sync.WatcherDegradedLinux : StringKeys.Sync.WatcherDegraded,
+                _pair.LocalPath,
+                ex.Message);
             _watcher = null;
         }
     }

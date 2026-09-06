@@ -1,4 +1,5 @@
 using MyPersonalDrive.Services.Sync;
+using MyPersonalDrive.Models;
 using Xunit;
 
 namespace MyPersonalDrive.Tests.Services.Sync;
@@ -41,7 +42,7 @@ public class LocalFolderInspectorTests : IDisposable
         var asFile = Path.Combine(_root, "actually-a-file.txt");
         File.WriteAllText(asFile, "not a folder");
 
-        Assert.Contains("es un archivo, no una carpeta", LocalFolderInspector.CheckWritable(asFile));
+        Assert.Equal(SyncPairIssueKind.LocalPathIsAFile, LocalFolderInspector.CheckWritable(asFile)!.Kind);
     }
 
     [PosixFact]
@@ -55,7 +56,7 @@ public class LocalFolderInspectorTests : IDisposable
 
         try
         {
-            Assert.Contains("No se puede escribir en", LocalFolderInspector.CheckWritable(readOnly));
+            Assert.Equal(SyncPairIssueKind.LocalPathNotWritable, LocalFolderInspector.CheckWritable(readOnly)!.Kind);
         }
         finally
         {
@@ -102,8 +103,10 @@ public class LocalFolderInspectorTests : IDisposable
         var warning = LocalFolderInspector.CheckFreeSpace(_root, bytesToDownload: long.MaxValue / 2);
 
         Assert.NotNull(warning);
-        Assert.Contains("Esto descargaría", warning);
-        Assert.Contains("libres en ese disco", warning);
+        Assert.Equal(SyncPairIssueKind.NotEnoughFreeSpace, warning.Kind);
+
+        // Both numbers travel with the reason — the sentence naming them lives in the presenter.
+        Assert.Equal(2, warning.Args.Length);
     }
 
     [Fact]

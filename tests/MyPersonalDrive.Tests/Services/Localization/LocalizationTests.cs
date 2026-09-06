@@ -127,8 +127,10 @@ public class LocalizationTests
         // A plural constant names the *prefix* — "console.activeoperations" — while the locale
         // holds "…​.one" and "…​.other". Count the prefix as covered when its categories exist, and
         // the categories as covered by that one constant.
+        // A ".other" alone is not a plural — "filekind.other" and "sync.skip.unspecified" are the
+        // default case of a category. Only a key whose ".one" sibling exists too is one.
         var pluralPrefixes = english
-            .Where(key => key.EndsWith(".other", StringComparison.Ordinal))
+            .Where(key => key.EndsWith(".other", StringComparison.Ordinal) && english.Contains(key[..^6] + ".one"))
             .Select(key => key[..^6])
             .Where(constants.Contains)
             .ToHashSet(StringComparer.Ordinal);

@@ -1,6 +1,8 @@
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Providers;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.Services.Sync;
 
 /// <summary>
@@ -107,8 +109,8 @@ public sealed class SyncExecutor
     public sealed record SyncProgress(int Completed, int Total, SyncOperation? Operation, string? RelativePath)
     {
         public string Describe() => Operation is null
-            ? $"Analizando… ({Total} acción(es) en cola)"
-            : $"{Completed}/{Total}  {Operation}  {RelativePath}";
+            ? Localizer.Instance.Plural(StringKeys.Sync.ExecScanning, Total)
+            : Localizer.Instance.F(StringKeys.Sync.ExecProgress, Completed, Total, Operation, RelativePath);
     }
 
     /// <summary>Raised on the executing thread; a UI subscriber must marshal to its own thread.</summary>
@@ -165,20 +167,21 @@ public sealed class SyncExecutor
 
     private static string? BuildStatusMessage(int failureCount, int conflictCount, bool aborted)
     {
+        var localizer = Localizer.Instance;
         var parts = new List<string>();
         if (failureCount > 0)
         {
-            parts.Add($"{failureCount} acción(es) fallaron");
+            parts.Add(localizer.Plural(StringKeys.Sync.ExecFailed, failureCount));
         }
 
         if (conflictCount > 0)
         {
-            parts.Add($"{conflictCount} conflicto(s) esperando tu decisión");
+            parts.Add(localizer.Plural(StringKeys.Sync.ExecConflicts, conflictCount));
         }
 
         if (aborted)
         {
-            parts.Add("la ejecución se detuvo antes de tiempo (iniciá sesión de nuevo, o liberá espacio, y reintentá)");
+            parts.Add(localizer.T(StringKeys.Sync.ExecAborted));
         }
 
         return parts.Count == 0 ? null : string.Join("; ", parts);
@@ -356,22 +359,16 @@ public sealed class SyncExecutor
     /// adversarial review.
     /// </summary>
     private static string DescribeSkip(NodeSkip skip)
-        => skip.Reason switch
-        {
-            NodeSkipReason.UnmappableName =>
-                $"Se omitió '{skip.Name}': su nombre contiene '/', que no se puede usar en un nombre de archivo local. " +
-                "Queda en Proton Drive pero no se va a sincronizar — renombralo ahí para incluirlo.",
-            NodeSkipReason.CaseCollision =>
-                $"Se omitió '{skip.Name}': su nombre choca con el de un hermano si se ignoran mayúsculas y minúsculas. " +
-                "Los dos quedan en Proton Drive pero no se van a sincronizar — renombrá uno ahí para incluirlo.",
-            NodeSkipReason.DuplicateName =>
-                $"Se omitió '{skip.Name}': más de un elemento comparte exactamente este nombre en la misma carpeta. " +
-                "Todos quedan en el drive remoto pero no se van a sincronizar — renombrá todos menos uno para incluirlo.",
-            NodeSkipReason.GoogleNativeFile =>
-                $"Se omitió '{skip.Name}': es un archivo de Google Docs/Sheets/Slides sin contenido descargable. " +
-                "Queda en Google Drive pero no se va a sincronizar.",
-            _ => $"Se omitió '{skip.Name}': no se puede representar localmente."
-        };
+        => Localizer.Instance.F(
+            skip.Reason switch
+            {
+                NodeSkipReason.UnmappableName => StringKeys.Sync.SkipUnmappableName,
+                NodeSkipReason.CaseCollision => StringKeys.Sync.SkipCaseCollision,
+                NodeSkipReason.DuplicateName => StringKeys.Sync.SkipDuplicateName,
+                NodeSkipReason.GoogleNativeFile => StringKeys.Sync.SkipGoogleNativeFile,
+                _ => StringKeys.Sync.SkipUnspecified,
+            },
+            skip.Name);
 
     private async Task<(IReadOnlyDictionary<string, NodeFingerprint> Local, IReadOnlyDictionary<string, NodeFingerprint> Remote, PathMapper Mapper)> ScanBothSidesAsync(
         SyncPair pair, IReadOnlyDictionary<string, SyncBaselineEntry> baseline, CancellationToken cancellationToken)

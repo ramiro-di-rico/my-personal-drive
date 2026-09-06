@@ -16,7 +16,7 @@
 
 ## Status
 
-> **L0-L6 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
+> **L0-L7 implemented on branch `feature/i18n`, 2026-09-05**, from `main` at `14413d8`. 1053 tests
 > passing (from 1001). The AOT publish is clean — only the five warnings that predate this work —
 > and both locales are verifiably embedded in the single-file binary. **Not visually verified: this
 > environment has no working screenshot tool** (GNOME refuses `ScreenshotWindow` over D-Bus), so
@@ -77,7 +77,13 @@
       failures, retried/discarded actions, attempts, and recovered download folders all go through
       `Plural`. One thing is deliberately still `Verbatim`: `SyncPanelViewModel.AlertAsync`'s
       message, which comes from `SyncPairValidator` — that is L7's typed-reason work.
-- [ ] **L7 — Service-layer messages → typed reasons.** Not started.
+- [x] **L7 — Service-layer messages → typed reasons.** `SyncPairValidator` and
+      `LocalFolderInspector` return a `Models/SyncPairIssue` (kind + arguments) instead of a
+      sentence; `ViewModels/SyncIssuePresenter` words it. `DriveErrorPresenter` holds the
+      `DriveErrorKind` → key table. `FileKindClassifier`, `SyncExecutor`'s progress/summary/skip
+      copy, `LocalFileWatcher`'s degradation notice and `SyncScheduler`'s retry notice went through
+      the string table. **§9's boundary moved slightly** — see
+      [§9.1](#91-what-l7-actually-drew-the-line-around).
 - [ ] **L8 — Culture-aware formatting, and the invariant-culture audit.** Not started.
 - [ ] **L9 — The no-literals lint gate.** Not started.
 
@@ -571,6 +577,38 @@ and crash log, where a stable, greppable, English sentence is worth more.
   change, its own commit, its own tests.
 - `SyncLogEntry` / `CommandLogBuffer` stay English/raw. The console is a diagnostic surface. Say so
   in a comment so a later sweep does not "fix" it.
+
+### 9.1 What L7 actually drew the line around
+
+§9 as written said "services do not translate", with the provider's raw sentence as the untranslated
+detail. Applying it literally would have left a large amount of *our own* Spanish copy inside
+`Services/` — the file-kind labels on the filter chips, the sync progress line, the skip
+explanations, the inotify degradation notice. None of those is a provider's words; they are the
+app's, and they happen to live in a service.
+
+So the boundary is now: **a service must not word an exception**, and must not word anything that
+goes to the CLI console or the crash log — those stay English and greppable. A service *may* use
+the string table for copy that is only ever presentation. Where the wording depends on a decision
+the service made, the service returns the decision and the UI does the wording — which is what
+`SyncPairIssue` is.
+
+Concretely, still untranslated on purpose:
+
+- Every `DriveException` message thrown by `Providers/Proton`, `Providers/OneDrive` and
+  `Providers/GoogleDrive`. These reach the user as the detail half of a localized frame
+  (`error.loadfailed`, "Could not load {0}: {1}"), and they are the sentence that says whether the
+  problem is the user's or ours. Localizing them means giving `DriveException` a key, which is a
+  bigger change than this phase, and one with no demand behind it yet.
+- `CommandLogBuffer`, `SyncLogEntry` and the crash log.
+
+`DriveErrorPresenter`'s table is therefore only lightly exercised today — `FormatDriveError` falls
+back to it when a provider produced no message at all. It exists because the moment any surface
+needs to *lead* with a failure reason rather than quote one (a per-action failure kind on the sync
+rows, say), the table is what it needs, and building it per-caller is how the "errors are typed"
+rule gets eroded.
+
+The validator tests are the visible payoff: they assert on `SyncPairIssueKind` now, not on a Spanish
+sentence, so a copy edit can no longer break a rule check.
 
 ## 10. L8 — Culture-aware formatting, and the invariant-culture audit
 

@@ -131,7 +131,7 @@ public class SyncPairEditTests : IDisposable
         await row.EditCommand.ExecuteAsync();
 
         Assert.Equal(SyncDirection.LocalToRemote, row.Direction);
-        Assert.Contains("también está sincronizada (solo subida)", panel.StatusMessage);
-        Assert.Contains(alerts, message => message.Contains("también está sincronizada (solo subida)"));
+        Assert.Contains("is also synced (upload only)", panel.StatusMessage);
+        Assert.Contains(alerts, message => message.Contains("is also synced (upload only)"));
     }
 }

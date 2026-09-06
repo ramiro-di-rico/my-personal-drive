@@ -100,7 +100,7 @@ public class FolderMetricsViewModelTests
         Load(sut, File("clip.webm", 1000), File("photo.jpg", 500));
 
         Assert.Equal(2, sut.Buckets.Count);
-        Assert.Equal("Vídeos", sut.Buckets[0].Label);
+        Assert.Equal("Videos", sut.Buckets[0].Label);
         Assert.Equal(FolderMetricBucketViewModel.BarMaxWidth, sut.Buckets[0].BarWidth);
         Assert.Equal(FolderMetricBucketViewModel.BarMaxWidth / 2, sut.Buckets[1].BarWidth);
     }

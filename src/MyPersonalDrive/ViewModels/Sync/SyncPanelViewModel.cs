@@ -268,14 +268,14 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// </summary>
     public Func<string, Task>? RequestAlertAsync { get; set; }
 
-    private async Task AlertAsync(string message)
+    private async Task AlertAsync(string message) => await AlertAsync(LocalizedText.Verbatim(message));
+
+    private async Task AlertAsync(LocalizedText message)
     {
-        // Already-final text: the validator produced this sentence, and §7's typed-reason work
-        // (docs/PLAN-I18N.md L7) is what will let it carry a key instead.
-        SetStatus(LocalizedText.Verbatim(message));
+        SetStatus(message);
         if (RequestAlertAsync is { } alert)
         {
-            await alert(message);
+            await alert(message.Render());
         }
     }
 
@@ -537,11 +537,11 @@ public sealed class SyncPanelViewModel : ObservableObject
             var targetSlot = ActiveSlot;
             var sameAccountPairs = await targetSlot.StateStore.GetPairsAsync();
             var allAccountPairs = await GetAllPairsAcrossAccountsAsync();
-            var validationError = SyncPairValidator.Validate(request.RemotePath, request.LocalPath, request.Direction, sameAccountPairs, allAccountPairs)
-                                  ?? LocalFolderInspector.CheckWritable(request.LocalPath);
-            if (validationError is not null)
+            var issue = SyncPairValidator.Validate(request.RemotePath, request.LocalPath, request.Direction, sameAccountPairs, allAccountPairs)
+                        ?? LocalFolderInspector.CheckWritable(request.LocalPath);
+            if (issue is not null)
             {
-                await AlertAsync(validationError);
+                await AlertAsync(SyncIssuePresenter.Describe(issue));
                 return;
             }
 

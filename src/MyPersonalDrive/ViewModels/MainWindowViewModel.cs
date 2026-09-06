@@ -4143,12 +4143,17 @@ public sealed class MainWindowViewModel : ObservableObject
                 : LocalizedText.Of(StringKeys.Error.NeedAuthToLoad, path);
         }
 
+        // The provider's own sentence is the detail half, verbatim. When it has none — a transport
+        // that failed before producing one — the typed kind still has something to say, which is
+        // what DriveErrorPresenter's table is for.
+        var detail = string.IsNullOrWhiteSpace(ex.Message) ? DriveErrorPresenter.Describe(kind) : ex.Message;
+
         if (path == "auth logout")
         {
-            return LocalizedText.Of(StringKeys.Error.LogoutFailed, ex.Message);
+            return LocalizedText.Of(StringKeys.Error.LogoutFailed, detail);
         }
 
-        return LocalizedText.Of(StringKeys.Error.LoadFailed, path, ex.Message);
+        return LocalizedText.Of(StringKeys.Error.LoadFailed, path, detail);
     }
 
     private static string? PlaceholderIdentity(ProviderId id) => id switch

@@ -232,7 +232,7 @@ public sealed class SyncPairViewModel : ObservableObject
     /// or null when the change is safe. Left null disables the check (e.g. in tests that don't
     /// care about it), the same way every other optional delegate on this type does.
     /// </summary>
-    public Func<SyncDirection, Task<string?>>? ValidateDirectionChangeAsync { get; set; }
+    public Func<SyncDirection, Task<SyncPairIssue?>>? ValidateDirectionChangeAsync { get; set; }
 
     public Action<string>? OnError { get; set; }
 
@@ -256,7 +256,7 @@ public sealed class SyncPairViewModel : ObservableObject
             var warnings = new List<string>();
             if (LocalFolderInspector.CheckFreeSpace(_pair.LocalPath, plan.Stats.BytesToDownload) is { } spaceWarning)
             {
-                warnings.Add(spaceWarning);
+                warnings.Add(SyncIssuePresenter.Describe(spaceWarning).Render());
             }
 
             if (await confirm(plan, warnings))
@@ -479,10 +479,11 @@ public sealed class SyncPairViewModel : ObservableObject
         }
 
         var validate = ValidateDirectionChangeAsync;
-        if (validate is not null && await validate(request.Direction) is { } validationError)
+        if (validate is not null && await validate(request.Direction) is { } issue)
         {
-            SetStatus(LocalizedText.Verbatim(validationError));
-            OnError?.Invoke(validationError);
+            var described = SyncIssuePresenter.Describe(issue);
+            SetStatus(described);
+            OnError?.Invoke(described.Render());
             return;
         }
 

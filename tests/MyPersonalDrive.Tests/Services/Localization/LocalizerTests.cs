@@ -1,3 +1,6 @@
+using MyPersonalDrive.Models;
+using MyPersonalDrive.Services.Providers;
+using MyPersonalDrive.ViewModels;
 using Xunit;
 using System.Globalization;
 using MyPersonalDrive.Services;
@@ -232,4 +235,55 @@ public class LocalizedTextTests
         => Assert.NotEqual(
             LocalizedText.Of(StringKeys.Status.RenameDone, "a", "b"),
             LocalizedText.Of(StringKeys.Status.RenameDone, "a", "c"));
+}
+
+/// <summary>
+/// docs/PLAN-I18N.md §9's boundary, from the other side: <c>Services/</c> names a reason and the
+/// presenter words it, so the check and the copy stop being the same thing.
+/// </summary>
+public class IssuePresenterTests
+{
+    [Fact]
+    public void EveryIssueKindHasASentence()
+    {
+        foreach (var kind in Enum.GetValues<SyncPairIssueKind>())
+        {
+            var rendered = SyncIssuePresenter.Describe(new SyncPairIssue(kind, "a", "b")).Render();
+
+            Assert.False(string.IsNullOrWhiteSpace(rendered));
+            Assert.DoesNotContain("⟦", rendered, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void TheReasonsArgumentsReachTheSentence()
+        => Assert.Equal(
+            "'/home/me/Docs' is already synced with '/my-files/Docs'.",
+            SyncIssuePresenter.Describe(
+                new SyncPairIssue(SyncPairIssueKind.LocalAlreadySynced, "/home/me/Docs", "/my-files/Docs")).Render());
+
+    [Fact]
+    public void EveryDriveErrorKindHasASentence()
+    {
+        foreach (var kind in Enum.GetValues<DriveErrorKind>())
+        {
+            var rendered = DriveErrorPresenter.Describe(kind);
+
+            Assert.False(string.IsNullOrWhiteSpace(rendered));
+            Assert.DoesNotContain("⟦", rendered, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>Every file kind is labelled — an unlabelled chip is an invisible filter.</summary>
+    [Fact]
+    public void EveryFileKindHasALabel()
+    {
+        foreach (var kind in Enum.GetValues<FileKind>())
+        {
+            var rendered = FileKindClassifier.DisplayName(kind);
+
+            Assert.False(string.IsNullOrWhiteSpace(rendered));
+            Assert.DoesNotContain("⟦", rendered, StringComparison.Ordinal);
+        }
+    }
 }

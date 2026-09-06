@@ -190,8 +190,8 @@ public class SyncSchedulerTests : IDisposable
 
         // And every failure was recorded for the user, with the wait spelled out.
         var logs = await h.Store.GetRecentLogsAsync(null, 20);
-        Assert.Contains(logs, l => l.Level == SyncLogLevel.Error && l.Message.Contains("La sincronización automática falló"));
-        Assert.Contains(logs, l => l.Message.Contains("próximo intento en 30 min"));
+        Assert.Contains(logs, l => l.Level == SyncLogLevel.Error && l.Message.Contains("Automatic sync failed"));
+        Assert.Contains(logs, l => l.Message.Contains("next attempt in 30 min"));
 
         await h.Scheduler.DisposeAsync();
     }

@@ -412,6 +412,14 @@ public static class StringKeys
         public const string EditTooltip = "sync.edit.tooltip";
         public const string EditUnavailable = "sync.edit.unavailable";
         public const string EmptyState = "sync.emptystate";
+        public const string ExecAborted = "sync.exec.aborted";
+        /// <summary>Plural prefix.</summary>
+        public const string ExecConflicts = "sync.exec.conflicts";
+        /// <summary>Plural prefix.</summary>
+        public const string ExecFailed = "sync.exec.failed";
+        public const string ExecProgress = "sync.exec.progress";
+        /// <summary>Plural prefix.</summary>
+        public const string ExecScanning = "sync.exec.scanning";
         /// <summary>Plural prefix.</summary>
         public const string FailureAttempts = "sync.failure.attempts";
         public const string FailureNoReason = "sync.failure.noreason";
@@ -453,7 +461,13 @@ public static class StringKeys
         /// <summary>Plural prefix.</summary>
         public const string RetryRequeued = "sync.retry.requeued";
         public const string RetryReset = "sync.retry.reset";
+        public const string SchedulerFailed = "sync.scheduler.failed";
         public const string ShowLabel = "sync.show.label";
+        public const string SkipCaseCollision = "sync.skip.casecollision";
+        public const string SkipDuplicateName = "sync.skip.duplicatename";
+        public const string SkipGoogleNativeFile = "sync.skip.googlenativefile";
+        public const string SkipUnmappableName = "sync.skip.unmappablename";
+        public const string SkipUnspecified = "sync.skip.unspecified";
         public const string StatusError = "sync.status.error";
         public const string StatusNever = "sync.status.never";
         public const string StatusPartialFailure = "sync.status.partialfailure";
@@ -462,6 +476,8 @@ public static class StringKeys
         public const string Syncing = "sync.syncing";
         public const string TimeNever = "sync.time.never";
         public const string Title = "sync.title";
+        public const string WatcherDegraded = "sync.watcher.degraded";
+        public const string WatcherDegradedLinux = "sync.watcher.degraded.linux";
     }
 
     /// <summary>The settings view.</summary>
@@ -644,10 +660,55 @@ public static class StringKeys
     /// <summary>The framing sentences around a provider error. The provider's own message stays verbatim inside them (docs/PLAN-I18N.md §9).</summary>
     public static class Error
     {
+        public const string KindAlreadyExists = "error.kind.alreadyexists";
+        public const string KindBusy = "error.kind.busy";
+        public const string KindConflict = "error.kind.conflict";
+        public const string KindInvalidArgument = "error.kind.invalidargument";
+        public const string KindNetwork = "error.kind.network";
+        public const string KindNotAuthenticated = "error.kind.notauthenticated";
+        public const string KindNotFound = "error.kind.notfound";
+        public const string KindPermissionDenied = "error.kind.permissiondenied";
+        public const string KindQuota = "error.kind.quota";
+        public const string KindRateLimited = "error.kind.ratelimited";
+        public const string KindTimeout = "error.kind.timeout";
+        public const string KindUnknown = "error.kind.unknown";
         public const string LoadFailed = "error.loadfailed";
         public const string LogoutFailed = "error.logoutfailed";
         public const string NeedAuth = "error.needauth";
         public const string NeedAuthToLoad = "error.needauth.load";
+    }
+
+    /// <summary>Why a sync pair was refused. The validator names the reason; these word it (docs/PLAN-I18N.md §9).</summary>
+    public static class Issue
+    {
+        public const string DirectionUnsafeOverlap = "issue.direction.unsafeoverlap";
+        public const string FreeSpace = "issue.freespace";
+        public const string LocalAlreadySynced = "issue.local.alreadysynced";
+        public const string LocalOverlaps = "issue.local.overlaps";
+        public const string LocalPathHomeOrRoot = "issue.localpath.homeorroot";
+        public const string LocalPathIsAFile = "issue.localpath.isafile";
+        public const string LocalPathMissing = "issue.localpath.missing";
+        public const string LocalPathNotWritable = "issue.localpath.notwritable";
+        public const string RemoteAlreadySynced = "issue.remote.alreadysynced";
+        public const string RemoteOverlaps = "issue.remote.overlaps";
+        public const string RemotePathNotAbsolute = "issue.remotepath.notabsolute";
+    }
+
+    /// <summary>File-kind labels, for the metrics histogram and the type filter chips.</summary>
+    public static class FileKind
+    {
+        public const string Archive = "filekind.archive";
+        public const string Audio = "filekind.audio";
+        public const string Code = "filekind.code";
+        public const string Document = "filekind.document";
+        public const string Folder = "filekind.folder";
+        public const string Image = "filekind.image";
+        public const string Other = "filekind.other";
+        public const string Pdf = "filekind.pdf";
+        public const string Presentation = "filekind.presentation";
+        public const string Spreadsheet = "filekind.spreadsheet";
+        public const string Text = "filekind.text";
+        public const string Video = "filekind.video";
     }
 
     /// <summary>Provider session labels shown by the picker and the connection cards.</summary>

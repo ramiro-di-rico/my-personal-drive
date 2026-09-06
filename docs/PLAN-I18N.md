@@ -21,11 +21,17 @@
 > and both locales are verifiably embedded in the single-file binary. **Not visually verified: this
 > environment has no working screenshot tool** (GNOME refuses `ScreenshotWindow` over D-Bus), so
 > the Settings layout with the picker, and the language actually changing on screen, are both
-> unconfirmed by eye and want a human pass. The counts in §0.1 were taken on `feature/ux-round-2`
+> unconfirmed by eye and want a human pass — see the 2026-09-06 note below, which closes part of
+> this. The counts in §0.1 were taken on `feature/ux-round-2`
 > and are slightly low against the merged `main`, which added the per-pane toolbars.
 >
-> **Final state: 578 keys, English and Spanish, 1086 tests passing (from 1001).** Every phase's AOT
+> **Final state: 620 keys, English and Spanish, 1096 tests passing (from 1001).** Every phase's AOT
 > publish was clean, and both locales are present in the single-file binary.
+>
+> **Confirmed working in the running app, 2026-09-06** — the picker changes the whole interface,
+> verified by the user after the `LocalizedStrings` fix ([§3.1](#31-what-the-compile-check-could-not-see)).
+> What that confirms is the *mechanism*. Layout under English copy — which is a different length
+> from the Spanish it replaced, in a UI full of fixed widths — has still not been looked at.
 >
 > L3 turned up one thing worth carrying forward: `{Binding Loc[key]}` needs the DataContext to be
 > a view model, and one `DataTemplate` in the header is typed against `ProviderDescriptor`. That
@@ -33,8 +39,10 @@
 > `{Binding [key], Source={x:Static loc:Localizer.Instance}, x:DataType=loc:Localizer}` — which is
 > still a compiled binding. Expect the same for any template over a model type in L4-L6.
 
-- [x] **L0 — Live-switch spike (partial).** The markup half is proven; the ViewModel half is wired
-      but unobserved. See [§3](#3-l0--the-live-switch-spike) for what was and was not shown.
+- [x] **L0 — Live-switch spike.** Both halves work, but **not the way this phase concluded** — it
+      called the markup proven and the view-model half unproven, and it was the other way round.
+      Corrected in [§3.1](#31-what-the-compile-check-could-not-see) after the shipped picker changed
+      nothing on screen; the fix is `LocalizedStrings`.
 - [x] **L1 — Localization infrastructure.** `Services/Localization/` — `Language`,
       `LanguageCatalog`, `StringKeys`, `LocaleCatalogLoader`, `Localizer`, and `Locales/en.json` /
       `es.json` (45 keys) globbed as embedded resources. `AppSettings.Language` +

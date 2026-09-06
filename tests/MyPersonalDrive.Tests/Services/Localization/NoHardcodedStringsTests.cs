@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using MyPersonalDrive.Services.Localization;
 using Xunit;
 
 namespace MyPersonalDrive.Tests.Services.Localization;
@@ -228,28 +229,61 @@ public class NoHardcodedStringsTests
     }
 
     /// <summary>
-    /// A smell test for copy that was pasted between locales rather than translated. Only values
-    /// that are genuinely language-neutral should be byte-identical.
+    /// A smell test for copy that was pasted rather than translated. Only values that are genuinely
+    /// language-neutral should be byte-identical to English.
+    ///
+    /// Runs per locale rather than only against Spanish: the point of the gate is that it keeps
+    /// applying as languages are added, and a test named after two specific ones silently stops
+    /// covering the third.
     /// </summary>
-    [Fact]
-    public void SpanishAndEnglishOnlyMatchWhereTheyShould()
+    [Theory]
+    [MemberData(nameof(NonReferenceLanguages))]
+    public void ALocaleOnlyMatchesEnglishWhereItShould(string code)
     {
         var english = LocalizationTests.LoadLocale("en");
-        var spanish = LocalizationTests.LoadLocale("es");
+        var locale = LocalizationTests.LoadLocale(code);
 
         var identical = english
-            .Where(pair => spanish.TryGetValue(pair.Key, out var other) && string.Equals(pair.Value, other, StringComparison.Ordinal))
+            .Where(pair => locale.TryGetValue(pair.Key, out var other) && string.Equals(pair.Value, other, StringComparison.Ordinal))
             .Select(pair => pair.Key)
-            .Where(key => !LanguageNeutral(key))
+            .Where(key => !LanguageNeutral(key) && !BorrowsTheEnglishWord(code, key))
             .Order()
             .ToList();
 
         Assert.True(
             identical.Count == 0,
-            "These keys read the same in both locales, which usually means the value was copied rather\n" +
-            "than translated. If a value really is language-neutral (a pure layout template, a unit, a\n" +
-            "proper noun), add it to LanguageNeutral in this test.\n\n  " + string.Join("\n  ", identical));
+            $"These keys read the same in {code} as in English, which usually means the value was copied\n" +
+            "rather than translated. If a value really is language-neutral (a pure layout template, a\n" +
+            "unit, a proper noun), add it to LanguageNeutral in this test.\n\n  " + string.Join("\n  ", identical));
     }
+
+    public static TheoryData<string> NonReferenceLanguages()
+    {
+        var data = new TheoryData<string>();
+        foreach (var language in LanguageCatalog.Available.Where(l => l.Code != LanguageCatalog.DefaultCode))
+        {
+            data.Add(language.Code);
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    /// Keys where one particular language legitimately uses the English word, because that word is
+    /// the correct one in that language — not because someone skipped the line. Kept per locale on
+    /// purpose: "File" is right in Italian and wrong in Spanish, and a shared list would quietly
+    /// stop the gate catching the Spanish case.
+    /// </summary>
+    private static bool BorrowsTheEnglishWord(string code, string key) => (code, key) switch
+    {
+        // Italian takes these as loanwords; "conto" is a bank account and "in linea" is archaic.
+        ("it", "common.account") => true,
+        ("it", "common.file") => true,
+        ("it", "connection.state.online") => true,
+        // "file" is invariant in Italian, so the singular reads the same as the English singular.
+        ("it", "metrics.files.one") => true,
+        _ => false,
+    };
 
     /// <summary>Keys whose value is a layout template, a symbol or a proper noun, not prose.</summary>
     private static bool LanguageNeutral(string key) => key is

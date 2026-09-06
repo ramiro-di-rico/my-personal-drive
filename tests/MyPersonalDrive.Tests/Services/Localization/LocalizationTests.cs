@@ -36,6 +36,23 @@ public class LocalizationTests
         return data;
     }
 
+    /// <summary>
+    /// A language code is three things at once — the locale file's name, the value persisted in
+    /// <c>AppSettings.Language</c>, and a <see cref="CultureInfo"/> name. A code .NET does not know
+    /// resolves to <see cref="CultureInfo.InvariantCulture"/>, silently, and dates and numbers stop
+    /// following the language while the strings still switch. Checking it is step 1 of
+    /// .claude/skills/add-language/SKILL.md; here it is a gate instead of a manual step.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AllLanguages))]
+    public void EveryLanguageCodeIsACultureDotNetKnows(string code)
+    {
+        var culture = CultureInfo.GetCultureInfo(code);
+
+        Assert.False(culture.Equals(CultureInfo.InvariantCulture));
+        Assert.Equal(code, culture.TwoLetterISOLanguageName);
+    }
+
     [Fact]
     public void EnglishIsTheReferenceLocaleAndIsNotEmpty()
     {

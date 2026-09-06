@@ -25,7 +25,12 @@
 > this. The counts in §0.1 were taken on `feature/ux-round-2`
 > and are slightly low against the merged `main`, which added the per-pane toolbars.
 >
-> **Final state: 620 keys, English and Spanish, 1096 tests passing (from 1001).** Every phase's AOT
+> **Italian added 2026-09-06** — `it.json`, one row in `LanguageCatalog`, no other code. The seam
+> held: the whole change was the file plus the row, which is what
+> [`.claude/skills/add-language/SKILL.md`](../.claude/skills/add-language/SKILL.md) promises. Two
+> gates were widened rather than satisfied — see [Appendix B](#appendix-b--adding-the-next-language).
+>
+> **Final state: 620 keys, English, Spanish and Italian, 1104 tests passing (from 1001).** Every phase's AOT
 > publish was clean, and both locales are present in the single-file binary.
 >
 > **Confirmed working in the running app, 2026-09-06** — the picker changes the whole interface,
@@ -178,7 +183,9 @@ This is not a one-commit change and must not be attempted as one.
   is a *layout* project (`FlowDirection`, mirrored icons, breadcrumb chevrons), not a strings one.
   The skill says so.
 - **Regional variants.** `es`, not `es-AR` / `es-ES`. Vos/tú wording follows the existing copy,
-  which is Rioplatense ("Arrastrá", "Agregá").
+  which is Rioplatense ("Arrastrá", "Agregá"). Italian is informal second person singular
+  ("Scegli", "Aggiungi"), the modern Italian software convention and the closest match to the
+  Spanish register.
 - **Plural rules beyond one/other.** The `PluralRule` delegate in `LanguageCatalog` exists so a
   Slavic language can be added without re-architecting, but no such rule is written now.
 - **A translator pipeline** (`.po`, Crowdin, machine translation on CI).
@@ -758,3 +765,26 @@ Not in this document, on purpose. The procedure is
 single source of truth per [AGENTS.md](../AGENTS.md). The two-line summary: drop
 `Locales/<code>.json`, add one row to `LanguageCatalog.Available`, run the tests. If it needs more
 than that, L1 built the seam wrong.
+
+### What adding Italian actually cost
+
+The seam held: `it.json` plus one row, no `.csproj` edit, no code path, no wiring. What it *did*
+surface is that two gates had been written for a two-language world:
+
+- **`SpanishAndEnglishOnlyMatchWhereTheyShould`** compared exactly those two locales, so it silently
+  stopped covering the third. Now `ALocaleOnlyMatchesEnglishWhereItShould`, a theory over every
+  non-reference language. A gate named after specific languages is a gate with an expiry date.
+- **Its allowlist had to become per-locale.** Italian legitimately takes the English word for
+  `common.account`, `common.file` and `connection.state.online` — "conto" is a bank account, "in
+  linea" is archaic — and `metrics.files.one` reads the same because *file* is invariant in Italian.
+  A shared allowlist would have accepted those and, in the same move, stopped catching an
+  untranslated Spanish "File".
+- **A new gate for step 1 of the skill.** `EveryLanguageCodeIsACultureDotNetKnows` — a code .NET
+  does not recognise falls back to `InvariantCulture` silently, so the strings would switch while
+  dates and numbers did not. That was a manual check in the skill; it is a test now.
+
+**Layout:** Italian runs 24% longer than English but only **4% longer than the Spanish that already
+ships**, which is the baseline that matters. The three view tabs are the widest growth
+("Visualizzatore" against "Visor"), and they sit in an auto-sizing `StackPanel` with no fixed width,
+so they push rather than clip. Verified by a runtime probe, not by eye — see §3.1 on why that
+distinction now gets stated explicitly.

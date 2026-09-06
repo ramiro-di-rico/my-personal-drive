@@ -77,7 +77,7 @@ src/MyPersonalDrive/
       LocalizedStrings.cs          # the façade the markup binds through; replaced, never mutated
       LocalizedText.cs             # a key plus its arguments, rendered on read
       ILocalizedError.cs           # an exception's English Message plus its translated Detail
-      Locales/en.json, es.json     # embedded resources, globbed
+      Locales/en.json, es.json, it.json  # embedded resources, globbed
     Providers/
       ICloudDriveProvider.cs       # the facade every consumer talks to (see §5); exposes Paths
       IDriveOperations.cs / IDriveAuthenticator.cs / IRemoteViewInvalidator.cs / IProviderDiagnostics.cs
@@ -594,8 +594,8 @@ current pattern; if more dialogs are added, consider extracting them into their 
 
 ### 7.6 Localization
 
-The interface ships in **English (default) and Spanish**, chosen in Settings and applied without a
-restart. See [PLAN-I18N.md](PLAN-I18N.md) for the design and
+The interface ships in **English (default), Spanish and Italian**, chosen in Settings and applied
+without a restart. See [PLAN-I18N.md](PLAN-I18N.md) for the design and
 [`.claude/skills/add-language/SKILL.md`](../.claude/skills/add-language/SKILL.md) for adding a
 third.
 

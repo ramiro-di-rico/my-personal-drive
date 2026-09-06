@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private static Localizer Loc => Localizer.Instance;
 
 
+
     public MainWindow()
     {
         InitializeComponent();

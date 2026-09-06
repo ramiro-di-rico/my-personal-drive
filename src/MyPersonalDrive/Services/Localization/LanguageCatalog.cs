@@ -22,6 +22,7 @@ public static class LanguageCatalog
     [
         new Language("en", "English", "English"),
         new Language("es", "Spanish", "Español"),
+        new Language("it", "Italian", "Italiano"),
     ];
 
     public static Language Default { get; } = Available[0];

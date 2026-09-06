@@ -63,8 +63,10 @@
       [§Z](#z-code-review--correctness-resources-and-where-the-seams-are).
 - [x] **Z4 — seventeen bypasses of the repo's own `TimeProvider` rule.** Fifteen fixed, including
       both OAuth token-expiry checks; two allowlisted with reasons, behind a gate.
-- [ ] **Z5/Z6 — the 4415-line view model and the 1978-line code-behind**, with a staged extraction
-      order argued from their actual coupling rather than from their size.
+- [x] **Z6 — the 1978-line code-behind.** Nine dialogs extracted to `Views/Dialogs/`; the file is
+      1000 lines and holds only what needs the visual tree.
+- [ ] **Z5 — the 4415-line view model**, with a staged extraction order argued from its actual
+      coupling rather than from its size. Not started.
 
 ---
 
@@ -478,10 +480,19 @@ pattern; if more dialogs are added, consider extracting them into their own clas
 collapsed three of them into one, which is the first payment on that debt; the remaining fourteen
 are roughly 1100 lines of the file.
 
-**Do.** `Views/Dialogs/`, one class per dialog, each taking its inputs and returning its result —
-the shape `PromptForNameAsync` already has. The code-behind keeps what genuinely needs the visual
-tree: gestures, drag-and-drop, focus, the splitter. Independent of Z5 and much smaller; a good first
-refactor for whoever picks this up.
+**Done.** `Views/Dialogs/` holds nine classes — `NamePromptDialog`, `ConfirmDialog`, `AlertDialog`,
+`PropertiesDialog`, `UploadConflictDialog`, `SyncPairDialog`, `SyncPreviewDialog`,
+`SyncConflictsDialog`, `SyncFailuresDialog` — each a static `ShowAsync(owner, …)` returning its
+result, which is the shape `PromptForNameAsync` already had. The bodies moved unchanged, so the
+diff is reviewable as a move rather than a redesign.
+
+`MainWindow.axaml.cs` went from **1978 lines to 1000**, and keeps what genuinely needs the visual
+tree: gestures, drag-and-drop, focus, the splitter, the storage pickers and the keyboard map. Two
+things had to be re-pointed rather than moved: the properties dialog reaches a clipboard through its
+owner instead of the window, and the pair dialog's folder picker takes the owner's `TopLevel`.
+
+Done in two commits — the five simple dialogs, then the four sync ones — because one 1100-line move
+is not a reviewable diff.
 
 ### Z7 — What was checked and found sound
 

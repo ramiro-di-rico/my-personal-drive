@@ -145,7 +145,8 @@
                     CornerRadius="6"
                     Padding="10,4"
                     MinWidth="180"
-                    ToolTip.Tip="{Binding Loc[header.provider.tooltip]}">
+                    ToolTip.Tip="{Binding Loc[header.provider.tooltip]}"
+                    AutomationProperties.Name="{Binding Loc[header.provider.tooltip]}">
             <ComboBox.ItemTemplate>
               <DataTemplate x:DataType="providers:ProviderDescriptor">
                 <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" VerticalAlignment="Center" Margin="2,2">
@@ -171,7 +172,8 @@
                            StrokeThickness="2"
                            Fill="Transparent"
                            VerticalAlignment="Center"
-                           ToolTip.Tip="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Loc[header.session.tooltip]}">
+                           ToolTip.Tip="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Loc[header.session.tooltip]}"
+                           AutomationProperties.Name="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Loc[header.session.tooltip]}">
                     <Ellipse.Styles>
                       <Style Selector="Ellipse.auth">
                         <Setter Property="Stroke" Value="{DynamicResource StatusOkBrush}" />
@@ -209,6 +211,7 @@
                stops reporting a problem it won't help with (U2). Hit-testing is switched off in the
                healthy states so it reads as a plain badge. -->
           <Button Name="ConnectionBadge"
+                  AutomationProperties.Name="{Binding ConnectionStatusDescription}"
                   Padding="8,4"
                   CornerRadius="6"
                   Command="{Binding StatusActionCommand}"
@@ -299,18 +302,21 @@
               <Button Command="{Binding SetThemeDefaultCommand}"
                       Classes.active="{Binding IsSystemTheme}"
                       ToolTip.Tip="{Binding Loc[header.theme.system.tooltip]}"
+                      AutomationProperties.Name="{Binding Loc[header.theme.system.tooltip]}"
                       Padding="6,4">
                 <Path Classes="icon" Data="{StaticResource IconMonitor}" Width="14" Height="14" />
               </Button>
               <Button Command="{Binding SetThemeLightCommand}"
                       Classes.active="{Binding IsLightTheme}"
                       ToolTip.Tip="{Binding Loc[header.theme.light.tooltip]}"
+                      AutomationProperties.Name="{Binding Loc[header.theme.light.tooltip]}"
                       Padding="6,4">
                 <Path Classes="icon" Data="{StaticResource IconSun}" Width="14" Height="14" />
               </Button>
               <Button Command="{Binding SetThemeDarkCommand}"
                       Classes.active="{Binding IsDarkTheme}"
                       ToolTip.Tip="{Binding Loc[header.theme.dark.tooltip]}"
+                      AutomationProperties.Name="{Binding Loc[header.theme.dark.tooltip]}"
                       Padding="6,4">
                 <Path Classes="icon" Data="{StaticResource IconMoon}" Width="14" Height="14" />
               </Button>
@@ -326,6 +332,7 @@
                   Classes.active="{Binding IsLocalExplorerPanelVisible}"
                   IsVisible="{Binding IsExplorerView}"
                   ToolTip.Tip="{Binding Loc[header.localpane.tooltip]}"
+                  AutomationProperties.Name="{Binding Loc[header.localpane.tooltip]}"
                   Padding="8,6">
             <Path Classes="icon" Data="{StaticResource IconPanelRight}" Width="14" Height="14" />
           </Button>
@@ -384,7 +391,8 @@
                    Fill="{DynamicResource StatusErrorBrush}"
                    VerticalAlignment="Center"
                    IsVisible="{Binding SyncPanel.HasFailingPairs}"
-                   ToolTip.Tip="{Binding Loc[nav.sync.failures.tooltip]}" />
+                   ToolTip.Tip="{Binding Loc[nav.sync.failures.tooltip]}"
+                   AutomationProperties.Name="{Binding Loc[nav.sync.failures.tooltip]}" />
         </StackPanel>
       </Button>
     </StackPanel>
@@ -458,13 +466,13 @@
                                    Icon="{StaticResource IconCloud}" />
             </Border>
 
-            <Button Grid.Column="1" ToolTip.Tip="{Binding Loc[explorer.back.tooltip]}" Command="{Binding BackCommand}">
+            <Button Grid.Column="1" ToolTip.Tip="{Binding Loc[explorer.back.tooltip]}" AutomationProperties.Name="{Binding Loc[explorer.back.tooltip]}" Command="{Binding BackCommand}">
               <Path Classes="icon" Data="{StaticResource IconArrowLeft}" />
             </Button>
-            <Button Grid.Column="2" ToolTip.Tip="{Binding Loc[explorer.newfolder.tooltip]}" Command="{Binding CreateFolderCommand}">
+            <Button Grid.Column="2" ToolTip.Tip="{Binding Loc[explorer.newfolder.tooltip]}" AutomationProperties.Name="{Binding Loc[explorer.newfolder.tooltip]}" Command="{Binding CreateFolderCommand}">
               <Path Classes="icon" Data="{StaticResource IconFolderPlus}" />
             </Button>
-            <Button Grid.Column="3" ToolTip.Tip="{Binding Loc[explorer.upload.tooltip]}" Command="{Binding UploadCommand}">
+            <Button Grid.Column="3" ToolTip.Tip="{Binding Loc[explorer.upload.tooltip]}" AutomationProperties.Name="{Binding Loc[explorer.upload.tooltip]}" Command="{Binding UploadCommand}">
               <Path Classes="icon" Data="{StaticResource IconUpload}" />
             </Button>
 
@@ -474,6 +482,7 @@
                     Classes="viewMode"
                     Classes.active="{Binding IsListView}"
                     ToolTip.Tip="{Binding Loc[explorer.view.list.tooltip]}"
+                    AutomationProperties.Name="{Binding Loc[explorer.view.list.tooltip]}"
                     Command="{Binding ShowListViewCommand}">
               <Path Classes="icon" Data="{StaticResource IconViewList}" />
             </Button>
@@ -481,6 +490,7 @@
                     Classes="viewMode"
                     Classes.active="{Binding IsIconsView}"
                     ToolTip.Tip="{Binding Loc[explorer.view.icons.tooltip]}"
+                    AutomationProperties.Name="{Binding Loc[explorer.view.icons.tooltip]}"
                     Command="{Binding ShowIconsViewCommand}">
               <Path Classes="icon" Data="{StaticResource IconViewGrid}" />
             </Button>
@@ -488,6 +498,7 @@
                     Classes="viewMode"
                     Classes.active="{Binding IsGalleryView}"
                     ToolTip.Tip="{Binding Loc[explorer.view.gallery.tooltip]}"
+                    AutomationProperties.Name="{Binding Loc[explorer.view.gallery.tooltip]}"
                     Command="{Binding ShowGalleryViewCommand}">
               <Path Classes="icon" Data="{StaticResource IconViewGallery}" />
             </Button>
@@ -517,13 +528,15 @@
                  it hid, and the only way out was selecting the text and deleting it. -->
             <TextBox Width="200"
                      PlaceholderText="{Binding Loc[explorer.search.placeholder]}"
+                     AutomationProperties.Name="{Binding Loc[explorer.search.placeholder]}"
                      Text="{Binding SearchText, Mode=TwoWay}" />
             <Button Command="{Binding ClearSearchCommand}"
                     IsVisible="{Binding HasSearchText}"
                     Padding="6,2"
                     Margin="4,0,0,0"
                     VerticalAlignment="Center"
-                    ToolTip.Tip="{Binding Loc[explorer.search.clear.tooltip]}">
+                    ToolTip.Tip="{Binding Loc[explorer.search.clear.tooltip]}"
+                    AutomationProperties.Name="{Binding Loc[explorer.search.clear.tooltip]}">
               <Path Classes="icon" Data="{StaticResource IconClear}" Width="12" Height="12" />
             </Button>
             <TextBlock Text="{Binding SearchResultText}"
@@ -704,6 +717,7 @@
                   <Button Grid.Column="2"
                           Classes="rowAction"
                           ToolTip.Tip="{Binding Loc[menu.preview]}"
+                          AutomationProperties.Name="{Binding Loc[menu.preview]}"
                           Margin="8,0,0,0"
                           Command="{Binding PreviewCommand}"
                           IsVisible="{Binding CanPreview}">
@@ -713,6 +727,7 @@
                   <Button Grid.Column="3"
                           Classes="rowAction"
                           ToolTip.Tip="{Binding Loc[menu.copy]}"
+                          AutomationProperties.Name="{Binding Loc[menu.copy]}"
                           Margin="8,0,0,0"
                           Command="{Binding CopyCommand}">
                     <Path Classes="icon" Data="{StaticResource IconCopy}" />
@@ -721,6 +736,7 @@
                   <Button Grid.Column="4"
                           Classes="rowAction"
                           ToolTip.Tip="{Binding Loc[explorer.row.rename.tooltip]}"
+                          AutomationProperties.Name="{Binding Loc[explorer.row.rename.tooltip]}"
                           Margin="8,0,0,0"
                           Command="{Binding RenameCommand}">
                     <Path Classes="icon" Data="{StaticResource IconPencil}" />
@@ -729,6 +745,7 @@
                   <Button Grid.Column="5"
                           Classes="rowAction"
                           ToolTip.Tip="{Binding DownloadTooltip}"
+                          AutomationProperties.Name="{Binding DownloadTooltip}"
                           Margin="8,0,0,0"
                           Command="{Binding DownloadCommand}"
                           IsVisible="{Binding IsFile}">
@@ -738,6 +755,7 @@
                   <Button Grid.Column="6"
                           Classes="rowAction"
                           ToolTip.Tip="{Binding Loc[menu.trash]}"
+                          AutomationProperties.Name="{Binding Loc[menu.trash]}"
                           Margin="8,0,0,0"
                           Command="{Binding TrashCommand}">
                     <Path Classes="icon" Data="{StaticResource IconTrash}" />
@@ -1017,12 +1035,14 @@
               <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Left">
                 <TextBox Width="200"
                          PlaceholderText="{Binding Loc[explorer.search.placeholder]}"
+                         AutomationProperties.Name="{Binding Loc[explorer.search.placeholder]}"
                          Text="{Binding SearchText, Mode=TwoWay}" />
                 <Button Command="{Binding ClearSearchCommand}"
                         IsVisible="{Binding HasSearchText}"
                         Padding="6,2"
                         VerticalAlignment="Center"
-                        ToolTip.Tip="{Binding Loc[explorer.search.clear.tooltip]}">
+                        ToolTip.Tip="{Binding Loc[explorer.search.clear.tooltip]}"
+                        AutomationProperties.Name="{Binding Loc[explorer.search.clear.tooltip]}">
                   <Path Classes="icon" Data="{StaticResource IconClear}" Width="12" Height="12" />
                 </Button>
                 <TextBlock Text="{Binding SearchResultText}"
@@ -1034,17 +1054,18 @@
               </StackPanel>
             </Border>
 
-            <Button Grid.Column="1" ToolTip.Tip="{Binding Loc[local.home.tooltip]}" Command="{Binding GoHomeCommand}">
+            <Button Grid.Column="1" ToolTip.Tip="{Binding Loc[local.home.tooltip]}" AutomationProperties.Name="{Binding Loc[local.home.tooltip]}" Command="{Binding GoHomeCommand}">
               <Path Classes="icon" Data="{StaticResource IconHome}" />
             </Button>
             <Button Grid.Column="2"
                     Classes="viewMode"
                     Classes.active="{Binding ShowHiddenFiles}"
                     ToolTip.Tip="{Binding Loc[local.hidden.tooltip]}"
+                    AutomationProperties.Name="{Binding Loc[local.hidden.tooltip]}"
                     Command="{Binding ToggleHiddenFilesCommand}">
               <Path Classes="icon" Data="{StaticResource IconEyeOff}" />
             </Button>
-            <Button Grid.Column="3" ToolTip.Tip="{Binding Loc[common.refresh]}" Command="{Binding RefreshCommand}">
+            <Button Grid.Column="3" ToolTip.Tip="{Binding Loc[common.refresh]}" AutomationProperties.Name="{Binding Loc[common.refresh]}" Command="{Binding RefreshCommand}">
               <Path Classes="icon" Data="{StaticResource IconRefresh}" />
             </Button>
             <TextBlock Grid.Column="4"
@@ -1225,7 +1246,8 @@
                                 Grid.Column="1"
                                 Padding="4"
                                 Command="{Binding CancelCommand}"
-                                ToolTip.Tip="{Binding Loc[common.cancel]}">
+                                ToolTip.Tip="{Binding Loc[common.cancel]}"
+                                AutomationProperties.Name="{Binding Loc[common.cancel]}">
                           <Path Classes="icon" Width="12" Height="12" Data="{StaticResource IconClear}" />
                         </Button>
                         <TextBlock Grid.Row="1"
@@ -1408,12 +1430,14 @@
             <TextBox Grid.Column="2"
                       Width="160"
                       PlaceholderText="{Binding Loc[console.search.placeholder]}"
+                      AutomationProperties.Name="{Binding Loc[console.search.placeholder]}"
                       Text="{Binding LogSearchText, Mode=TwoWay}" />
             <Button Grid.Column="3"
                     Classes="viewMode"
                     Classes.active="{Binding ShowOnlyWarningsAndErrors}"
                     Command="{Binding ToggleLogFilterCommand}"
-                    ToolTip.Tip="{Binding Loc[console.warningsonly.tooltip]}">
+                    ToolTip.Tip="{Binding Loc[console.warningsonly.tooltip]}"
+                    AutomationProperties.Name="{Binding Loc[console.warningsonly.tooltip]}">
               <Path Classes="icon" Data="{StaticResource IconWarning}" />
             </Button>
             <Button Grid.Column="4"
@@ -1423,12 +1447,14 @@
             </Button>
             <Button Grid.Column="5"
                     Command="{Binding DownloadActivityCommand}"
-                    ToolTip.Tip="{Binding Loc[console.download.tooltip]}">
+                    ToolTip.Tip="{Binding Loc[console.download.tooltip]}"
+                    AutomationProperties.Name="{Binding Loc[console.download.tooltip]}">
               <Path Classes="icon" Data="{StaticResource IconSave}" />
             </Button>
             <Button Grid.Column="6"
                     Command="{Binding ClearActivityCommand}"
-                    ToolTip.Tip="{Binding Loc[console.clear.tooltip]}">
+                    ToolTip.Tip="{Binding Loc[console.clear.tooltip]}"
+                    AutomationProperties.Name="{Binding Loc[console.clear.tooltip]}">
               <Path Classes="icon" Data="{StaticResource IconClear}" />
             </Button>
           </Grid>
@@ -1523,7 +1549,8 @@
             <Button Grid.Column="2"
                     VerticalAlignment="Top"
                     Command="{Binding CloseViewerCommand}"
-                    ToolTip.Tip="{Binding Loc[viewer.close.tooltip]}">
+                    ToolTip.Tip="{Binding Loc[viewer.close.tooltip]}"
+                    AutomationProperties.Name="{Binding Loc[viewer.close.tooltip]}">
               <Path Classes="icon" Data="{StaticResource IconClear}" />
             </Button>
           </Grid>
@@ -1657,7 +1684,7 @@
                   <TextBox Width="420"
                            PlaceholderText="{Binding Loc[settings.syncfolder.placeholder]}"
                            Text="{Binding DefaultSyncFolder, Mode=TwoWay}" />
-                  <Button ToolTip.Tip="{Binding Loc[settings.syncfolder.browse.tooltip]}" Click="BrowseDefaultSyncFolder">
+                  <Button ToolTip.Tip="{Binding Loc[settings.syncfolder.browse.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.syncfolder.browse.tooltip]}" Click="BrowseDefaultSyncFolder">
                     <Path Classes="icon" Data="{StaticResource IconFolder}" />
                   </Button>
                 </StackPanel>
@@ -1711,31 +1738,31 @@
             <Button Classes.primary="{Binding IsProtonActive}" Command="{Binding SwitchToProtonCommand}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <TextBlock Text="Proton Drive" VerticalAlignment="Center" />
-                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsProtonAuthenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" />
+                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsProtonAuthenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.provider.signedin.tooltip]}" />
               </StackPanel>
             </Button>
             <Button Classes.primary="{Binding IsOneDriveActive}" Command="{Binding SwitchToOneDriveCommand}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <TextBlock Text="OneDrive" VerticalAlignment="Center" />
-                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsOneDriveAuthenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" />
+                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsOneDriveAuthenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.provider.signedin.tooltip]}" />
               </StackPanel>
             </Button>
             <Button Classes.primary="{Binding IsGoogleDriveActive}" Command="{Binding SwitchToGoogleDriveCommand}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <TextBlock Text="Google Drive" VerticalAlignment="Center" />
-                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsGoogleDriveAuthenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" />
+                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsGoogleDriveAuthenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.provider.signedin.tooltip]}" />
               </StackPanel>
             </Button>
             <Button Classes.primary="{Binding IsNextcloudActive}" Command="{Binding SwitchToNextcloudCommand}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <TextBlock Text="Nextcloud" VerticalAlignment="Center" />
-                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsNextcloudAuthenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" />
+                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsNextcloudAuthenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.provider.signedin.tooltip]}" />
               </StackPanel>
             </Button>
             <Button Classes.primary="{Binding IsS3Active}" Command="{Binding SwitchToS3Command}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <TextBlock Text="Custom S3" VerticalAlignment="Center" />
-                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsS3Authenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" />
+                <Ellipse Classes="providerAuth" Classes.auth="{Binding IsS3Authenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.provider.signedin.tooltip]}" />
               </StackPanel>
             </Button>
           </StackPanel>
@@ -1752,16 +1779,16 @@
                 <TextBox Width="420"
                          PlaceholderText="{Binding Loc[settings.proton.clipath.placeholder]}"
                          Text="{Binding CliPath, Mode=TwoWay}" />
-                <Button ToolTip.Tip="{Binding Loc[settings.proton.clipath.browse.tooltip]}" Click="BrowseCliPath">
+                <Button ToolTip.Tip="{Binding Loc[settings.proton.clipath.browse.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.proton.clipath.browse.tooltip]}" Click="BrowseCliPath">
                   <Path Classes="icon" Data="{StaticResource IconFolder}" />
                 </Button>
-                <Button Classes="primary" ToolTip.Tip="{Binding SignInTooltip}" Command="{Binding AuthenticateCommand}">
+                <Button Classes="primary" ToolTip.Tip="{Binding SignInTooltip}" AutomationProperties.Name="{Binding SignInTooltip}" Command="{Binding AuthenticateCommand}">
                   <Path Classes="icon" Data="{StaticResource IconKey}" />
                 </Button>
-                <Button ToolTip.Tip="{Binding SignOutTooltip}" Command="{Binding LogoutCommand}">
+                <Button ToolTip.Tip="{Binding SignOutTooltip}" AutomationProperties.Name="{Binding SignOutTooltip}" Command="{Binding LogoutCommand}">
                   <Path Classes="icon" Data="{StaticResource IconLogout}" />
                 </Button>
-                <Button ToolTip.Tip="{Binding Loc[settings.refresh.tooltip]}" Command="{Binding RefreshCommand}">
+                <Button ToolTip.Tip="{Binding Loc[settings.refresh.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.refresh.tooltip]}" Command="{Binding RefreshCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
               </StackPanel>
@@ -1777,7 +1804,7 @@
                            TextWrapping="Wrap"
                            Opacity="0.8"
                            Text="{Binding CliVersion}" />
-                <Button ToolTip.Tip="{Binding Loc[settings.proton.cliversion.recheck.tooltip]}" Command="{Binding CheckCliVersionCommand}">
+                <Button ToolTip.Tip="{Binding Loc[settings.proton.cliversion.recheck.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.proton.cliversion.recheck.tooltip]}" Command="{Binding CheckCliVersionCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
               </StackPanel>
@@ -1789,7 +1816,7 @@
                            TextWrapping="Wrap"
                            Opacity="0.8"
                            Text="{Binding CliUpdateStatus}" />
-                <Button ToolTip.Tip="{Binding Loc[settings.proton.update.check.tooltip]}"
+                <Button ToolTip.Tip="{Binding Loc[settings.proton.update.check.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.proton.update.check.tooltip]}"
                         Command="{Binding CheckForCliUpdateCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
@@ -1819,13 +1846,13 @@
                 <TextBox Width="420"
                          PlaceholderText="{Binding Loc[settings.onedrive.clientid.placeholder]}"
                          Text="{Binding OneDriveClientId, Mode=TwoWay}" />
-                <Button Classes="primary" ToolTip.Tip="{Binding SignInTooltip}" Command="{Binding AuthenticateCommand}">
+                <Button Classes="primary" ToolTip.Tip="{Binding SignInTooltip}" AutomationProperties.Name="{Binding SignInTooltip}" Command="{Binding AuthenticateCommand}">
                   <Path Classes="icon" Data="{StaticResource IconKey}" />
                 </Button>
-                <Button ToolTip.Tip="{Binding SignOutTooltip}" Command="{Binding LogoutCommand}">
+                <Button ToolTip.Tip="{Binding SignOutTooltip}" AutomationProperties.Name="{Binding SignOutTooltip}" Command="{Binding LogoutCommand}">
                   <Path Classes="icon" Data="{StaticResource IconLogout}" />
                 </Button>
-                <Button ToolTip.Tip="{Binding Loc[settings.refresh.tooltip]}" Command="{Binding RefreshCommand}">
+                <Button ToolTip.Tip="{Binding Loc[settings.refresh.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.refresh.tooltip]}" Command="{Binding RefreshCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
               </StackPanel>
@@ -1864,13 +1891,13 @@
                        PasswordChar="*"
                        Text="{Binding GoogleDriveClientSecret, Mode=TwoWay}" />
               <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button Classes="primary" ToolTip.Tip="{Binding SignInTooltip}" Command="{Binding AuthenticateCommand}">
+                <Button Classes="primary" ToolTip.Tip="{Binding SignInTooltip}" AutomationProperties.Name="{Binding SignInTooltip}" Command="{Binding AuthenticateCommand}">
                   <Path Classes="icon" Data="{StaticResource IconKey}" />
                 </Button>
-                <Button ToolTip.Tip="{Binding SignOutTooltip}" Command="{Binding LogoutCommand}">
+                <Button ToolTip.Tip="{Binding SignOutTooltip}" AutomationProperties.Name="{Binding SignOutTooltip}" Command="{Binding LogoutCommand}">
                   <Path Classes="icon" Data="{StaticResource IconLogout}" />
                 </Button>
-                <Button ToolTip.Tip="{Binding Loc[settings.refresh.tooltip]}" Command="{Binding RefreshCommand}">
+                <Button ToolTip.Tip="{Binding Loc[settings.refresh.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.refresh.tooltip]}" Command="{Binding RefreshCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
               </StackPanel>
@@ -1903,10 +1930,10 @@
                     <TextBlock Text="{Binding Loc[settings.nextcloud.connect]}" />
                   </StackPanel>
                 </Button>
-                <Button ToolTip.Tip="{Binding SignOutTooltip}" Command="{Binding LogoutCommand}" IsVisible="{Binding IsAuthenticated}">
+                <Button ToolTip.Tip="{Binding SignOutTooltip}" AutomationProperties.Name="{Binding SignOutTooltip}" Command="{Binding LogoutCommand}" IsVisible="{Binding IsAuthenticated}">
                   <Path Classes="icon" Data="{StaticResource IconLogout}" />
                 </Button>
-                <Button ToolTip.Tip="{Binding Loc[settings.refresh.tooltip]}" Command="{Binding RefreshCommand}">
+                <Button ToolTip.Tip="{Binding Loc[settings.refresh.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.refresh.tooltip]}" Command="{Binding RefreshCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
               </StackPanel>
@@ -1930,10 +1957,10 @@
                     <TextBlock Text="{Binding Loc[settings.s3.connect]}" />
                   </StackPanel>
                 </Button>
-                <Button ToolTip.Tip="{Binding SignOutTooltip}" Command="{Binding LogoutCommand}" IsVisible="{Binding IsAuthenticated}">
+                <Button ToolTip.Tip="{Binding SignOutTooltip}" AutomationProperties.Name="{Binding SignOutTooltip}" Command="{Binding LogoutCommand}" IsVisible="{Binding IsAuthenticated}">
                   <Path Classes="icon" Data="{StaticResource IconLogout}" />
                 </Button>
-                <Button ToolTip.Tip="{Binding Loc[settings.refresh.tooltip]}" Command="{Binding RefreshCommand}">
+                <Button ToolTip.Tip="{Binding Loc[settings.refresh.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.refresh.tooltip]}" Command="{Binding RefreshCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
               </StackPanel>

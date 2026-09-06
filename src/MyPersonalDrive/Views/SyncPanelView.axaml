@@ -168,22 +168,22 @@
                   </StackPanel>
 
                   <StackPanel Grid.Column="1" Grid.Row="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
-                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[sync.preview.tooltip]}" Command="{Binding PreviewCommand}">
+                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[sync.preview.tooltip]}" AutomationProperties.Name="{Binding Loc[sync.preview.tooltip]}" Command="{Binding PreviewCommand}">
                       <Path Classes="icon" Data="{StaticResource IconEye}" />
                     </Button>
-                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[sync.edit.tooltip]}" Command="{Binding EditCommand}">
+                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[sync.edit.tooltip]}" AutomationProperties.Name="{Binding Loc[sync.edit.tooltip]}" Command="{Binding EditCommand}">
                       <Path Classes="icon" Data="{StaticResource IconPencil}" />
                     </Button>
-                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[menu.syncnow]}" Command="{Binding SyncNowCommand}">
+                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[menu.syncnow]}" AutomationProperties.Name="{Binding Loc[menu.syncnow]}" Command="{Binding SyncNowCommand}">
                       <Path Classes="icon" Data="{StaticResource IconPlay}" />
                     </Button>
-                    <Button Classes="rowAction" ToolTip.Tip="{Binding PauseTooltip}" Command="{Binding TogglePauseCommand}">
+                    <Button Classes="rowAction" ToolTip.Tip="{Binding PauseTooltip}" AutomationProperties.Name="{Binding PauseTooltip}" Command="{Binding TogglePauseCommand}">
                       <Panel>
                         <Path Classes="icon" Data="{StaticResource IconPlay}" IsVisible="{Binding IsPaused}" />
                         <Path Classes="icon" Data="{StaticResource IconPause}" IsVisible="{Binding !IsPaused}" />
                       </Panel>
                     </Button>
-                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[sync.remove.tooltip]}" Command="{Binding RemoveCommand}">
+                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[sync.remove.tooltip]}" AutomationProperties.Name="{Binding Loc[sync.remove.tooltip]}" Command="{Binding RemoveCommand}">
                       <Path Classes="icon" Data="{StaticResource IconTrash}" />
                     </Button>
                   </StackPanel>

@@ -56,8 +56,8 @@
       in English and switch it, build another in Spanish, compare every string property. All six
       fixed, the gate's allowlist is empty, and two comparisons against rendered prose went with
       them — see [§7](#7-y7--six-labels-never-followed-the-language-picker).
-- [ ] **Y8 — The properties dialog's buttons sit where the layout put them, not where they belong.**
-      Cosmetic, from screenshot 8 — see [§8](#8-y8--the-properties-dialogs-buttons).
+- [x] **Y8 — Withdrawn: there was nothing wrong with it.** Read from a screenshot, and read wrong —
+      see [§8](#8-y8--the-properties-dialogs-buttons).
 - [x] **Z1–Z3 — a process-kill path, two leaked cancellation sources and a race in the CLI
       executor**, from a code review of `src/` rather than of the interface — see
       [§Z](#z-code-review--correctness-resources-and-where-the-seams-are).
@@ -303,17 +303,20 @@ against a freshly rendered one, so a language change between the two silently st
 and the version check ran (or did not) for the wrong reason. It is `CliVersionIsUnknown` now, which
 compares the key. Control flow should not depend on rendered prose.
 
-## 8. Y8 — The properties dialog's buttons
+## 8. Y8 — The properties dialog's buttons — **withdrawn**
 
-**Observed.** Screenshot 8: in the properties window, `Copiar` sits to the right of the `Ruta:` line
-rather than with the path it copies, and `OK` floats near the centre-bottom instead of at a
-consistent corner.
+**Claimed.** That `Copiar` sat away from the path it copies and `OK` floated near the centre-bottom
+"instead of at a consistent corner".
 
-**Source.** `ShowPropertiesAsync` builds the dialog imperatively, and the buttons are children of
-the same vertical stack as the fields, so they land wherever their row does.
+**Checked, and wrong.** `ShowPropertiesAsync` puts each copyable value in a `Grid` of `*,Auto` — the
+value stretches, the button sits at the row's right edge, next to the value it copies — and the `OK`
+row is a `StackPanel` with `HorizontalAlignment.Right` at the end of the stack. Measured against the
+screenshot: the dialog spans roughly 420px and both buttons are at its right edge. That is a
+consistent corner; I read a small button in a small window as floating.
 
-**Do.** Give the dialog the shape the name prompts got in X9: fields, then one right-aligned button
-row. Small, isolated, and the last of the code-built dialogs still laid out by accident.
+**Withdrawn rather than fixed.** This round's whole subject is claims that were never checked, and
+manufacturing a change to close an item I opened from a misreading would be the same mistake with
+the sign flipped. Recorded so the next reader does not re-open it: the dialog is fine.
 
 ---
 

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <!-- xUnit v3 runs each test assembly as its own process, so this one is an executable.
+         MyPersonalDrive.Tests stays on xUnit v2: Avalonia.Headless.XUnit is a v3 package, and the
+         two versions cannot share an assembly — both define Xunit.Assert and [Fact]. Keeping the
+         UI tests in their own project is what makes that a non-problem rather than a migration.
+
+         Like the other test project, this runs on the JIT test host and is not part of the AOT
+         publish pipeline. -->
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <!-- Pinned to the Avalonia the app itself uses (12.0.4). Not the newest: 12.1.2 was four days
+         old when this was written, inside the repo's seven-day rule, and a 12.1.x headless package
+         would unify the app's own Avalonia reference upwards as a side effect of adding a test. -->
+    <PackageReference Include="Avalonia.Headless.XUnit" Version="12.0.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MyPersonalDrive\MyPersonalDrive.csproj" />
+    <!-- Linked, not referenced: the fake CLI boundary is the same one the view-model tests drive,
+         and a second copy would be a second thing to keep true to the real executor — but
+         referencing that project would drag xUnit v2 in beside v3. The file itself has no test
+         framework dependency, which is what makes this work. -->
+    <Compile Include="..\MyPersonalDrive.Tests\Fakes\FakeCliExecutor.cs" Link="Fakes\FakeCliExecutor.cs" />
+  </ItemGroup>
+</Project>

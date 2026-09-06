@@ -1744,7 +1744,8 @@
                        in the middle of the card with its browse button pinned far away
                        (docs/PLAN-UX-ROUND-3.md X7 — introduced there and found on the first
                        screenshot of the round). The field fills the row, up to its own button. -->
-                  <TextBox Grid.Column="0"
+                  <TextBox x:Name="DefaultSyncFolderBox"
+                           Grid.Column="0"
                            MinWidth="200"
                            HorizontalAlignment="Stretch"
                            PlaceholderText="{Binding Loc[settings.syncfolder.placeholder]}"

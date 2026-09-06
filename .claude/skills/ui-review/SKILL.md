@@ -9,6 +9,17 @@ Unit tests prove a ViewModel exposes the right state. They prove nothing about w
 reads well. This is the pass for visual work — `smoke-test` covers whether the app *works*, this
 covers whether it *looks right*.
 
+## Measure what a number can settle
+
+Before asking for a screenshot, check whether the question is a width, an offset or a visibility —
+`tests/MyPersonalDrive.UiTests` builds the real `MainWindow` in Avalonia's headless platform and
+reads `Bounds`. It exists because two layout defects shipped past 1135 view-model tests and were
+found by a user looking at the app: a field that centred itself, and rows that hugged their own
+text. Both are one assertion long.
+
+It cannot tell you whether something *looks* right — contrast, rhythm, whether a colour reads as a
+warning. Do not fake those with a number; get the picture.
+
 ## Getting a picture
 
 **Only claim you reviewed the UI if you actually saw it.** No screenshot capture tool is

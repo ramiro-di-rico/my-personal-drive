@@ -58,6 +58,13 @@
       reason — see [§7](#7-y7--six-labels-never-followed-the-language-picker).
 - [ ] **Y8 — The properties dialog's buttons sit where the layout put them, not where they belong.**
       Cosmetic, from screenshot 8 — see [§8](#8-y8--the-properties-dialogs-buttons).
+- [x] **Z1–Z3 — a process-kill path, two leaked cancellation sources and a race in the CLI
+      executor**, from a code review of `src/` rather than of the interface — see
+      [§Z](#z-code-review--correctness-resources-and-where-the-seams-are).
+- [ ] **Z4 — seventeen bypasses of the repo's own `TimeProvider` rule**, including both OAuth
+      token-expiry checks, which are therefore untestable.
+- [ ] **Z5/Z6 — the 4415-line view model and the 1978-line code-behind**, with a staged extraction
+      order argued from their actual coupling rather than from their size.
 
 ---
 
@@ -294,6 +301,175 @@ the same vertical stack as the fields, so they land wherever their row does.
 
 **Do.** Give the dialog the shape the name prompts got in X9: fields, then one right-aligned button
 row. Small, isolated, and the last of the code-built dialogs still laid out by accident.
+
+---
+
+## Z. Code review — correctness, resources, and where the seams are
+
+Round 4's other half: a pass over `src/` looking for what breaks in production rather than what
+reads badly on screen. Findings are numbered Z so they do not compete with the UX items.
+
+The headline is that this codebase is in better shape than its size suggests. The SQLite layer is
+built on a measured finding (`SqliteOffThread`'s comment records a 30-second UI freeze and the
+`database is locked` that followed), all three stores use it consistently, both OAuth token files are
+written `0600`, the CLI executor drains stdout and stderr concurrently and kills the whole process
+tree on cancel, and the sync engine never deletes — it moves into a dated trash folder and
+disambiguates collisions. Those are the parts most likely to hurt a user, and they are careful.
+
+What follows is what the pass actually found.
+
+### Z1 — Four `async void` handlers with nowhere to put an exception *(fixed)*
+
+`MainWindow.axaml.cs` has seven `async void` event handlers. Three contained their exceptions;
+four did not: both drag-and-drop drops, and both file-picker buttons.
+
+An `async void` method has no caller to observe its task, so an exception leaving one goes to the
+runtime and ends the process — `Program.cs`'s last-resort handler writes `crash.log` and the app
+still dies. `OnCloudListingDrop` awaited an upload, which fails for a dozen ordinary reasons;
+`BrowseCliPath` awaited the desktop portal and then wrote `settings.json`.
+
+AGENTS.md lists this as a non-negotiable and `AsyncCommand` enforces it — for commands.
+Event handlers were never covered by either, which is how four of them ended up bare while the rule
+was considered satisfied.
+
+**Fixed.** All four route to `MainWindowViewModel.ReportHandlerFailure`, the same sink
+`AsyncCommand` uses. `AsyncVoidHandlersAreGuardedTests` fails on any `async void` body with no
+`catch`, verified by removing a guard.
+
+### Z2 — Two cancellation sources cancelled and dropped *(fixed)*
+
+`_cts` (one per folder navigation) and `_deepScanCts` (one per recursive scan) were cancelled and
+replaced without `Dispose`. A replaced `CancellationTokenSource` keeps its registrations and its
+timer alive until finalization. `BeginPreview`, in the same file, disposes its own correctly — so
+the pattern was known and two of three sites missed it.
+
+### Z3 — A kill callback registered before the process existed *(fixed)*
+
+`ProtonDriveCliExecutor.ExecuteInSlotAsync` registered its cancellation callback — "kill the
+process" — before calling `process.Start()`, with `process.HasExited` *outside* the callback's
+`try`. `Process.HasExited` throws `InvalidOperationException` when nothing has been started.
+
+So a token already cancelled at that instant raised that exception synchronously out of `Register`,
+where callers expect `OperationCanceledException` or `DriveException`; and a token cancelled a
+moment later raised it out of whichever thread called `Cancel()` — which is the UI thread, on every
+navigation.
+
+The window is microseconds wide and the semaphore above it (`_slots.WaitAsync(cancellationToken)`)
+closes most of it, so this is a narrow race and is described as one. It is fixed because the cost is
+two moved lines and the failure mode is an exception thrown out of `Cancel()`.
+
+### Z4 — Seventeen bypasses of the repository's own `TimeProvider` rule *(open)*
+
+AGENTS.md: "**Use `TimeProvider`**, not `DateTime.Now` — tests substitute `FakeTimeProvider`."
+
+| File | Uses | What the clock decides |
+|---|---|---|
+| `Providers/OneDrive/GraphAuthenticator.cs` | 3 | token expiry and the refresh margin |
+| `Providers/GoogleDrive/GoogleDriveAuthenticator.cs` | 3 | the same |
+| `ViewModels/Sync/SyncPairViewModel.cs` | 5 | the "Up to date (…)" timestamps |
+| `Services/Sync/SyncCrashRecovery.cs` | 2 | how stale a run has to be to recover it |
+| `Services/Sync/SyncExecutor.cs` | 1 | the trash folder's date, in the delete path |
+| `Services/Sync/LocalScanner.cs`, `CrashLog.cs`, `AppSettingsService.cs` | 1 each | |
+
+The two authenticators are the ones that matter. `ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(…)`
+and `stored.ExpiresAt - DateTimeOffset.UtcNow > RefreshMargin` mean **no test can cover the
+boundary**: a token expiring while the app is open, a refresh margin off by a minute, a clock that
+moved. Those are the failures that read to a user as "it signed me out for no reason", and they are
+the failures the rule exists to make testable. `SyncExecutor` is second: its one use is in
+`MoveToLocalTrash`, on the path that moves a user's file.
+
+**Do.** Thread the existing `TimeProvider` through the two authenticators and `SyncExecutor` first,
+then the rest, and add the gate — `DateTime.Now|UtcNow|DateTimeOffset.Now|UtcNow` outside a
+`TimeProvider` implementation is a build failure. The gate is three lines and the rule already
+exists; what is missing is the thing that checks it, which is the pattern Appendix A.4 describes.
+
+### Z5 — `MainWindowViewModel` is 4415 lines and 391 members *(open — proposal below)*
+
+Grouping its distinct members by concern:
+
+| Concern | Members | | Concern | Members |
+|---|---|---|---|---|
+| browsing / listing | 80 | | selection | 23 |
+| auth / provider | 33 | | CLI update | 19 |
+| status / telemetry | 33 | | metrics / scan | 8 |
+| settings / preferences | 28 | | sync | 5 |
+| preview / viewer | 26 | | unclassified | 89 |
+| transfer | 23 | | console / activity | 24 |
+
+The interesting number is not the total, though. It is this:
+
+```
+SetStatus(     91 uses      _provider.     70 uses
+IsLoading =    29 uses      _settings.     19 uses
+IsWarning =    27 uses
+```
+
+**The class is not hard to split because it has too many features. It is hard to split because
+reporting is a private method on it.** Anything that can fail has to call `SetStatus`, so anything
+that can fail has to live inside the class. Every attempt to extract a feature drags the status
+surface, and therefore the whole class, behind it.
+
+That makes the order obvious, and it is not "start with the biggest piece":
+
+**Step 0 — extract the status surface.** A `StatusViewModel` owning `StatusMessage`, `IsWarning`,
+`IsStatusBannerVisible`, `IsInformationalStatus`, `HasStatusAction`, `StatusActionLabel`,
+`StatusActionCommand` and `SetStatus(LocalizedText)`. Round 3's X1 already separated the two
+surfaces conceptually; this makes the separation a type. Nothing moves out of the god object yet —
+this step exists so that the next three *can*.
+
+**Step 1 — `CliUpdateViewModel`** (12 symbols). The smallest and most self-contained: it needs the
+status sink, the executor and the release feed, and shares nothing else. Y7's remaining half —
+giving `CliVersion` and `CliUpdateStatus` a `LocalizedText` each — is fifteen edits inside this
+cluster, so extracting first makes that change local instead of another edit to a 4400-line file.
+
+**Step 2 — `ActivityConsoleViewModel`** (19 symbols). Owns the log buffer, its lock, the pending-line
+batching, the filter and search, and the console's own view state. It consumes `ProviderActivity`
+events and produces text; it does not need the provider itself.
+
+**Step 3 — `FilePreviewViewModel`** (35 symbols). The three loaders, the zoom, `BeginPreview` /
+`EndPreview` and the cancellation source that is already disposed correctly there.
+
+What stays is browsing, selection and navigation — which is what a main window's view model is
+actually for, and would be roughly 1500 lines rather than 4400.
+
+**Risk, stated plainly.** This is a large refactor of the file every feature touches, on a branch
+that already carries 25 commits. It should be its own branch, one step per commit, with
+`./scripts/run-tests.sh` green at each — and it should not start until the open UX items above are
+either done or explicitly deferred, because both touch the same file and rebasing one across the
+other is where a refactor turns into a rewrite.
+
+### Z6 — `MainWindow.axaml.cs` is 1978 lines, and 17 of its methods are dialogs *(open)*
+
+| Concern | Methods |
+|---|---|
+| dialogs built by hand | 17 |
+| drag & drop | 11 |
+| pointer / gesture | 7 |
+| lifecycle / wiring | 4 |
+| console resize | 3 |
+| keyboard | 2 |
+
+`ARCHITECTURE.md` §7.5 already says it: "**dialogs built imperatively** … Fragile but the current
+pattern; if more dialogs are added, consider extracting them into their own classes." Round 3's X9
+collapsed three of them into one, which is the first payment on that debt; the remaining fourteen
+are roughly 1100 lines of the file.
+
+**Do.** `Views/Dialogs/`, one class per dialog, each taking its inputs and returning its result —
+the shape `PromptForNameAsync` already has. The code-behind keeps what genuinely needs the visual
+tree: gestures, drag-and-drop, focus, the splitter. Independent of Z5 and much smaller; a good first
+refactor for whoever picks this up.
+
+### Z7 — What was checked and found sound
+
+Recorded so the next review does not re-derive it: no `.Result`, `.Wait()` or
+`GetAwaiter().GetResult()` anywhere (no sync-over-async deadlock paths); every SQLite store uses
+`SqliteOffThread` and its bounded busy timeout; both token files are chmod 0600; the CLI executor
+drains both streams concurrently and kills the process tree; `SyncPairViewModel` subscribes to the
+shared executor's progress per run and unsubscribes in a `finally`; `LocalFileWatcher` and
+`SyncExecutor` unsubscribe what they subscribe; the scheduler marshals to the UI thread before
+touching bound collections; the CLI updater owns its `HttpClient` through an `OwningStream` and
+disposes it on the failure path; and the sync engine's delete is a move into a dated trash folder,
+never an unlink.
 
 ---
 

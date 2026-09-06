@@ -49,6 +49,16 @@ public class MainWindowRowActivationTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Answers any text preview with the same content. Activation only needs the viewer to open;
+    /// what it renders is <see cref="MainWindowTextViewerTests"/>'s subject, not this file's.
+    /// </summary>
+    private sealed class StubTextLoader : ITextFilePreviewLoader
+    {
+        public Task<TextFilePreview> LoadAsync(DriveItem item, CancellationToken cancellationToken = default)
+            => Task.FromResult(new TextFilePreview(item.Path, item.Name, "hello\n", 1, 6, IsTruncated: false, IsBinary: false, "UTF-8"));
+    }
+
     private MainWindowViewModel Build()
     {
         new AppSettingsService().Save(new AppSettings { CliPath = "/usr/bin/proton-drive", IsAuthenticated = true });
@@ -61,7 +71,8 @@ public class MainWindowRowActivationTests : IDisposable
             provider,
             new DriveCacheService(Path.Combine(_tempAppData, "cache.db")),
             new AppSettingsService(),
-            new SyncPanelViewModel(syncStore, syncExecutor, new SyncCrashRecovery(syncStore)));
+            new SyncPanelViewModel(syncStore, syncExecutor, new SyncCrashRecovery(syncStore)),
+            previewLoader: new StubTextLoader());
     }
 
     private static DriveNodeViewModel Row(MainWindowViewModel viewModel, string name)
@@ -114,8 +125,14 @@ public class MainWindowRowActivationTests : IDisposable
         Assert.Equal("/my-files/notes.txt", viewModel.SelectedPath);
     }
 
+    /// <summary>
+    /// This test used to assert that activating a file navigates nowhere, and stopped there — which
+    /// described the defect rather than the intent: double-clicking a previewable file did nothing
+    /// at all, while X2's plan and commit message both said it previewed (docs/PLAN-UX-ROUND-4.md
+    /// Y1). A test that pins a gap as if it were a decision is worse than no test.
+    /// </summary>
     [Fact]
-    public async Task ActivatingAFile_SelectsIt_AndNavigatesNowhere()
+    public async Task ActivatingAPreviewableFile_OpensTheViewer()
     {
         var viewModel = LoadAFolderAndAFile(Build());
         var before = viewModel.CurrentPath;
@@ -124,5 +141,19 @@ public class MainWindowRowActivationTests : IDisposable
 
         Assert.True(Row(viewModel, "notes.txt").IsSelected);
         Assert.Equal(before, viewModel.CurrentPath);
+        Assert.True(viewModel.IsViewerVisible);
+    }
+
+    /// <summary>A file the app cannot show still just selects — there is nothing else to do with it.</summary>
+    [Fact]
+    public async Task ActivatingAFileWithNoPreview_JustSelectsIt()
+    {
+        var viewModel = Build();
+        viewModel.DisplayItems([new DriveItem("/my-files/clip.webm", "clip.webm", IsFolder: false, Size: 10)]);
+
+        await Row(viewModel, "clip.webm").ActivateCommand.ExecuteAsync();
+
+        Assert.True(Row(viewModel, "clip.webm").IsSelected);
+        Assert.False(viewModel.IsViewerVisible);
     }
 }

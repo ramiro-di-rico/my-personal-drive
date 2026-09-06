@@ -3047,12 +3047,21 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectRow(RootItems.FirstOrDefault(node => node.Item.Path == item.Path));
         SelectItem(item);
 
-        if (!item.IsFolder)
+        if (item.IsFolder)
         {
+            await NavigateIntoAsync(item.Path);
             return;
         }
 
-        await NavigateIntoAsync(item.Path);
+        // Opening a file opens it (docs/PLAN-UX-ROUND-4.md Y1). This returned here, which was
+        // invisible while a click both selected and opened — X2 made the double click the open
+        // gesture, and then double-clicking a file did nothing at all while the plan and the commit
+        // message both said it previewed. A file with no preview still just selects: there is
+        // nothing else this app can do with it.
+        if (PreviewPolicy.CanPreview(item))
+        {
+            await PreviewItemAsync(item);
+        }
     }
 
     /// <summary>

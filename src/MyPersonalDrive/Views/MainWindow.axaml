@@ -730,7 +730,10 @@
                     <StackPanel Orientation="Horizontal" Spacing="8">
                       <Path Classes="icon" Data="{StaticResource IconFolder}" IsVisible="{Binding IsFolder}" />
                       <Path Classes="icon" Data="{StaticResource IconFile}" IsVisible="{Binding IsFile}" />
-                      <TextBlock Text="{Binding DisplayName}" />
+                      <!-- Trimmed, like the tiles and the local pane already were: without this a
+                           long name widens its own row past the others and, in a narrow window,
+                           pushes the row's actions out of the pane (docs/PLAN-UX-ROUND-4.md Y5). -->
+                      <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
                       <Path Classes="icon" Data="{StaticResource IconRefresh}" Width="12" Height="12" Opacity="0.7"
                             IsVisible="{Binding IsSyncPairActive}" ToolTip.Tip="{Binding Loc[explorer.row.syncactive.tooltip]}" />
                       <Path Classes="icon" Data="{StaticResource IconPause}" Width="12" Height="12" Opacity="0.7"

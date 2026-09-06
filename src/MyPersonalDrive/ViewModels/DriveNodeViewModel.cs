@@ -32,12 +32,7 @@ public sealed class DriveNodeViewModel : ObservableObject
         _previewItemAsync = previewItemAsync;
         _syncActions = syncActions;
         SyncPair = syncActions?.FindSyncPair?.Invoke(item);
-        // A Google-native Doc/Sheet/Slide has no extension (so TextPreviewPolicy's "no extension at
-        // all" fallback would otherwise offer to preview it as plain text) and no binary content to
-        // actually read — the P10 live-verification pass hit exactly this: the preview button showed
-        // up and failed instead of never appearing (docs/PLAN-CLOUD-PROVIDERS.md §8.4/G4).
-        CanPreview = !item.IsRemoteOnlyDocument
-            && (TextPreviewPolicy.CanPreview(item) || ImagePreviewPolicy.CanPreview(item) || PdfPreviewPolicy.CanPreview(item));
+        CanPreview = PreviewPolicy.CanPreview(item);
         ActivateCommand = new AsyncCommand(HandleRowClickAsync, onError: onError);
         SelectCommand = new AsyncCommand(SelectRowAsync, onError: onError);
         DownloadCommand = new AsyncCommand(DownloadAsync, () => CanDownload, onError);

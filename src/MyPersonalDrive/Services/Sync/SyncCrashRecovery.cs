@@ -15,7 +15,14 @@ public sealed class SyncCrashRecovery
 
     private readonly SyncStateStore _stateStore;
 
-    public SyncCrashRecovery(SyncStateStore stateStore) => _stateStore = stateStore;
+    /// <param name="timeProvider">Recovery stamps the rows it revives; tests substitute a fake clock (docs/PLAN-UX-ROUND-4.md Z4).</param>
+    public SyncCrashRecovery(SyncStateStore stateStore, TimeProvider? timeProvider = null)
+    {
+        _stateStore = stateStore;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+    }
+
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Returns how many temp directories were cleared, for logging/diagnostics. Never throws
@@ -42,14 +49,14 @@ public sealed class SyncCrashRecovery
                 await _stateStore.LogAsync(
                     pair.Id, SyncLogLevel.Info, relativePath: null,
                     $"Cleared leftover download temp folder from a previous run: {tempRoot}",
-                    DateTimeOffset.UtcNow, cancellationToken);
+                    _timeProvider.GetUtcNow(), cancellationToken);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 await _stateStore.LogAsync(
                     pair.Id, SyncLogLevel.Warning, relativePath: null,
                     $"Could not clear the leftover temp folder '{tempRoot}': {ex.Message}",
-                    DateTimeOffset.UtcNow, cancellationToken);
+                    _timeProvider.GetUtcNow(), cancellationToken);
             }
         }
 

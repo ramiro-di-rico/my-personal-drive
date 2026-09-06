@@ -61,8 +61,8 @@
 - [x] **Z1–Z3 — a process-kill path, two leaked cancellation sources and a race in the CLI
       executor**, from a code review of `src/` rather than of the interface — see
       [§Z](#z-code-review--correctness-resources-and-where-the-seams-are).
-- [ ] **Z4 — seventeen bypasses of the repo's own `TimeProvider` rule**, including both OAuth
-      token-expiry checks, which are therefore untestable.
+- [x] **Z4 — seventeen bypasses of the repo's own `TimeProvider` rule.** Fifteen fixed, including
+      both OAuth token-expiry checks; two allowlisted with reasons, behind a gate.
 - [ ] **Z5/Z6 — the 4415-line view model and the 1978-line code-behind**, with a staged extraction
       order argued from their actual coupling rather than from their size.
 
@@ -394,10 +394,18 @@ moved. Those are the failures that read to a user as "it signed me out for no re
 the failures the rule exists to make testable. `SyncExecutor` is second: its one use is in
 `MoveToLocalTrash`, on the path that moves a user's file.
 
-**Do.** Thread the existing `TimeProvider` through the two authenticators and `SyncExecutor` first,
-then the rest, and add the gate — `DateTime.Now|UtcNow|DateTimeOffset.Now|UtcNow` outside a
-`TimeProvider` implementation is a build failure. The gate is three lines and the rule already
-exists; what is missing is the thing that checks it, which is the pattern Appendix A.4 describes.
+**Done.** Fifteen of the seventeen now take a `TimeProvider`: both authenticators, `SyncExecutor`'s
+trash path, `SyncCrashRecovery`, `LocalScanner` and `SyncPairViewModel`. Each defaults to
+`TimeProvider.System`, so no call site had to change; a test can now pass `FakeTimeProvider` and sit
+on a boundary.
+
+Two are allowlisted in the gate with the reason: `CrashLog` timestamps a line in the last-resort log
+and `AppSettingsService` names the backup it takes when settings.json will not parse. Neither is a
+decision — nothing branches on the value — and both run on paths where adding plumbing buys nothing:
+one while the process is dying, the other while the config is already corrupt.
+
+`AmbientClockTests.NothingReadsTheAmbientClock` is the gate, verified by putting
+`DateTimeOffset.UtcNow` back into the OneDrive authenticator and watching it name the line.
 
 ### Z5 — `MainWindowViewModel` is 4415 lines and 391 members *(open — proposal below)*
 

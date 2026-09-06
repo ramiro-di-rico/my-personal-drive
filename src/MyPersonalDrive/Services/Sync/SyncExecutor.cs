@@ -905,7 +905,7 @@ public sealed class SyncExecutor
     /// Never permanently deletes — moves into a dated trash folder under the pair's local
     /// root, per docs/PLAN-LOCAL-SYNC.md §11's cross-cutting safety rule.
     /// </summary>
-    private static void MoveToLocalTrash(SyncPair pair, PathMapper mapper, string relativePath)
+    private void MoveToLocalTrash(SyncPair pair, PathMapper mapper, string relativePath)
     {
         var sourcePath = mapper.ToLocalAbsolute(relativePath);
         var isDirectory = Directory.Exists(sourcePath);
@@ -914,7 +914,7 @@ public sealed class SyncExecutor
             return; // already gone — nothing to do
         }
 
-        var trashRoot = Path.Combine(pair.LocalPath, ".mypersonaldrive-trash", DateTimeOffset.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        var trashRoot = Path.Combine(pair.LocalPath, ".mypersonaldrive-trash", _timeProvider.GetUtcNow().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
         var trashPath = Path.Combine(trashRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(trashPath)!);
 

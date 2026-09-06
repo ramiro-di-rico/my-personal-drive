@@ -15,6 +15,9 @@ public sealed class SyncPairViewModel : ObservableObject
 {
     private readonly SyncExecutor _executor;
     private readonly SyncStateStore _stateStore;
+
+    /// <summary>Stamps retries and status updates; tests substitute a fake clock (docs/PLAN-UX-ROUND-4.md Z4).</summary>
+    private readonly TimeProvider _timeProvider;
     private readonly Action<SyncPairViewModel> _onRemoved;
     private SyncPair _pair;
     private LocalizedText _status = LocalizedText.None;
@@ -28,8 +31,9 @@ public sealed class SyncPairViewModel : ObservableObject
     /// single-account case, where the panel shows only one account and a label would be noise.
     /// Set once at construction: a pair's account never changes without recreating the row.
     /// </param>
-    public SyncPairViewModel(SyncPair pair, SyncExecutor executor, SyncStateStore stateStore, Action<SyncPairViewModel> onRemoved, string accountLabel = "")
+    public SyncPairViewModel(SyncPair pair, SyncExecutor executor, SyncStateStore stateStore, Action<SyncPairViewModel> onRemoved, string accountLabel = "", TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _pair = pair;
         _executor = executor;
         _stateStore = stateStore;
@@ -284,7 +288,7 @@ public sealed class SyncPairViewModel : ObservableObject
         _executor.Progress += OnProgress;
         try
         {
-            await _stateStore.RetryFailedAsync(_pair.Id, DateTimeOffset.UtcNow);
+            await _stateStore.RetryFailedAsync(_pair.Id, _timeProvider.GetUtcNow());
             await _executor.RunAsync(_pair);
             _pair = await _stateStore.GetPairAsync(_pair.Id) ?? _pair;
         }
@@ -366,10 +370,10 @@ public sealed class SyncPairViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            var revived = await _stateStore.RetryFailedAsync(_pair.Id, DateTimeOffset.UtcNow);
+            var revived = await _stateStore.RetryFailedAsync(_pair.Id, _timeProvider.GetUtcNow());
             if (_pair.LastStatus is SyncPairStatus.PartialFailure or SyncPairStatus.Error)
             {
-                await _stateStore.UpdatePairStatusAsync(_pair.Id, _pair.LastSyncAt ?? DateTimeOffset.UtcNow, SyncPairStatus.Ok, null);
+                await _stateStore.UpdatePairStatusAsync(_pair.Id, _pair.LastSyncAt ?? _timeProvider.GetUtcNow(), SyncPairStatus.Ok, null);
                 _pair = await _stateStore.GetPairAsync(_pair.Id) ?? _pair;
             }
 
@@ -419,14 +423,14 @@ public sealed class SyncPairViewModel : ObservableObject
             var toRetry = decisions.Where(d => d.Value == SyncFailureDecision.Retry).Select(d => d.Key).ToList();
             var toDiscard = decisions.Where(d => d.Value == SyncFailureDecision.Discard).Select(d => d.Key).ToList();
 
-            var retried = await _stateStore.RetryFailedAsync(_pair.Id, toRetry, DateTimeOffset.UtcNow);
+            var retried = await _stateStore.RetryFailedAsync(_pair.Id, toRetry, _timeProvider.GetUtcNow());
             var discarded = await _stateStore.DiscardFailedAsync(_pair.Id, toDiscard);
 
             // Only clear the pair's error banner once nothing failed is left behind; a partial
             // decision must not make the row claim it is healthy.
             if (retried + discarded == failures.Count && _pair.LastStatus is SyncPairStatus.PartialFailure or SyncPairStatus.Error)
             {
-                await _stateStore.UpdatePairStatusAsync(_pair.Id, _pair.LastSyncAt ?? DateTimeOffset.UtcNow, SyncPairStatus.Ok, null);
+                await _stateStore.UpdatePairStatusAsync(_pair.Id, _pair.LastSyncAt ?? _timeProvider.GetUtcNow(), SyncPairStatus.Ok, null);
                 _pair = await _stateStore.GetPairAsync(_pair.Id) ?? _pair;
             }
 

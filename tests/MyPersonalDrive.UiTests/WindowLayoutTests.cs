@@ -51,6 +51,13 @@ public class WindowLayoutTests : IDisposable
 
     public void Dispose()
     {
+        // Closed, or its fire-and-forget refreshes keep posting to the shared dispatcher and run
+        // inside the *next* test's pump — which empties that test's listing and reads as a keyboard
+        // that does not work. Every one of these tests passes alone; four of them failed together
+        // until this line existed.
+        _shown?.Close();
+        _shown = null;
+
         Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", _originalAppData);
         SqliteConnection.ClearAllPools();
         try
@@ -63,6 +70,9 @@ public class WindowLayoutTests : IDisposable
         }
     }
 
+    /// <summary>The fake CLI behind the window built by <see cref="Show"/>, for seeding a listing.</summary>
+    protected FakeCliExecutor Executor { get; private set; } = new();
+
     private MainWindowViewModel BuildViewModel()
     {
         new AppSettingsService().Save(new AppSettings
@@ -71,7 +81,8 @@ public class WindowLayoutTests : IDisposable
             IsAuthenticated = true,
         });
 
-        var provider = new ProtonDriveProvider(new ProtonDriveService(new FakeCliExecutor()));
+        Executor = new FakeCliExecutor();
+        var provider = new ProtonDriveProvider(new ProtonDriveService(Executor));
         var syncStore = new SyncStateStore(_dbPath);
         var syncExecutor = new SyncExecutor(provider.Operations, syncStore, new LocalScanner(), new RemoteScanner(provider));
 
@@ -88,7 +99,9 @@ public class WindowLayoutTests : IDisposable
     /// the fake CLI and leave the listing at whatever that returned, and these tests want to place
     /// their own rows.
     /// </summary>
-    private (MainWindow Window, MainWindowViewModel ViewModel) Show()
+    private MainWindow? _shown;
+
+    protected (MainWindow Window, MainWindowViewModel ViewModel) Show()
     {
         var viewModel = BuildViewModel();
         var window = new MainWindow
@@ -100,10 +113,11 @@ public class WindowLayoutTests : IDisposable
 
         window.Show();
         Layout(window);
+        _shown = window;
         return (window, viewModel);
     }
 
-    private static void Layout(Window window)
+    protected static void Layout(Window window)
     {
         window.Measure(new Avalonia.Size(WindowWidth, WindowHeight));
         window.Arrange(new Avalonia.Rect(0, 0, WindowWidth, WindowHeight));

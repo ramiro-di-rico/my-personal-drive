@@ -40,10 +40,11 @@
       so a refusal the user cannot act on ("not moving X over the existing file") gets a Retry
       button. U1's own plan said the action appears "when `IsWarning` is set by a failure that has a
       known remedy" — see [§3](#3-y3--the-recovery-button-is-offered-for-every-warning).
-- [ ] **Y4 — The keyboard map is still unverified end to end.** X5 shipped nine gestures and the
-      commit says they were verified by build and launch, which is not verification. The headless
-      harness cannot drive them either: `Focus()` returns false with no activated window —
-      see [§4](#4-y4--the-keyboard-map-is-still-unverified-end-to-end).
+- [x] **Y4 — The keyboard map is verified now, and one of X5's claims was wrong.** Eight gestures
+      are pressed against the real window in the headless harness: Ctrl+A in list *and* icons mode,
+      F2 with one row and with several, Delete, Escape, Ctrl+F, Ctrl+Shift+N. Delete on a lone file
+      trashes it **without asking**, which X5's commit message said it did not. Shift+F10 remains
+      untested and is the one gap — see [§4](#4-y4--the-keyboard-map-is-still-unverified-end-to-end).
 - [x] **Y5 — A long name widened its own row.** The list-mode name column had no `TextTrimming`,
       unlike the tiles and the local pane. Visible in the screenshots as the `Lumo_generated_…` rows
       reaching further right than every other file — see [§5](#5-y5--a-long-name-widened-its-own-row).
@@ -209,19 +210,31 @@ way a layout pass leaves them. So the probe could not distinguish "the app is br
 harness cannot drive this", and was discarded rather than committed — a probe that cannot fail
 honestly is worse than none.
 
-**Do.**
-1. Ask for the four gestures that would settle most of it: open the app and press `↓` without
-   clicking first (focus-on-open), `F2` on a selected row, `Delete` on a selected folder,
-   `Ctrl+F`.
-2. If they work, the remaining risk is small. If `↓` does nothing, `ListModeListing.Focus()` fails
-   in the real app too and the whole X5 story starts one click later than it says.
-3. Two claims in X5's commit message need correcting either way:
-   - "Delete inherits the confirmation prompt" is true for folders and multi-selections and **false
-     for a single file**, which trashes on one keystroke with no prompt. Trash is recoverable, so
-     this may be the right behaviour — but it is not what the message says.
-   - "reachable via the context menu, which is `Shift+F10`" was never checked in Avalonia. If that
-     gesture is not wired, taking the row actions out of the tab order left them mouse-only, which
-     is the opposite of what X5 set out to do.
+**Done.** `KeyboardTests` drives the map against the real window: Ctrl+A in list mode and in icons
+mode (the half X2 could not have and X5 moved to the window in order to reach), F2 with one row
+selected and with several, Delete, Escape, Ctrl+F and Ctrl+Shift+N. All eight behave as X5 said.
+
+**And one claim did not survive.** X5's commit message said Delete "inherits the confirmation prompt
+instead of deleting on a keypress". It asks when the selection contains a folder or several items,
+and **trashes a lone file with no prompt at all**. That is now asserted explicitly, as the behaviour
+it is rather than the behaviour that was written down. Trash is recoverable, so this is arguably
+right — but it was documented as something it never did.
+
+**Still not verified: `Shift+F10`.** X5 took the row's action buttons out of the tab order on the
+grounds that the context menu is reachable that way. The check was written and then removed: after
+switching view modes the harness cannot find a materialized row to send the gesture to, so it
+reported "row not found" rather than an answer. If that gesture is not wired in Avalonia, the row
+actions are mouse-only, which is the opposite of what X5 set out to do — worth one manual press.
+
+**What getting here cost, because it is the useful part.** The first version of these tests
+concluded the keyboard was broken. It was not. Three separate harness faults produced that: the
+window's own `InitializeAsync` emptied the listing between the rows being placed and the key being
+pressed; the fake CLI throws on an unmatched call, and that exception reaches the view model as a
+failed load which empties the listing again; and each test's window keeps posting fire-and-forget
+refreshes to the shared dispatcher, so the next test's pump runs them. Closing the window and
+disabling parallelism both failed to stop the third. One window driving the whole map, with the
+failures collected rather than thrown at the first, is what works — and the reasoning is in the
+test file so the next person does not rediscover it.
 
 ## 5. Y5 — A long name widened its own row
 

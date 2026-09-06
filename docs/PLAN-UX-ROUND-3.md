@@ -13,45 +13,77 @@
 > [PLAN-TECH-DEBT.md](PLAN-TECH-DEBT.md), and the
 > [`a11y-theming`](../.claude/skills/a11y-theming/SKILL.md) skill, which X4 and X6 exist to satisfy.
 >
-> Implementation branch: not started.
+> Implementation branch: `feature/ux-round-3`, branched from `main` at `bc84166`.
 
 ## Status
 
-> **Nothing in this document is implemented.** It is the review itself: ten items, each traced to a
-> file and line, written after reading `Views/MainWindow.axaml` (1855 lines),
-> `Views/MainWindow.axaml.cs` (1757), `Views/SyncPanelView.axaml`, the explorer/sync view models and
-> the three locale files, with the app running.
+> **All ten items implemented on branch `feature/ux-round-3`, 2026-09-06**, from `main` at
+> `bc84166`. 1130 tests passing, from 1104 — plus three new gates. Every phase's XAML was compiled
+> with `--no-incremental`, which the i18n round established as the only way to actually re-run the
+> Avalonia XAML compiler.
 >
-> **Not visually verified.** Screen capture does not work in this environment and this round did not
-> get around it: the session is Wayland with no `grim`/`scrot`/`xwd`/ImageMagick, `ffmpeg -f x11grab`
-> against the XWayland window returned a fully black frame, and PIL's X11 grab failed outright
-> (`X get_image failed: error 8`). Every item below is therefore derived from markup and code, not
-> from a rendering. Items marked **needs a picture** are the ones a screenshot could still overturn —
-> see [Appendix B](#appendix-b--what-a-screenshot-would-settle).
+> **Still not visually verified.** Screen capture does not work in this environment and this round
+> did not get around it: the session is Wayland with no `grim`/`scrot`/`xwd`/ImageMagick,
+> `ffmpeg -f x11grab` against the XWayland window returned a fully black frame, and PIL's X11 grab
+> failed outright (`X get_image failed: error 8`). The app was launched against the real CLI and
+> did not crash, and the view-model half of every item is pinned by tests — but no layout below has
+> been looked at. The five screenshots in [Appendix B](#appendix-b--what-a-screenshot-would-settle)
+> are still the ones that would close it, and X7 in particular is the item most likely to change
+> after one.
+>
+> **Order taken, and why it differs from the plan's.** X6 ran first rather than fourth: X1 adds a
+> warning banner, and writing it against colour literals that X6 would replace two commits later
+> made no sense. Everything after that followed the documented order.
 
-- [ ] **X1 — The error surface lives inside an optional, explorer-only panel.** `StatusMessage`,
-      `IsWarning` and round 2's U1 recovery button render only inside the status card, which is
-      hidden when `ShowStatusPanel` is off and is not part of the Settings or Sync views at all —
-      see [§1](#1-x1--the-error-surface-lives-inside-an-optional-explorer-only-panel).
-- [ ] **X2 — Icons and Gallery are second-class view modes.** Selection, multi-select, drag-and-drop
-      and `Ctrl+A` are wired to the list-mode `ListBox` only, so switching view mode silently drops
-      capability — see [§2](#2-x2--icons-and-gallery-are-second-class-view-modes).
-- [ ] **X3 — No empty state and no "nothing matched" state.** An empty folder renders as a blank
-      pane — see [§3](#3-x3--no-empty-state-and-no-nothing-matched-state).
-- [ ] **X4 — Icon-only buttons have no accessible name.** 72 icon paths, zero `AutomationProperties`
-      in the repository — see [§4](#4-x4--icon-only-buttons-have-no-accessible-name).
-- [ ] **X5 — The keyboard reaches almost nothing.** Two window gestures, one list gesture, and no
-      `Focus()` call anywhere in the app — see [§5](#5-x5--the-keyboard-reaches-almost-nothing).
-- [ ] **X6 — Seventeen hard-coded colours, including a light-yellow warning card in dark mode** —
-      see [§6](#6-x6--seventeen-hard-coded-colours).
-- [ ] **X7 — Fixed widths, no window minimum, and a console that still cannot be resized** — see
-      [§7](#7-x7--fixed-widths-no-window-minimum-and-a-console-that-still-cannot-be-resized).
-- [ ] **X8 — One Spanish literal survived the i18n sweep, and the gate cannot see it.**
-      `Label="Este equipo (local)"` — see [§8](#8-x8--one-spanish-literal-survived-the-i18n-sweep).
-- [ ] **X9 — The code-built prompts are fixed-height, unfocused and unvalidated** — see
-      [§9](#9-x9--the-code-built-prompts-are-fixed-height-unfocused-and-unvalidated).
-- [ ] **X10 — The five provider cards offer the same action in three different shapes** — see
-      [§10](#10-x10--the-five-provider-cards-offer-the-same-action-in-three-different-shapes).
+- [x] **X1 — The error surface lives inside an optional, explorer-only panel.** Split by kind:
+      `IsStatusBannerVisible` drives a window-level alert strip in its own grid row above all three
+      views, `IsInformationalStatus` keeps the panel's card for progress. A dismissal answers one
+      message — the next `SetStatus` clears it. Settings and Sync have an error surface for the
+      first time. See [§1](#1-x1--the-error-surface-lives-inside-an-optional-explorer-only-panel).
+- [x] **X2 — Icons and Gallery are second-class view modes.** Resolved by option (a), decided
+      with the user: click selects, double click opens, everywhere. `RowCommand` became
+      `SelectCommand` + `ActivateCommand` on both panes' node view models; the pointer handlers stop
+      resolving rows by `ListBoxItem` and walk up to whatever is bound to a node, so the same three
+      handlers serve list rows and tiles. Both tile scrollers accept drops. `Ctrl+A` landed with X5.
+      See [§2](#2-x2--icons-and-gallery-are-second-class-view-modes).
+- [x] **X3 — No empty state and no "nothing matched" state.** `IsListingEmpty` /
+      `IsListingFilteredToNothing` in both panes, three distinct messages, and a "clear search and
+      filters" button on the two situations that have a remedy. Gated on `_hasRenderedListing` so it
+      cannot flash before the first paint. See [§3](#3-x3--no-empty-state-and-no-nothing-matched-state).
+- [x] **X4 — Icon-only buttons have no accessible name.** 47 buttons plus eight indicators and
+      unlabelled fields, each bound to the same `Loc` key as its tooltip. `IconOnlyControlsAreNamedTests`
+      parses the markup (buttons nest here) and fails on any icon-only button without a name.
+      See [§4](#4-x4--icon-only-buttons-have-no-accessible-name).
+- [x] **X5 — The keyboard reaches almost nothing.** One window-level bubble-phase `KeyDown`:
+      `F5`, `F2`, `Delete`, `Backspace`/`Alt+←`, `Ctrl+F`, `Ctrl+Shift+N`, `Escape`, and `Ctrl+A`
+      for all three modes. The listing takes focus on open; row actions left the tab order, and the
+      five actions that were inline-only joined the list-mode context menu.
+      See [§5](#5-x5--the-keyboard-reaches-almost-nothing).
+- [x] **X6 — Seventeen hard-coded colours.** Eight brushes in both `ThemeDictionaries`, values
+      measured rather than picked: every one clears 4.5:1 on its own card background except the
+      syncing dot at 4.2, which is an 8px UI element. `NoHardcodedColorsTests` and
+      `EveryBrushIsDefinedInBothThemeDictionaries` keep them there.
+      See [§6](#6-x6--seventeen-hard-coded-colours).
+- [x] **X7 — Fixed widths, no window minimum, and a console that still cannot be resized.**
+      `MinWidth` 960 / `MinHeight` 600 (estimated, not measured — see the status note above), the
+      sort row and the provider tabs wrap, the settings fields shrink between 200 and 420, and the
+      console body has a drag handle with a persisted, clamped height, which closes round 1's
+      Task 4. `BarMaxWidth` deliberately untouched: the status panel stayed fixed-width.
+      See [§7](#7-x7--fixed-widths-no-window-minimum-and-a-console-that-still-cannot-be-resized).
+- [x] **X8 — One Spanish literal survived the i18n sweep.** Two, in the end: the breadcrumb
+      `Label` and `LocalExplorerViewModel.SearchResultText`, which built "{n} resultados" by hand and
+      slipped past the source gate for having no accent. The markup gate now derives its property
+      list from the repository's own `StyledProperty<string>` declarations.
+      See [§8](#8-x8--one-spanish-literal-survived-the-i18n-sweep).
+- [x] **X9 — The code-built prompts are fixed-height, unfocused and unvalidated.** The three
+      collapsed into one `PromptForNameAsync`: sizes to content, wraps, focuses and selects up to the
+      last dot, and keeps confirm disabled until the name is non-empty, separator-free and changed.
+      See [§9](#9-x9--the-code-built-prompts-are-fixed-height-unfocused-and-unvalidated).
+- [x] **X10 — The five provider cards offer the same action in three different shapes.** One
+      row on every card: labelled Connect (accented only while signed out), icon-only sign-out and
+      refresh, both keeping their tooltips when disabled. The duplicate `Content` assignment is gone
+      and the two per-provider connect keys with it.
+      See [§10](#10-x10--the-five-provider-cards-offer-the-same-action-in-three-different-shapes).
 
 ---
 

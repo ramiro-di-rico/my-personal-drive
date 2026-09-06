@@ -1,7 +1,7 @@
 # MyPersonalDrive — Technical Reference
 
 > Reference document describing the current state of the application (branch
-> `feature/i18n`, commit `7c1f6d3`).
+> `feature/ux-round-3`, commit `1730fd9`).
 > Meant to give full context to any future chat/session without having to re-read all the code.
 
 ---
@@ -581,14 +581,50 @@ Fragile against CLI version changes.
 
 ### 7.5 View
 
-[`MainWindow.axaml`](../src/MyPersonalDrive/Views/MainWindow.axaml): a 5-row `Grid` —
-header, CLI-path bar + action buttons (📂 🔑 🚪 🔄), breadcrumbs + ⬅️ 📁 📤, the listing
-`TreeView` + detail panel, and the collapsible CLI console.
+[`MainWindow.axaml`](../src/MyPersonalDrive/Views/MainWindow.axaml): a 4-row `Grid` — header,
+view tabs (Explorer / Viewer / Sync), the **alert strip**, and the active view. The three views
+are `IsVisible`-toggled siblings of that last row, not routed.
+
+The explorer view splits into the remote pane, a `GridSplitter`, the local pane and the optional
+status panel. The listing renders in one of three modes over the same `RootItems`: a `ListBox`
+(list) and two `ItemsRepeater`s (icons, gallery).
+
+Two `UserControl`s exist: [`BreadcrumbBar`](../src/MyPersonalDrive/Views/BreadcrumbBar.axaml) and
+[`SyncPanelView`](../src/MyPersonalDrive/Views/SyncPanelView.axaml).
 
 [`MainWindow.axaml.cs`](../src/MyPersonalDrive/Views/MainWindow.axaml.cs): pickers via
-`StorageProvider` and **dialogs built imperatively** (`new Window { Content = new StackPanel {…} }`),
-with buttons reached by `Children` index (`(StackPanel)panel.Children[2]`). Fragile but the
-current pattern; if more dialogs are added, consider extracting them into their own classes.
+`StorageProvider`, the pointer and keyboard plumbing described in §7.7, and **dialogs built
+imperatively** (`new Window { Content = new StackPanel {…} }`). The three name prompts (rename,
+new folder, copy) collapsed into one `PromptForNameAsync`; the rest still reach their buttons by
+`Children` index (`(StackPanel)panel.Children[2]`), which is fragile and stays the current
+pattern — if more dialogs are added, extract them into their own classes.
+
+---
+
+### 7.7 Interaction, keyboard and theming
+
+The rules a new control has to follow (docs/PLAN-UX-ROUND-3.md, and the
+[`a11y-theming`](../.claude/skills/a11y-theming/SKILL.md) skill):
+
+- **Click selects, double click opens** — in both panes and all three view modes. Node view models
+  expose `SelectCommand` and `ActivateCommand`; a container binds the first to a click and the
+  second to `DoubleTapped`. `Ctrl`/`Shift+Click` and drag are resolved by walking up from the hit
+  element to whatever is bound to a node, so they work regardless of container type.
+- **Keyboard**: `Ctrl+,` settings, `Ctrl+~` console, `F5` refresh, `F2` rename, `Delete` trash,
+  `Backspace`/`Alt+←` up, `Ctrl+F` search, `Ctrl+A` select all, `Escape` closes the viewer,
+  `Enter`/`Space` opens the focused row. All of it is one window-level bubble-phase `KeyDown`
+  handler, so an editing `TextBox` keeps the keys it needs by marking them handled first. Which
+  pane a keystroke means is decided by focus, defaulting to the remote pane.
+- **Every icon-only control carries `AutomationProperties.Name`**, bound to the same value as its
+  tooltip. Gated by `IconOnlyControlsAreNamedTests`.
+- **No colour literals in a view.** The palette — including the eight `Status*`/`WarningCard*`
+  brushes — lives in `App.axaml`'s two `ThemeDictionaries` and is consumed with `DynamicResource`.
+  Gated by `NoHardcodedColorsTests`, which also pins that both dictionaries define the same keys.
+- **A warning goes to the alert strip, progress to the status panel.** `IsStatusBannerVisible` and
+  `IsInformationalStatus` split them; the strip belongs to the window, so no preference and no
+  active view can hide a failure.
+- **Every listing has an empty state** (`IsListingEmpty`, `IsListingFilteredToNothing`), which
+  distinguishes an empty folder from a filter that hid everything.
 
 ---
 

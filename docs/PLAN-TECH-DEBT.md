@@ -33,6 +33,8 @@
 - [ ] **B4 (persistence/state), B5 (async lifecycle), B6 (observability)** — not started.
 - [ ] **B6.3** — the sync preview/conflict dialogs name Proton Drive whichever provider is
       syncing. Found during [PLAN-I18N.md](PLAN-I18N.md) L4; see §8.
+- [ ] **B6.5** — provider exception messages are still Spanish, and surface inside an
+      English interface. Found finishing [PLAN-I18N.md](PLAN-I18N.md); see §8.
 - [x] **B6.4** — folded into `ByteSize.Format` during [PLAN-I18N.md](PLAN-I18N.md) L8, which
       also moved `ByteSize` from invariant to the interface language's culture.
 
@@ -535,6 +537,35 @@ is going over every formatting site anyway.
 follow the interface language rather than the machine's ambient culture. The thresholds differ
 slightly from the deleted formatter's (binary steps throughout, and a GB step it lacked), so the
 same file can render a different string than before — the intended before/after.
+
+### B6.5 — Provider exception messages stay Spanish in an English interface
+
+**Where:** 56 literals across 14 files — `Providers/OneDrive/*`, `Providers/GoogleDrive/*`,
+`Providers/Proton/*`, `Providers/Generic/GenericCloudDriveProvider`, the three preview services,
+and four `SyncExecutor` guard clauses. Every one is the `message` of a thrown exception; a scan
+confirms none is anything else.
+
+**What goes wrong:** the interface defaults to English ([PLAN-I18N.md](PLAN-I18N.md)), and these
+reach the user as the detail half of a localized frame — "Could not load /my-files/Docs: **No hay
+una sesión de OneDrive guardada.**". An English-speaking user gets a Spanish sentence at exactly
+the moment they most need to read one, and a future third language gets Spanish too.
+
+**Why it wasn't fixed in L7:** these are exception messages, and localizing them properly means
+giving `DriveException` an optional key plus arguments, then threading it through every `throw` and
+every classifier. That is a change to the exception contract every provider implements, not a
+string sweep — and L7 deliberately drew the line at "a service must not word an exception"
+(PLAN-I18N.md §9.1). Half of them also quote a provider or CLI response, which must stay verbatim
+either way.
+
+**Shape of the fix**, when it is worth doing: add `LocalizedText? Detail` to `DriveException`
+alongside `Message`; have each provider populate it for *its own* sentences (the ones that are not
+quoting the remote); leave `Message` as the English/raw fallback for the console and crash log; and
+have `MainWindowViewModel.FormatDriveError` prefer `Detail` when present. `DriveErrorPresenter`'s
+kind→key table already exists and covers the generic cases, so a cheaper partial fix is to lead
+with the kind's sentence and demote the raw message to a "details" line.
+
+**What it blocks:** nothing functional. It should be settled before a third language ships, or that
+translator will be asked to leave a quarter of what the user reads untranslated.
 
 ---
 

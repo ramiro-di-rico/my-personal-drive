@@ -7,8 +7,16 @@ public sealed record ProviderDescriptor(
     string? AccountIdentity = null,
     bool IsAuthenticated = false)
 {
+    /// <summary>
+    /// What the header dropdown shows under the provider's name. Reaches the string table directly
+    /// rather than going through a view model: this record *is* what the picker binds to, and
+    /// wrapping it in one more view model to localize two words would be worse. It is presentation,
+    /// not the error text §9 of docs/PLAN-I18N.md keeps untranslated.
+    /// </summary>
     public string AccountSummary => string.IsNullOrWhiteSpace(AccountIdentity)
-        ? (IsAuthenticated ? "Con sesión iniciada" : "Sin sesión iniciada")
+        ? Localization.Localizer.Instance.T(IsAuthenticated
+            ? Localization.StringKeys.Provider.SignedIn
+            : Localization.StringKeys.Provider.SignedOut)
         : AccountIdentity;
 
     // Identity is Id alone, not the record's default all-property comparison. MainWindowViewModel's

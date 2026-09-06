@@ -135,7 +135,7 @@ public class MainWindowDeepMetricsTests : IDisposable
         Assert.True(viewModel.Metrics.IsDeep);
         Assert.False(viewModel.Metrics.IsPartial);
         Assert.Equal("3.0 KB", viewModel.Metrics.TotalSizeText);
-        Assert.Contains("Recursivo", viewModel.Metrics.DepthNote);
+        Assert.Contains("Recursive", viewModel.Metrics.DepthNote);
 
         var stored = await store.GetAsync("/my-files");
         Assert.NotNull(stored);
@@ -157,7 +157,7 @@ public class MainWindowDeepMetricsTests : IDisposable
         await viewModel.ScanFolderDeeplyCommand.ExecuteAsync();
 
         Assert.True(viewModel.Metrics.IsPartial);
-        Assert.Contains("Parcial", viewModel.Metrics.DepthNote);
+        Assert.Contains("Partial", viewModel.Metrics.DepthNote);
         Assert.Null(await store.GetAsync("/my-files"));
     }
 

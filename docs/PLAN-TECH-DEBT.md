@@ -31,6 +31,13 @@
       `scripts/run-tests.sh`. Not yet covered: `DriveCacheService`, `PathMapper`-equivalent
       (doesn't exist until sync work starts).
 - [ ] **B4 (persistence/state), B5 (async lifecycle), B6 (observability)** — not started.
+- [ ] **B6.3** — the sync preview/conflict dialogs name Proton Drive whichever provider is
+      syncing. Found during [PLAN-I18N.md](PLAN-I18N.md) L4; see §8.
+- [x] **B6.5** — done. `ILocalizedError` lets an exception carry an English `Message` for the
+      console and crash log *and* a translatable `Detail` for the screen; every one of the 62
+      Spanish literals left in `Services/` is gone. See §8.
+- [x] **B6.4** — folded into `ByteSize.Format` during [PLAN-I18N.md](PLAN-I18N.md) L8, which
+      also moved `ByteSize` from invariant to the interface language's culture.
 
 ---
 
@@ -488,6 +495,92 @@ path for no reason.
   `StringBuilder` and rebuild on a 100 ms timer.
 - Move `RaiseCommandStates()` out of the per-line path — only `DownloadActivityCommand` and
   `ClearActivityCommand` depend on the line count, and only on the empty/non-empty transition.
+
+### B6.3 — The sync dialogs name Proton Drive regardless of which provider is syncing
+
+**Where:** `src/MyPersonalDrive/Views/MainWindow.axaml.cs` — `ShowPreviewAsync`,
+`ShowConflictsAsync` and `DescribeReason`; the strings now live in
+`Services/Localization/Locales/*.json` under `dialog.preview.*` and `dialog.conflicts.*`.
+
+**What goes wrong:** the sync preview says "to Proton's trash" and "moved on Proton Drive to
+follow this machine", the conflict picker offers "Keep the Proton Drive version", and every
+`DescribeReason` sentence names Proton. Sync a OneDrive or Google Drive pair and the dialogs
+still say Proton Drive — the user is told the wrong service is about to trash their files. This
+predates the localization work (PLAN-CLOUD-PROVIDERS.md P7 made the app multi-provider without
+revisiting these sentences); the sweep in [PLAN-I18N.md](PLAN-I18N.md) L4 preserved the wording
+verbatim rather than silently changing behaviour.
+
+**Why it wasn't fixed here:** the fix is to plumb the pair's provider display name into
+`ShowPreviewAsync`/`ShowConflictsAsync`/`DescribeReason` and make it a `{0}` in each string — a
+signature change through the sync dialog call chain, which would have buried a mechanical string
+sweep in a behavioural change. Cheap to do on its own, and cheaper now that each sentence is a
+single key with a placeholder convention already in use.
+
+**What it blocks:** nothing, but it should land before any further translation of those strings,
+so a translator is not asked to translate the same sentence twice.
+
+### B6.4 — `MainWindow.axaml.cs.FormatBytes` duplicates `Services/ByteSize`
+
+**Where:** `src/MyPersonalDrive/Views/MainWindow.axaml.cs`, private static `FormatBytes`.
+
+**What goes wrong:** a second byte formatter with its own thresholds and its own `:F1` format,
+used only by the sync preview summary. It disagrees with `ByteSize.Format` — which the rest of
+the interface uses — so the same size can render two ways in two places. It also formats through
+the ambient culture with no explicit provider, which is exactly the hazard
+[PLAN-I18N.md §10](PLAN-I18N.md#10-l8--culture-aware-formatting-and-the-invariant-culture-audit)
+is about now that the interface language moves `CurrentCulture`.
+
+**Why it wasn't fixed here:** folding it into `ByteSize.Format` changes the text the preview
+dialog shows, which is a visible change and wants its own before/after. It belongs with L8, which
+is going over every formatting site anyway.
+
+**Done** in L8. The preview dialog's sizes now come from `ByteSize.Format`, which also means they
+follow the interface language rather than the machine's ambient culture. The thresholds differ
+slightly from the deleted formatter's (binary steps throughout, and a GB step it lacked), so the
+same file can render a different string than before — the intended before/after.
+
+### B6.5 — Provider exception messages stay Spanish in an English interface
+
+**Where:** 56 literals across 14 files — `Providers/OneDrive/*`, `Providers/GoogleDrive/*`,
+`Providers/Proton/*`, `Providers/Generic/GenericCloudDriveProvider`, the three preview services,
+and four `SyncExecutor` guard clauses. Every one is the `message` of a thrown exception; a scan
+confirms none is anything else.
+
+**What goes wrong:** the interface defaults to English ([PLAN-I18N.md](PLAN-I18N.md)), and these
+reach the user as the detail half of a localized frame — "Could not load /my-files/Docs: **No hay
+una sesión de OneDrive guardada.**". An English-speaking user gets a Spanish sentence at exactly
+the moment they most need to read one, and a future third language gets Spanish too.
+
+**Why it wasn't fixed in L7:** these are exception messages, and localizing them properly means
+giving `DriveException` an optional key plus arguments, then threading it through every `throw` and
+every classifier. That is a change to the exception contract every provider implements, not a
+string sweep — and L7 deliberately drew the line at "a service must not word an exception"
+(PLAN-I18N.md §9.1). Half of them also quote a provider or CLI response, which must stay verbatim
+either way.
+
+**Shape of the fix**, when it is worth doing: add `LocalizedText? Detail` to `DriveException`
+alongside `Message`; have each provider populate it for *its own* sentences (the ones that are not
+quoting the remote); leave `Message` as the English/raw fallback for the console and crash log; and
+have `MainWindowViewModel.FormatDriveError` prefer `Detail` when present. `DriveErrorPresenter`'s
+kind→key table already exists and covers the generic cases, so a cheaper partial fix is to lead
+with the kind's sentence and demote the raw message to a "details" line.
+
+**What it blocks:** nothing functional. It should be settled before a third language ships, or that
+translator will be asked to leave a quarter of what the user reads untranslated.
+
+**Done.** The fix took the shape sketched above, generalised one step: rather than a field on
+`DriveException` alone, an `ILocalizedError` interface that `DriveException`, `CliUpdateException`
+and three thin wrapper types (`LocalizedIOException`, `LocalizedFileNotFoundException`,
+`LocalizedInvalidOperationException`) implement. Subclassing rather than introducing a new
+hierarchy is what keeps every existing `catch (IOException)` working.
+
+`Exception.Message` is now English at all 62 sites — which is a *gain* for the console and the
+crash log, since those were Spanish before and are meant to be stable and greppable. The
+`Detail` is what the interface shows, through `exception.DescribeForUser()`. An exception with no
+`Detail` still shows its `Message` verbatim, which is the §9 rule for a provider's own words.
+
+`NoSourceFileCarriesASpanishSentence` is the regression guard: no source file outside
+`Locales/` may carry a Spanish sentence. Verified to fail on an injected one.
 
 ---
 

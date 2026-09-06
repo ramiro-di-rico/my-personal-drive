@@ -62,7 +62,7 @@ public class SyncPairPauseTests : IDisposable
 
         Assert.True(row.IsPaused);
         Assert.Equal("▶️", row.PauseGlyph);
-        Assert.Contains("Reanudar", row.PauseTooltip);
+        Assert.Contains("Resume", row.PauseTooltip);
         Assert.True(Assert.Single(await store.GetPairsAsync()).IsPaused);
     }
 
@@ -96,12 +96,12 @@ public class SyncPairPauseTests : IDisposable
         // to lead — it's what decides whether the rest of the status is still being kept true.
         var (_, row, _, _) = await BuildAsync();
         await row.SyncNowCommand.ExecuteAsync();
-        Assert.StartsWith("Al día", row.StatusText);
+        Assert.StartsWith("Up to date", row.StatusText);
 
         await row.TogglePauseCommand.ExecuteAsync();
 
-        Assert.StartsWith("En pausa —", row.StatusText);
-        Assert.Contains("Al día", row.StatusText); // the underlying state is still reported
+        Assert.StartsWith("Paused —", row.StatusText);
+        Assert.Contains("Up to date", row.StatusText); // the underlying state is still reported
     }
 
     [Fact]
@@ -114,6 +114,6 @@ public class SyncPairPauseTests : IDisposable
         await row.SyncNowCommand.ExecuteAsync();
 
         Assert.Contains(cli.Calls, c => c.Arguments.Contains("list"));
-        Assert.StartsWith("En pausa —", row.StatusText); // and it stays paused afterwards
+        Assert.StartsWith("Paused —", row.StatusText); // and it stays paused afterwards
     }
 }

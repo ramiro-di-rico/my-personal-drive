@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
@@ -5,6 +6,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Web;
+
+using MyPersonalDrive.Services.Localization;
 
 namespace MyPersonalDrive.Services.Providers.GoogleDrive;
 
@@ -72,7 +75,9 @@ public sealed class GoogleDriveAuthenticator : IDriveAuthenticator
     {
         if (string.IsNullOrWhiteSpace(_clientId))
         {
-            throw new InvalidOperationException("No hay un client ID de Google Drive configurado. Cargá uno en Configuración antes de iniciar sesión.");
+            throw new LocalizedInvalidOperationException(
+                "No Google Drive client ID is configured.",
+                LocalizedText.Of(StringKeys.Error.AuthNoClientId, "Google Drive"));
         }
 
         var verifier = GeneratePkceVerifier();
@@ -146,7 +151,7 @@ public sealed class GoogleDriveAuthenticator : IDriveAuthenticator
         var stored = _tokenStore.Load();
         if (stored is null)
         {
-            throw NotAuthenticated("No hay una sesión de Google Drive guardada.");
+            throw NotAuthenticated($"There is no saved Google Drive session.", LocalizedText.Of(StringKeys.Error.AuthNoSession, "Google Drive"));
         }
 
         if (stored.ExpiresAt - DateTimeOffset.UtcNow > RefreshMargin)
@@ -160,7 +165,7 @@ public sealed class GoogleDriveAuthenticator : IDriveAuthenticator
     /// <summary>Forces a refresh regardless of cached expiry — the 401-retry-once path in <see cref="GoogleDriveHttpClient"/>.</summary>
     public async Task<string> ForceRefreshAsync(CancellationToken cancellationToken = default)
     {
-        var stored = _tokenStore.Load() ?? throw NotAuthenticated("No hay una sesión de Google Drive guardada.");
+        var stored = _tokenStore.Load() ?? throw NotAuthenticated($"There is no saved Google Drive session.", LocalizedText.Of(StringKeys.Error.AuthNoSession, "Google Drive"));
         return await RefreshAsync(stored, cancellationToken);
     }
 
@@ -179,7 +184,7 @@ public sealed class GoogleDriveAuthenticator : IDriveAuthenticator
 
             if (string.IsNullOrEmpty(stored.RefreshToken))
             {
-                throw NotAuthenticated("No hay un refresh token guardado; iniciá sesión de nuevo.");
+                throw NotAuthenticated("There is no saved refresh token.", LocalizedText.Of(StringKeys.Error.AuthNoRefreshToken));
             }
 
             using var request = new HttpRequestMessage(HttpMethod.Post, TokenEndpoint)
@@ -212,7 +217,7 @@ public sealed class GoogleDriveAuthenticator : IDriveAuthenticator
         }
         catch (HttpRequestException ex)
         {
-            throw NotAuthenticated($"No se pudo renovar la sesión de Google Drive: {ex.Message}");
+            throw NotAuthenticated($"Could not renew the Google Drive session: {ex.Message}", LocalizedText.Of(StringKeys.Error.AuthRefreshFailed, "Google Drive", ex.Message));
         }
         finally
         {
@@ -249,13 +254,13 @@ public sealed class GoogleDriveAuthenticator : IDriveAuthenticator
         }
         catch (JsonException)
         {
-            throw NotAuthenticated("El endpoint de tokens devolvió una respuesta que no se pudo interpretar.");
+            throw NotAuthenticated("The token endpoint returned an unreadable response.", LocalizedText.Of(StringKeys.Error.AuthTokenUnparsable));
         }
 
         if (token is null || !wasSuccessStatus || string.IsNullOrEmpty(token.AccessToken))
         {
             var reason = token?.ErrorDescription ?? token?.Error ?? "unknown error";
-            throw NotAuthenticated($"Falló el inicio de sesión de Google Drive: {reason}");
+            throw NotAuthenticated($"Google Drive sign-in failed: {reason}", LocalizedText.Of(StringKeys.Error.AuthSignInFailed, "Google Drive", reason));
         }
 
         return token;
@@ -347,12 +352,14 @@ public sealed class GoogleDriveAuthenticator : IDriveAuthenticator
 
         if (error is not null)
         {
-            throw NotAuthenticated($"El inicio de sesión de Google Drive se canceló o falló: {query["error_description"] ?? error}");
+            throw NotAuthenticated(
+                $"Google Drive sign-in was cancelled or failed: {query["error_description"] ?? error}",
+                LocalizedText.Of(StringKeys.Error.AuthSignInCancelled, "Google Drive", query["error_description"] ?? error));
         }
 
         if (string.IsNullOrEmpty(code) || !string.Equals(state, expectedState, StringComparison.Ordinal))
         {
-            throw NotAuthenticated("A la redirección de inicio de sesión le faltaba el código o traía un estado inesperado — posible CSRF, no se continúa.");
+            throw NotAuthenticated("The sign-in redirect was missing its code or carried an unexpected state.", LocalizedText.Of(StringKeys.Error.AuthBadRedirect));
         }
 
         return code;
@@ -382,14 +389,24 @@ public sealed class GoogleDriveAuthenticator : IDriveAuthenticator
     private static string Base64UrlEncode(byte[] bytes)
         => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
-    private static DriveException NotAuthenticated(string message)
-        => new("Google Drive sign-in", exitCode: 1, stdout: string.Empty, stderr: message, message, DriveErrorKind.NotAuthenticated);
+    /// <summary>
+    /// <paramref name="message"/> is what reaches the CLI console and the crash log, so it stays
+    /// English and greppable; <paramref name="detail"/> is what the interface shows
+    /// (docs/PLAN-TECH-DEBT.md B6.5).
+    /// </summary>
+    private static DriveException NotAuthenticated(string message, LocalizedText detail)
+        => new("Google Drive sign-in", exitCode: 1, stdout: string.Empty, stderr: message, message, DriveErrorKind.NotAuthenticated)
+        {
+            Detail = detail,
+        };
 
     private static DriveException SignInTimedOut()
     {
-        var message = $"El inicio de sesión de Google Drive superó el tiempo de espera de {SignInTimeout.TotalMinutes:0} minutos — " +
-            "ningún navegador completó el login. Verificá que se haya abierto una ventana en accounts.google.com, " +
-            "terminá de iniciar sesión ahí y probá de nuevo.";
-        return new("Google Drive sign-in", exitCode: 1, stdout: string.Empty, stderr: message, message, DriveErrorKind.Timeout);
+        var minutes = SignInTimeout.TotalMinutes.ToString("0", CultureInfo.InvariantCulture);
+        var message = $"Google Drive sign-in timed out after {minutes} minutes — no browser completed the login.";
+        return new("Google Drive sign-in", exitCode: 1, stdout: string.Empty, stderr: message, message, DriveErrorKind.Timeout)
+        {
+            Detail = LocalizedText.Of(StringKeys.Error.AuthSignInTimeout, "Google Drive", minutes, "accounts.google.com"),
+        };
     }
 }

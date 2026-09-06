@@ -1,3 +1,4 @@
+using System.Globalization;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
@@ -7,7 +8,7 @@ namespace MyPersonalDrive.Tests.Services.Sync;
 
 public class SyncEchoSuppressorTests
 {
-    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-03-01T12:00:00Z");
+    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture);
 
     private static Dictionary<string, NodeFingerprint> Scan(params string[] paths)
         => paths.ToDictionary(p => p, p => new NodeFingerprint(p, false, 10, T0, null, null), StringComparer.Ordinal);

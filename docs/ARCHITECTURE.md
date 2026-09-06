@@ -1,7 +1,7 @@
 # MyPersonalDrive — Technical Reference
 
 > Reference document describing the current state of the application (branch
-> `feature/google-drive-provider`, commit `b87afac`).
+> `feature/i18n`, commit `7c1f6d3`).
 > Meant to give full context to any future chat/session without having to re-read all the code.
 
 ---
@@ -70,6 +70,14 @@ src/MyPersonalDrive/
     RemoteHashAlgorithm.cs         # None|Sha1|Sha256|QuickXor
     UploadConflictStrategy.cs      # enum None|KeepBoth|Replace|Skip
   Services/
+    Localization/                  # the interface's string table (see §7.6)
+      Language.cs / LanguageCatalog.cs   # the languages this build ships; degrade-to-English
+      StringKeys.cs                # every key, as a constant; a test pins it against en.json
+      Localizer.cs                 # the singleton: T/F/Plural, Culture, SetLanguage
+      LocalizedStrings.cs          # the façade the markup binds through; replaced, never mutated
+      LocalizedText.cs             # a key plus its arguments, rendered on read
+      ILocalizedError.cs           # an exception's English Message plus its translated Detail
+      Locales/en.json, es.json, it.json  # embedded resources, globbed
     Providers/
       ICloudDriveProvider.cs       # the facade every consumer talks to (see §5); exposes Paths
       IDriveOperations.cs / IDriveAuthenticator.cs / IRemoteViewInvalidator.cs / IProviderDiagnostics.cs
@@ -584,6 +592,44 @@ current pattern; if more dialogs are added, consider extracting them into their 
 
 ---
 
+### 7.6 Localization
+
+The interface ships in **English (default), Spanish and Italian**, chosen in Settings and applied
+without a restart. See [PLAN-I18N.md](PLAN-I18N.md) for the design and
+[`.claude/skills/add-language/SKILL.md`](../.claude/skills/add-language/SKILL.md) for adding a
+third.
+
+- **Not `.resx`.** Satellite assemblies resolve by reflection, which `PublishAot` /
+  `TrimMode=partial` is hostile to. One flat embedded JSON per language, loaded through
+  `AppJsonContext`.
+- **Markup** binds `{Binding Loc[some.key]}` — `ObservableObject.Loc` makes every view model a
+  binding source, so these stay *compiled* bindings. `Loc` returns `Localizer.Strings`, an
+  immutable façade that `SetLanguage` **replaces**: a compiled binding re-reads an indexer only
+  when the object it sits on is a different one, so notifying on the singleton left the interface
+  frozen at load-time language (PLAN-I18N.md §3.1). The one template typed against a model rather
+  than a view model (`ProviderDescriptor`, in the header) walks up to the window's view model —
+  never a static source, which cannot notify.
+- **A message that stays on screen stores its key, not its text** — `LocalizedText`, held by every
+  status line (`MainWindowViewModel`, `LocalExplorerViewModel`, `SyncPanelViewModel`,
+  `SyncPairViewModel`). Rendering at read time is what makes them follow the picker.
+- **Services name reasons, the UI words them.** `SyncPairValidator` and `LocalFolderInspector`
+  return a `SyncPairIssue`; `SyncIssuePresenter` and `DriveErrorPresenter` do the wording. A
+  service may use the string table for pure presentation copy (file-kind labels, sync progress).
+- **An exception carries two sentences.** `ILocalizedError` gives it an English `Message` — what
+  the CLI console and the crash log see, stable and greppable — alongside a translatable `Detail`
+  for the screen. `DriveException` and `CliUpdateException` implement it; `LocalizedIOException`,
+  `LocalizedFileNotFoundException` and `LocalizedInvalidOperationException` cover framework types
+  while staying catchable as their base. The UI reads `exception.DescribeForUser()`, which falls
+  back to `Message` verbatim — so a provider's own words are never paraphrased.
+- **Culture is split deliberately.** `Localizer.Culture` formats what a person reads; machine data
+  (paths, SQLite, CLI and API payloads, `settings.json`) is explicitly
+  `CultureInfo.InvariantCulture`. `.editorconfig` turns CA1304/CA1305/CA1310 on as warnings so the
+  split cannot erode.
+- **Four gates** in `tests/.../Localization/`: every locale is key-for-key identical to English
+  with matching placeholders; `StringKeys` matches `en.json` exactly; no `.axaml` carries a
+  literal user-facing attribute or a word-bearing `StringFormat` outside a seven-entry allowlist;
+  and no source file outside `Locales/` carries a Spanish sentence.
+
 ## 8. Packaging
 
 - `scripts/publish-linux.sh` → AOT `dotnet publish` for linux-x64, copies `libSkiaSharp.so`,
@@ -682,3 +728,8 @@ constructor) and on demand from the settings view.
   only by an atomic rename.
 - Anything touching `RootItems` / bound properties must run on the UI thread
   (`Dispatcher.UIThread.InvokeAsync` / `.Post`).
+- **No user-facing string is a literal.** Markup binds `Loc[key]`; code calls `Loc.T`/`F`/`Plural`.
+  A message that persists on screen stores a `LocalizedText`, not rendered text.
+- **`Localizer.Culture` for what a person reads; `CultureInfo.InvariantCulture` for machine data.**
+  Neither is the machine's ambient culture, and an unqualified `Parse`/`ToString` is a build
+  warning.

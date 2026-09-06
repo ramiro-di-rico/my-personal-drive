@@ -93,7 +93,7 @@ public class LocalScannerTests : IDisposable
         var scanner = new LocalScanner();
         var result = await scanner.ScanAsync(_root, new ExclusionMatcher());
 
-        Assert.DoesNotContain(result.Keys, k => k.StartsWith(".git"));
+        Assert.DoesNotContain(result.Keys, k => k.StartsWith(".git", StringComparison.Ordinal));
         Assert.True(result.ContainsKey("real.txt"));
     }
 

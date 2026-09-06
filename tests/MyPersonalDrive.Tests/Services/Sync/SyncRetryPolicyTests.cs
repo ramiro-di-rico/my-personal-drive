@@ -1,3 +1,4 @@
+using System.Globalization;
 using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Sync;
@@ -7,7 +8,7 @@ namespace MyPersonalDrive.Tests.Services.Sync;
 
 public class SyncRetryPolicyTests
 {
-    private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-03-01T12:00:00Z");
+    private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture);
 
     private static DriveException Cli(DriveErrorKind kind)
         => new("filesystem download /x /y", 1, "", "boom", "boom", kind);

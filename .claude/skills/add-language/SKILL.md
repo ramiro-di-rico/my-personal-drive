@@ -23,6 +23,11 @@ No `.csproj` edit (the locale files are globbed as `EmbeddedResource`), no code 
 fixing properly, or the language needs something the seam does not cover (see "When it is not just
 strings" below).
 
+One thing legitimately outside those three steps: a gate written when only two languages existed may
+need widening to keep covering the new one. Adding Italian needed exactly that (docs/PLAN-I18N.md,
+Appendix B). Widening a gate's *coverage* is fine; weakening its *assertion* to make your locale
+pass is the anti-pattern.
+
 ## Steps
 
 ### 1. Pick the code
@@ -62,8 +67,22 @@ Rules for the values:
   formal and informal address.
 - **Do not translate proper nouns**: `Proton Drive`, `OneDrive`, `Google Drive`, `Nextcloud`,
   `Custom S3`, `proton-drive`, `KB/s`.
-- **Length.** German and French run ~30% longer than English. Long labels wrap or clip in a
-  fixed-width column; that is a real finding, not a nitpick — note it in step 6.
+- **Length.** German and French run ~30% longer than English; Italian ran 24%. But **compare
+  against the longest language that already ships, not against English** — Italian came out only
+  4% longer than the Spanish already rendering fine, which is what made its layout risk small. A
+  quick way to get that number before looking at anything:
+
+  ```bash
+  python3 -c "
+  import json; d='src/MyPersonalDrive/Services/Localization/Locales/'
+  a=json.load(open(d+'es.json')); b=json.load(open(d+'<code>.json'))
+  print(sum(len(b[k])/max(1,len(a[k])) for k in a)/len(a))
+  for k in sorted(a, key=lambda k: len(a[k])-len(b[k]))[:15]:
+      print(f'{k}\n  es: {a[k]}\n  new: {b[k]}')"
+  ```
+
+  Long labels wrap or clip in a fixed-width column; that is a real finding, not a nitpick — note
+  it in step 6.
 
 ### 3. Register it
 
@@ -85,12 +104,20 @@ The localization tests are the safety net and they are specific:
 
 | Failure | What it means |
 |---|---|
+| `EveryLanguageCodeIsACultureDotNetKnows` | The code is not a culture .NET recognises. It would fall back to `InvariantCulture` silently, so the strings would switch while dates and numbers did not. |
 | `EveryLocaleHasTheSameKeysAsEnglish` | A key is missing or extra. The message names them. |
 | `PlaceholderSetsMatchEnglishPerKey` | A `{0}` was dropped or invented. Would crash at runtime. |
 | `NoLocaleValueIsEmptyOrWhitespace` | An untranslated value was blanked instead of copied. |
 | `EveryPluralKeyHasBothOneAndOther` | A `.one` without its `.other`. |
+| `ALocaleOnlyMatchesEnglishWhereItShould` | A value is byte-identical to English — usually copied rather than translated. Two escape hatches, and picking the right one matters: `LanguageNeutral` for a value no language translates (a `"{0}: {1}"` template, a unit, a proper noun), and `BorrowsTheEnglishWord` for a key where *this* language legitimately uses the English word. Italian's `common.file` is the second kind — "File" is correct Italian — and putting it in the first list would stop the gate catching an untranslated Spanish "File". |
+| `StringKeysConstantsAreExactlyTheEnglishKeySet` | You added a key to `en.json` with no constant, or a constant with no key. This one only fires when adding *new* strings, not when adding a locale. |
 
 Fix the file, not the test.
+
+Two more gates exist and should not fire for a locale-only change, but will tell you immediately if
+a translation attempt strayed into the markup: `NoMarkupCarriesALiteralUserFacingString` and
+`NoBindingCarriesALiteralStringFormat`. If either fires, you edited a `.axaml` — don't; the value
+belongs in the JSON.
 
 ### 5. Verify it actually publishes
 
@@ -145,7 +172,13 @@ Some languages need more than a JSON file. Say so up front rather than shipping 
 - **Sorting.** `DriveItemSorter` sorts names. A locale with its own collation (Swedish å/ä/ö,
   Turkish dotted/dotless i) will sort differently once `CurrentCulture` changes. Usually the desired
   behavior — but check it deliberately, and check nothing that parses machine data got swept along
-  (PLAN-I18N.md §10).
+  (PLAN-I18N.md §10). The CA1304/CA1305 warnings in `.editorconfig` are what keep that split
+  honest; a build that starts emitting them is telling you a formatting site lost its explicit
+  provider.
+- **Turkish specifically.** `tr-TR`'s dotless-i breaks `ToUpper()`/`ToLower()` round-trips on ASCII
+  identifiers. Everything in this repo that case-folds machine data does so with an explicit
+  `StringComparison`, and CA1310 keeps it that way — but this is the locale that finds any site
+  that slipped through.
 
 ## Anti-patterns
 

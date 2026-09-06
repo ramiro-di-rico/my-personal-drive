@@ -106,7 +106,7 @@ public class TransferQueueViewModelTests
         ops.NextCallBlocksOn = gate.Task;
 
         var sut = new TransferQueueViewModel();
-        Assert.Equal("Sin transferencias activas", sut.Summary);
+        Assert.Equal("No active transfers", sut.Summary);
 
         var first = sut.EnqueueDownload(ops, new DriveItem("/my-files/a.txt", "a.txt", IsFolder: false), "/dl");
         _ = sut.EnqueueDownload(ops, new DriveItem("/my-files/b.txt", "b.txt", IsFolder: false), "/dl");
@@ -116,7 +116,7 @@ public class TransferQueueViewModelTests
             await Task.Yield();
         }
 
-        Assert.Equal("1 transfiriendo · 1 en cola", sut.Summary);
+        Assert.Equal("1 transferring · 1 queued", sut.Summary);
 
         gate.SetResult();
         await first;

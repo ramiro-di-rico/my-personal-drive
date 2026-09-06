@@ -1,5 +1,8 @@
+using System.Globalization;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Providers;
+
+using MyPersonalDrive.Services.Localization;
 
 namespace MyPersonalDrive.Services.Sync;
 
@@ -107,8 +110,8 @@ public sealed class SyncExecutor
     public sealed record SyncProgress(int Completed, int Total, SyncOperation? Operation, string? RelativePath)
     {
         public string Describe() => Operation is null
-            ? $"Analizando… ({Total} acción(es) en cola)"
-            : $"{Completed}/{Total}  {Operation}  {RelativePath}";
+            ? Localizer.Instance.Plural(StringKeys.Sync.ExecScanning, Total)
+            : Localizer.Instance.F(StringKeys.Sync.ExecProgress, Completed, Total, Operation, RelativePath);
     }
 
     /// <summary>Raised on the executing thread; a UI subscriber must marshal to its own thread.</summary>
@@ -165,20 +168,21 @@ public sealed class SyncExecutor
 
     private static string? BuildStatusMessage(int failureCount, int conflictCount, bool aborted)
     {
+        var localizer = Localizer.Instance;
         var parts = new List<string>();
         if (failureCount > 0)
         {
-            parts.Add($"{failureCount} acción(es) fallaron");
+            parts.Add(localizer.Plural(StringKeys.Sync.ExecFailed, failureCount));
         }
 
         if (conflictCount > 0)
         {
-            parts.Add($"{conflictCount} conflicto(s) esperando tu decisión");
+            parts.Add(localizer.Plural(StringKeys.Sync.ExecConflicts, conflictCount));
         }
 
         if (aborted)
         {
-            parts.Add("la ejecución se detuvo antes de tiempo (iniciá sesión de nuevo, o liberá espacio, y reintentá)");
+            parts.Add(localizer.T(StringKeys.Sync.ExecAborted));
         }
 
         return parts.Count == 0 ? null : string.Join("; ", parts);
@@ -356,22 +360,16 @@ public sealed class SyncExecutor
     /// adversarial review.
     /// </summary>
     private static string DescribeSkip(NodeSkip skip)
-        => skip.Reason switch
-        {
-            NodeSkipReason.UnmappableName =>
-                $"Se omitió '{skip.Name}': su nombre contiene '/', que no se puede usar en un nombre de archivo local. " +
-                "Queda en Proton Drive pero no se va a sincronizar — renombralo ahí para incluirlo.",
-            NodeSkipReason.CaseCollision =>
-                $"Se omitió '{skip.Name}': su nombre choca con el de un hermano si se ignoran mayúsculas y minúsculas. " +
-                "Los dos quedan en Proton Drive pero no se van a sincronizar — renombrá uno ahí para incluirlo.",
-            NodeSkipReason.DuplicateName =>
-                $"Se omitió '{skip.Name}': más de un elemento comparte exactamente este nombre en la misma carpeta. " +
-                "Todos quedan en el drive remoto pero no se van a sincronizar — renombrá todos menos uno para incluirlo.",
-            NodeSkipReason.GoogleNativeFile =>
-                $"Se omitió '{skip.Name}': es un archivo de Google Docs/Sheets/Slides sin contenido descargable. " +
-                "Queda en Google Drive pero no se va a sincronizar.",
-            _ => $"Se omitió '{skip.Name}': no se puede representar localmente."
-        };
+        => Localizer.Instance.F(
+            skip.Reason switch
+            {
+                NodeSkipReason.UnmappableName => StringKeys.Sync.SkipUnmappableName,
+                NodeSkipReason.CaseCollision => StringKeys.Sync.SkipCaseCollision,
+                NodeSkipReason.DuplicateName => StringKeys.Sync.SkipDuplicateName,
+                NodeSkipReason.GoogleNativeFile => StringKeys.Sync.SkipGoogleNativeFile,
+                _ => StringKeys.Sync.SkipUnspecified,
+            },
+            skip.Name);
 
     private async Task<(IReadOnlyDictionary<string, NodeFingerprint> Local, IReadOnlyDictionary<string, NodeFingerprint> Remote, PathMapper Mapper)> ScanBothSidesAsync(
         SyncPair pair, IReadOnlyDictionary<string, SyncBaselineEntry> baseline, CancellationToken cancellationToken)
@@ -690,7 +688,10 @@ public sealed class SyncExecutor
         var localAbsolutePath = context.Mapper.ToLocalAbsolute(relativePath);
         if (!File.Exists(localAbsolutePath))
         {
-            throw new FileNotFoundException($"'{relativePath}' desapareció localmente antes de poder subirse.", localAbsolutePath);
+            throw new LocalizedFileNotFoundException(
+                $"'{relativePath}' disappeared locally before it could be uploaded.",
+                LocalizedText.Of(StringKeys.Error.SyncVanishedBeforeUpload, relativePath),
+                localAbsolutePath);
         }
 
         await _operations.UploadFilesAsync([localAbsolutePath], context.Mapper.ToRemoteAbsolute(parent),
@@ -708,7 +709,7 @@ public sealed class SyncExecutor
     {
         if (action.SecondaryPath is null)
         {
-            throw new InvalidOperationException($"Una resolución KeepBoth para '{action.RelativePath}' no tiene ruta de copia de conflicto.");
+            throw new InvalidOperationException($"A KeepBoth resolution for '{action.RelativePath}' has no conflict-copy path.");
         }
 
         var originalLocalPath = context.Mapper.ToLocalAbsolute(action.RelativePath);
@@ -745,7 +746,7 @@ public sealed class SyncExecutor
     {
         if (action.SecondaryPath is null)
         {
-            throw new InvalidOperationException($"Un renombrado local de '{action.RelativePath}' no tiene ruta de destino.");
+            throw new InvalidOperationException($"A local rename of '{action.RelativePath}' has no destination path.");
         }
 
         var source = context.Mapper.ToLocalAbsolute(action.RelativePath);
@@ -755,12 +756,17 @@ public sealed class SyncExecutor
         {
             // It vanished between the scan and now. Failing would be wrong: the next cycle rescans
             // and will download it at the new path, which is the correct outcome anyway.
-            throw new FileNotFoundException($"'{action.RelativePath}' desapareció localmente antes de poder moverse.", source);
+            throw new LocalizedFileNotFoundException(
+                $"'{action.RelativePath}' disappeared locally before it could be moved.",
+                LocalizedText.Of(StringKeys.Error.SyncVanishedBeforeMove, action.RelativePath),
+                source);
         }
 
         if (File.Exists(destination))
         {
-            throw new IOException($"No se mueve '{action.RelativePath}' encima del archivo existente '{action.SecondaryPath}'.");
+            throw new LocalizedIOException(
+                $"Not moving '{action.RelativePath}' over the existing file '{action.SecondaryPath}'.",
+                LocalizedText.Of(StringKeys.Error.SyncWontOverwrite, action.RelativePath, action.SecondaryPath));
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
@@ -796,7 +802,7 @@ public sealed class SyncExecutor
     {
         if (action.SecondaryPath is null)
         {
-            throw new InvalidOperationException($"Un movimiento remoto de '{action.RelativePath}' no tiene ruta de destino.");
+            throw new InvalidOperationException($"A remote move of '{action.RelativePath}' has no destination path.");
         }
 
         var oldParent = ParentOf(action.RelativePath);
@@ -862,7 +868,9 @@ public sealed class SyncExecutor
             var downloadedPath = Path.Combine(tempDirectory, fileName);
             if (!File.Exists(downloadedPath))
             {
-                throw new IOException($"Se esperaba que la CLI descargara '{fileName}' en la carpeta temporal, pero no estaba ahí.");
+                throw new LocalizedIOException(
+            $"The CLI was expected to download '{fileName}' into the temporary folder, but it was not there.",
+            LocalizedText.Of(StringKeys.Error.CliDownloadMissing, fileName));
             }
 
             File.Move(downloadedPath, localAbsolutePath, overwrite: true);
@@ -906,7 +914,7 @@ public sealed class SyncExecutor
             return; // already gone — nothing to do
         }
 
-        var trashRoot = Path.Combine(pair.LocalPath, ".mypersonaldrive-trash", DateTimeOffset.UtcNow.ToString("yyyy-MM-dd"));
+        var trashRoot = Path.Combine(pair.LocalPath, ".mypersonaldrive-trash", DateTimeOffset.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
         var trashPath = Path.Combine(trashRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(trashPath)!);
 

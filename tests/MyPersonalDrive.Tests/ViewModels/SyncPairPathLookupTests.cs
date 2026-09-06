@@ -128,13 +128,13 @@ public class SyncPairPathLookupTests : IDisposable
 
         await vm.ShowPropertiesAsync(new DriveItem("/my-files/Libros/tecnicos/refactoring.pdf", "refactoring.pdf", IsFolder: false));
 
-        var local = Assert.Single(shown, field => field.Label == "Ruta local");
+        var local = Assert.Single(shown, field => field.Label == "Local path");
         Assert.Equal(Path.Combine(_libros, "tecnicos", "refactoring.pdf"), local.Value);
         Assert.True(local.IsCopyable);
 
         // The remote path is copyable too — both are paths, and offering to copy only one of them
         // would be arbitrary.
-        Assert.True(Assert.Single(shown, field => field.Label == "Ruta").IsCopyable);
+        Assert.True(Assert.Single(shown, field => field.Label == "Path").IsCopyable);
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public class SyncPairPathLookupTests : IDisposable
 
         await vm.ShowPropertiesAsync(new DriveItem("/my-files/Fotos/vacaciones.jpg", "vacaciones.jpg", IsFolder: false));
 
-        Assert.DoesNotContain(shown, field => field.Label == "Ruta local");
+        Assert.DoesNotContain(shown, field => field.Label == "Local path");
     }
 
     // The mapping itself goes through PathMapper, so the dialog cannot disagree with the path the

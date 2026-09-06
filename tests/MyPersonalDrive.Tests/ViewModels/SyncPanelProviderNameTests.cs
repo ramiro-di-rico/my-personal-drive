@@ -48,7 +48,7 @@ public class SyncPanelProviderNameTests : IDisposable
     {
         var sut = Build(providerDisplayName: null);
 
-        Assert.Equal("Agregá una carpeta para empezar a sincronizarla desde Proton Drive.", sut.EmptyStateMessage);
+        Assert.Equal("Add a folder to start syncing it from Proton Drive.", sut.EmptyStateMessage);
         Assert.True(sut.HasNoPairs);
         Assert.Equal(string.Empty, sut.StatusMessage);
     }
@@ -58,7 +58,7 @@ public class SyncPanelProviderNameTests : IDisposable
     {
         var sut = Build("OneDrive");
 
-        Assert.Equal("Agregá una carpeta para empezar a sincronizarla desde OneDrive.", sut.EmptyStateMessage);
+        Assert.Equal("Add a folder to start syncing it from OneDrive.", sut.EmptyStateMessage);
     }
 
     // The prompt names the account a new pair would actually target. Switching the browsed account

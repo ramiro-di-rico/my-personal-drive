@@ -2,6 +2,8 @@ using Avalonia.Threading;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Sync;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.ViewModels.Sync;
 
 /// <summary>
@@ -15,7 +17,8 @@ public sealed class SyncPairViewModel : ObservableObject
     private readonly SyncStateStore _stateStore;
     private readonly Action<SyncPairViewModel> _onRemoved;
     private SyncPair _pair;
-    private string _statusText = string.Empty;
+    private LocalizedText _status = LocalizedText.None;
+    private string _statusMessage = string.Empty;
     private bool _isBusy;
     private int _conflictCount;
     private int _failedCount;
@@ -55,12 +58,12 @@ public sealed class SyncPairViewModel : ObservableObject
 
     public string LocalPath => _pair.LocalPath;
 
-    public string DirectionText => _pair.Direction switch
+    public string DirectionText => Loc.T(_pair.Direction switch
     {
-        SyncDirection.RemoteToLocal => "Remoto → Local",
-        SyncDirection.LocalToRemote => "Local → Remoto",
-        _ => "Bidireccional",
-    };
+        SyncDirection.RemoteToLocal => StringKeys.Sync.DirectionRemoteToLocal,
+        SyncDirection.LocalToRemote => StringKeys.Sync.DirectionLocalToRemote,
+        _ => StringKeys.Sync.DirectionTwoWay,
+    });
 
     public SyncDirection Direction => _pair.Direction;
 
@@ -69,11 +72,23 @@ public sealed class SyncPairViewModel : ObservableObject
     /// <summary>True mirrors the source side exactly (deletes destination-only items); false keeps the pair additive. Only meaningful for a one-way pair — see <see cref="SyncPair.MirrorDeletes"/>.</summary>
     public bool MirrorDeletes => _pair.MirrorDeletes;
 
-    public string StatusText
+    /// <summary>
+    /// The row's status line. Deferred, like the two explorer panes' — a row saying "Up to date"
+    /// sits there for as long as nothing changes, which is exactly the case that must not freeze in
+    /// the old language (docs/PLAN-I18N.md §6.3).
+    /// </summary>
+    public string StatusText => _statusMessage;
+
+    /// <summary>The unrendered form, so tests can assert on a key instead of on prose.</summary>
+    internal LocalizedText StatusTextValue => _status;
+
+    private void SetStatus(LocalizedText text)
     {
-        get => _statusText;
-        private set => SetProperty(ref _statusText, value);
+        _status = text;
+        SetProperty(ref _statusMessage, text.Render(), nameof(StatusText));
     }
+
+    private void SetStatus(string key, params object?[] args) => SetStatus(LocalizedText.Of(key, args));
 
     public bool IsBusy
     {
@@ -124,9 +139,9 @@ public sealed class SyncPairViewModel : ObservableObject
 
     public string PauseGlyph => IsPaused ? "▶️" : "⏸️";
 
-    public string PauseTooltip => IsPaused
-        ? "Reanudar la sincronización automática de este par"
-        : "Pausar la sincronización automática de este par (igual podés sincronizarlo a mano)";
+    public string PauseTooltip => Loc.T(IsPaused
+        ? StringKeys.Sync.PauseResumeTooltip
+        : StringKeys.Sync.PausePauseTooltip);
 
     public int ConflictCount
     {
@@ -185,12 +200,10 @@ public sealed class SyncPairViewModel : ObservableObject
         }
     }
 
-    public string ConflictText => ConflictCount == 1 ? "⚠ 1 conflicto" : $"⚠ {ConflictCount} conflictos";
+    public string ConflictText => Loc.Plural(StringKeys.Sync.ConflictsCount, ConflictCount);
 
     /// <summary>Label for the button that opens the per-action failure list.</summary>
-    public string FailureSummary => FailedCount == 1
-        ? "Ver la acción que falló"
-        : $"Ver las {FailedCount} acciones que fallaron";
+    public string FailureSummary => Loc.Plural(StringKeys.Sync.FailuresSummary, FailedCount);
 
     /// <summary>
     /// Shown a dry-run plan plus any warnings about carrying it out; returns true if the user chose
@@ -219,7 +232,7 @@ public sealed class SyncPairViewModel : ObservableObject
     /// or null when the change is safe. Left null disables the check (e.g. in tests that don't
     /// care about it), the same way every other optional delegate on this type does.
     /// </summary>
-    public Func<SyncDirection, Task<string?>>? ValidateDirectionChangeAsync { get; set; }
+    public Func<SyncDirection, Task<SyncPairIssue?>>? ValidateDirectionChangeAsync { get; set; }
 
     public Action<string>? OnError { get; set; }
 
@@ -228,12 +241,12 @@ public sealed class SyncPairViewModel : ObservableObject
         var confirm = RequestPreviewConfirmationAsync;
         if (confirm is null)
         {
-            StatusText = "La vista previa no está disponible.";
+            SetStatus(StringKeys.Sync.PreviewUnavailable);
             return;
         }
 
         IsBusy = true;
-        StatusText = "Analizando...";
+        SetStatus(StringKeys.Sync.Analyzing);
         try
         {
             var plan = await _executor.PreviewAsync(_pair);
@@ -243,7 +256,7 @@ public sealed class SyncPairViewModel : ObservableObject
             var warnings = new List<string>();
             if (LocalFolderInspector.CheckFreeSpace(_pair.LocalPath, plan.Stats.BytesToDownload) is { } spaceWarning)
             {
-                warnings.Add(spaceWarning);
+                warnings.Add(SyncIssuePresenter.Describe(spaceWarning).Render());
             }
 
             if (await confirm(plan, warnings))
@@ -260,13 +273,13 @@ public sealed class SyncPairViewModel : ObservableObject
     private async Task RunAsync()
     {
         IsBusy = true;
-        StatusText = "Sincronizando...";
+        SetStatus(StringKeys.Sync.Syncing);
 
         // Subscribed per run rather than for the object's lifetime: the executor is shared by every
         // pair and by the scheduler, so a permanent subscription would show one pair another's
         // progress.
         void OnProgress(object? _, SyncExecutor.SyncProgress progress)
-            => Dispatcher.UIThread.Post(() => StatusText = $"⟳ {progress.Describe()}");
+            => Dispatcher.UIThread.Post(() => SetStatus(LocalizedText.Of(StringKeys.Sync.Progress, progress.Describe())));
 
         _executor.Progress += OnProgress;
         try
@@ -301,7 +314,7 @@ public sealed class SyncPairViewModel : ObservableObject
         var requester = RequestConflictResolutionsAsync;
         if (requester is null)
         {
-            StatusText = "Resolver conflictos no está disponible.";
+            SetStatus(StringKeys.Sync.ConflictsUnavailable);
             return;
         }
 
@@ -333,7 +346,7 @@ public sealed class SyncPairViewModel : ObservableObject
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    OnError?.Invoke($"No se pudo resolver '{conflict.RelativePath}': {ex.Message}");
+                    OnError?.Invoke(Loc.F(StringKeys.Sync.ConflictsResolveFailed, conflict.RelativePath, ex.DescribeForUser().Render()));
                 }
             }
         }
@@ -343,9 +356,9 @@ public sealed class SyncPairViewModel : ObservableObject
             await RefreshOutstandingAsync();
         }
 
-        StatusText = resolved == conflicts.Count
-            ? $"Se resolvieron {resolved} conflicto(s)."
-            : $"Se resolvieron {resolved} de {decisions.Count} conflicto(s) elegidos; quedan {ConflictCount} pendientes.";
+        SetStatus(resolved == conflicts.Count
+            ? LocalizedText.Plural(StringKeys.Sync.ConflictsResolved, resolved)
+            : LocalizedText.Of(StringKeys.Sync.ConflictsResolvedPartial, resolved, decisions.Count, ConflictCount));
     }
 
     private async Task RetryFailedAsync()
@@ -361,9 +374,9 @@ public sealed class SyncPairViewModel : ObservableObject
             }
 
             var msg = revived == 0
-                ? "Se reinició el estado de error — sincronizá ahora o reanudá para sincronizar."
-                : $"{revived} acción(es) con error volvieron a la cola — se ejecutarán en la próxima sincronización.";
-            StatusText = _pair.IsPaused ? $"En pausa — {msg}" : msg;
+                ? Loc.T(StringKeys.Sync.RetryReset)
+                : Loc.Plural(StringKeys.Sync.RetryRequeued, revived);
+            SetStatus(_pair.IsPaused ? LocalizedText.Of(StringKeys.Sync.PausedPrefix, msg) : LocalizedText.Verbatim(msg));
         }
         finally
         {
@@ -383,7 +396,7 @@ public sealed class SyncPairViewModel : ObservableObject
         var requester = RequestFailureReviewAsync;
         if (requester is null)
         {
-            StatusText = "Revisar las fallas no está disponible.";
+            SetStatus(StringKeys.Sync.FailuresUnavailable);
             return;
         }
 
@@ -417,7 +430,7 @@ public sealed class SyncPairViewModel : ObservableObject
                 _pair = await _stateStore.GetPairAsync(_pair.Id) ?? _pair;
             }
 
-            StatusText = DescribeFailureDecisions(retried, discarded);
+            SetStatus(LocalizedText.Verbatim(DescribeFailureDecisions(retried, discarded)));
         }
         finally
         {
@@ -428,19 +441,20 @@ public sealed class SyncPairViewModel : ObservableObject
 
     private static string DescribeFailureDecisions(int retried, int discarded)
     {
+        var localizer = Localizer.Instance;
         var parts = new List<string>();
         if (retried > 0)
         {
-            parts.Add($"{retried} acción(es) volvieron a la cola");
+            parts.Add(localizer.Plural(StringKeys.Sync.FailuresRetried, retried));
         }
 
         if (discarded > 0)
         {
-            parts.Add($"{discarded} acción(es) descartadas");
+            parts.Add(localizer.Plural(StringKeys.Sync.FailuresDiscarded, discarded));
         }
 
         return parts.Count == 0
-            ? "No se cambió ninguna acción."
+            ? localizer.T(StringKeys.Sync.FailuresNoChange)
             : string.Join("; ", parts) + ".";
     }
 
@@ -454,7 +468,7 @@ public sealed class SyncPairViewModel : ObservableObject
         var requester = RequestEditAsync;
         if (requester is null)
         {
-            StatusText = "Editar un par no está disponible.";
+            SetStatus(StringKeys.Sync.EditUnavailable);
             return;
         }
 
@@ -465,10 +479,11 @@ public sealed class SyncPairViewModel : ObservableObject
         }
 
         var validate = ValidateDirectionChangeAsync;
-        if (validate is not null && await validate(request.Direction) is { } validationError)
+        if (validate is not null && await validate(request.Direction) is { } issue)
         {
-            StatusText = validationError;
-            OnError?.Invoke(validationError);
+            var described = SyncIssuePresenter.Describe(issue);
+            SetStatus(described);
+            OnError?.Invoke(described.Render());
             return;
         }
 
@@ -517,26 +532,26 @@ public sealed class SyncPairViewModel : ObservableObject
     {
         var status = _pair.LastStatus switch
         {
-            SyncPairStatus.Never => "Nunca sincronizado",
-            SyncPairStatus.Ok => $"Al día ({FormatTime(_pair.LastSyncAt)})",
-            SyncPairStatus.PartialFailure => $"Fallo parcial ({FormatTime(_pair.LastSyncAt)}): {_pair.LastError}",
-            SyncPairStatus.Error => $"Error: {_pair.LastError}",
-            _ => "Desconocido",
+            SyncPairStatus.Never => LocalizedText.Of(StringKeys.Sync.StatusNever),
+            SyncPairStatus.Ok => LocalizedText.Of(StringKeys.Sync.StatusUpToDate, FormatTime(_pair.LastSyncAt)),
+            SyncPairStatus.PartialFailure => LocalizedText.Of(StringKeys.Sync.StatusPartialFailure, FormatTime(_pair.LastSyncAt), _pair.LastError),
+            SyncPairStatus.Error => LocalizedText.Of(StringKeys.Sync.StatusError, _pair.LastError),
+            _ => LocalizedText.Of(StringKeys.Sync.StatusUnknown),
         };
 
         // A paused pair saying only "Up to date" would be a lie the moment anything changes, so the
         // pause is stated first — it's the fact that decides whether the rest is still being kept true.
-        StatusText = _pair.IsPaused ? $"En pausa — {status}" : status;
+        SetStatus(_pair.IsPaused ? LocalizedText.Of(StringKeys.Sync.PausedPrefix, status.Render()) : status);
         OnPropertyChanged(nameof(HasFailures));
         RetryFailedCommand.RaiseCanExecuteChanged();
     }
 
     private static string FormatTime(DateTimeOffset? timestamp)
-        => timestamp is { } t ? t.ToLocalTime().ToString("g") : "nunca";
+        => timestamp is { } t ? t.ToLocalTime().ToString("g", Localizer.Instance.Culture) : Localizer.Instance.T(StringKeys.Sync.TimeNever);
 
     private void ReportError(Exception ex)
     {
-        StatusText = $"Error inesperado: {ex.Message}";
-        OnError?.Invoke(ex.Message);
+        SetStatus(StringKeys.Status.UnexpectedError, ex.DescribeForUser().Render());
+        OnError?.Invoke(ex.DescribeForUser().Render());
     }
 }

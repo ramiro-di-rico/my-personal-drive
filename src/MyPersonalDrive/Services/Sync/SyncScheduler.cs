@@ -1,5 +1,7 @@
 using MyPersonalDrive.Models;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.Services.Sync;
 
 /// <summary>
@@ -221,8 +223,11 @@ public sealed class SyncScheduler : IAsyncDisposable
         {
             runtime.ConsecutiveErrors++;
             await SafeLogAsync(runtime.Pair.Id, SyncLogLevel.Error,
-                $"La sincronización automática falló (intento {runtime.ConsecutiveErrors}, próximo intento en " +
-                $"{SyncSchedulePolicy.ErrorBackoff(runtime.ConsecutiveErrors).TotalMinutes:0} min): {ex.Message}",
+                Localizer.Instance.F(
+                    StringKeys.Sync.SchedulerFailed,
+                    runtime.ConsecutiveErrors,
+                    SyncSchedulePolicy.ErrorBackoff(runtime.ConsecutiveErrors).TotalMinutes.ToString("0", Localizer.Instance.Culture),
+                    ex.Message),
                 cancellationToken);
         }
         finally

@@ -1,3 +1,4 @@
+using System.Globalization;
 using MyPersonalDrive.Services.Providers.GoogleDrive;
 using Xunit;
 
@@ -34,7 +35,7 @@ public class GoogleDriveTokenStoreTests : IDisposable
         {
             AccessToken = "access",
             RefreshToken = "refresh",
-            ExpiresAt = DateTimeOffset.Parse("2026-01-01T00:00:00Z"),
+            ExpiresAt = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture),
             AccountLabel = "user@example.com",
         };
 

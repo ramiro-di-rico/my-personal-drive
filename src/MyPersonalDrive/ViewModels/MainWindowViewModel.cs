@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Text.Json;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Localization;
 using MyPersonalDrive.Services.Providers;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Services.Providers.Proton;
@@ -83,7 +84,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _googleDriveClientId;
     private string _googleDriveClientSecret;
     private string _currentPath;
-    private string _statusMessage = "Seleccioná un ejecutable de la CLI de Proton Drive para empezar.";
+    private LocalizedText _statusText = LocalizedText.Of(StringKeys.Status.PickCliInitial);
+    private string _statusMessage = Localizer.Instance.T(StringKeys.Status.PickCliInitial);
     private bool _isWarning;
     private bool _isLoading;
     private bool _isAuthenticated;
@@ -95,22 +97,23 @@ public sealed class MainWindowViewModel : ObservableObject
     private double _commandConsoleMaxHeight = 180;
     private double _commandConsoleOpacity = 1;
     private bool _commandConsoleHitTestVisible = true;
-    private string _activeCommand = "Inactivo";
-    private string _commandLogText = "No hay ningún comando de la CLI en ejecución.";
-    private string _commandConsoleToggleLabel = "Ocultar la actividad de la CLI";
+    private string _activeCommand = Localizer.Instance.T(StringKeys.Console.Idle);
+    private string _commandLogText = Localizer.Instance.T(StringKeys.Console.NoCommandRunning);
+    private string _commandConsoleToggleLabel = Localizer.Instance.T(StringKeys.Console.ToggleHide);
     private string _commandConsoleToggleGlyph = "▼";
-    private string _selectedName = "Ninguno";
-    private string _selectedKind = "Ninguno";
-    private string _selectedPath = "Ninguno";
-    private string _selectedSize = "Ninguno";
-    private string _selectedModified = "Ninguno";
-    private string _selectedOwner = "Ninguno";
-    private string _selectedShared = "Ninguno";
+    private string _selectedName = Localizer.Instance.T(StringKeys.Common.None);
+    private string _selectedKind = Localizer.Instance.T(StringKeys.Common.None);
+    private string _selectedPath = Localizer.Instance.T(StringKeys.Common.None);
+    private string _selectedSize = Localizer.Instance.T(StringKeys.Common.None);
+    private string _selectedModified = Localizer.Instance.T(StringKeys.Common.None);
+    private string _selectedOwner = Localizer.Instance.T(StringKeys.Common.None);
+    private string _selectedShared = Localizer.Instance.T(StringKeys.Common.None);
     private bool _hasSelection;
+    private DriveItem? _selectedItem;
     private MainView _activeView = MainView.Explorer;
     private bool _isViewerVisible;
     private bool _isViewerLoading;
-    private string _viewerTitle = "Visor";
+    private string _viewerTitle = Localizer.Instance.T(StringKeys.Viewer.Title);
     private string _viewerPath = string.Empty;
     private string _viewerText = string.Empty;
     private string _viewerNote = string.Empty;
@@ -129,23 +132,23 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _searchText = string.Empty;
     private string _filterSummary = string.Empty;
     private bool _sortDescending;
-    private const string UnknownCliVersion = "Desconocida";
+    private static string UnknownCliVersion => Localizer.Instance.T(StringKeys.Common.Unknown);
     private string _cliVersion = UnknownCliVersion;
     private bool _isCheckingCliVersion;
     private readonly ICliReleaseFeed? _releaseFeed;
     private readonly CliUpdateInstaller _updateInstaller;
     private readonly Func<bool> _isSyncInProgress;
     private CliReleaseCandidate? _availableRelease;
-    private string _cliUpdateStatus = "Todavía no se verificó.";
+    private string _cliUpdateStatus = Localizer.Instance.T(StringKeys.CliUpdate.Unchecked);
     private bool _isCliUpdateAvailable;
     private bool _isCliUpdateBusy;
     private string _theme = "Default";
     private int _bandwidthLimitKbps;
     private double _viewerZoom;
     private string _defaultSyncFolder = string.Empty;
-    private string _connectionStatus = "En línea";
+    private string _connectionStatus = Localizer.Instance.T(StringKeys.Connection.StateOnline);
     private string _connectionStatusKind = "Online";
-    private string _connectionStatusDescription = "Conectado";
+    private string _connectionStatusDescription = Localizer.Instance.T(StringKeys.Connection.Initial);
     private long _quotaUsedBytes;
     private long _quotaTotalBytes = 500L * 1024 * 1024 * 1024;
 
@@ -198,7 +201,11 @@ public sealed class MainWindowViewModel : ObservableObject
 
             // OneDrive's account label lives on its live GraphAuthenticator, not settings, until
             // AuthenticateAsync persists it — settings can lag behind what's actually signed in.
-            var liveLabel = _provider is OneDriveProvider { Auth: GraphAuthenticator { AccountLabel: { } label } } && label != "Sin sesión iniciada."
+            // The "not signed in" placeholder is this view model's own (OneDriveAccountLabel
+            // below); GraphAuthenticator reports null when there is no session, which the pattern
+            // already excludes. The comparison against that sentence was redundant, and would
+            // have quietly stopped matching the moment the sentence was translated.
+            var liveLabel = _provider is OneDriveProvider { Auth: GraphAuthenticator { AccountLabel: { } label } }
                 ? label
                 : null;
 
@@ -325,9 +332,9 @@ public sealed class MainWindowViewModel : ObservableObject
     /// gap: with OneDrive as the browsed account, a hardcoded "Proton Drive browser" header was
     /// actively misleading, not just cosmetically stale).
     /// </summary>
-    public string BrowserHeaderTitle => $"Explorador de {_provider.DisplayName}";
+    public string BrowserHeaderTitle => Loc.F(StringKeys.Explorer.HeaderTitle, _provider.DisplayName);
 
-    public string BrowserHeaderSubtitle => $"Explorando {RootPath} en {_provider.DisplayName}.";
+    public string BrowserHeaderSubtitle => Loc.F(StringKeys.Explorer.HeaderSubtitle, RootPath, _provider.DisplayName);
 
     /// <summary>Which connection-card block the settings view shows — Proton's, OneDrive's, Google Drive's, Nextcloud's, or S3's.</summary>
     public bool IsProtonActive => _provider.Id == ProviderId.Proton;
@@ -371,13 +378,13 @@ public sealed class MainWindowViewModel : ObservableObject
     public string OneDriveAccountLabel
         => _provider is OneDriveProvider oneDrive && oneDrive.Auth is GraphAuthenticator { AccountLabel: { } label }
             ? label
-            : "Sin sesión iniciada.";
+            : Loc.T(StringKeys.Provider.NoSession);
 
     /// <summary>The signed-in Google Drive account's label (email/name), or a "not signed in" placeholder for the card.</summary>
     public string GoogleDriveAccountLabel
         => _provider is GoogleDriveProvider googleDrive && googleDrive.Auth is GoogleDriveAuthenticator { AccountLabel: { } googleLabel }
             ? googleLabel
-            : "Sin sesión iniciada.";
+            : Loc.T(StringKeys.Provider.NoSession);
 
     public MainWindowViewModel(
         ICloudDriveProvider provider,
@@ -466,7 +473,7 @@ public sealed class MainWindowViewModel : ObservableObject
             _commandConsoleMaxHeight = 0;
             _commandConsoleOpacity = 0;
             _commandConsoleHitTestVisible = false;
-            _commandConsoleToggleLabel = "Mostrar la actividad de la CLI";
+            _commandConsoleToggleLabel = Loc.T(StringKeys.Console.ToggleShow);
             _commandConsoleToggleGlyph = "▲";
         }
         // The browsed provider's own activity is tagged like any other session's, so interleaved
@@ -531,6 +538,11 @@ public sealed class MainWindowViewModel : ObservableObject
         UpdateQuotaMetrics();
 
         _browserSessions.Add(new BrowserAccountSession(_provider, _cacheService, _metricsStore, _statsScanner, _previewLoader, _imagePreviewLoader, _pdfPreviewLoader));
+
+        // Every derived label on this view model reads through Loc at get time, so a language
+        // change only has to tell the bindings to re-read (docs/PLAN-I18N.md §3). The view model
+        // outlives the window, so there is nothing to unsubscribe from.
+        Localizer.Instance.LanguageChanged += (_, _) => OnLanguageChanged();
     }
 
     /// <summary>
@@ -704,6 +716,42 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public bool IsDarkTheme => string.Equals(_theme, "Dark", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// The languages the Settings picker offers. A fixed list from
+    /// <see cref="LanguageCatalog"/> — adding one is a row there plus a locale file, and this
+    /// property needs no change (docs/PLAN-I18N.md, Appendix B).
+    /// </summary>
+    public IReadOnlyList<Language> Languages => LanguageCatalog.Available;
+
+    /// <summary>
+    /// The interface language. Mirrors <see cref="ThemePreference"/> deliberately: apply first,
+    /// then persist, so a failed write leaves the user looking at what they picked rather than
+    /// silently reverting.
+    /// </summary>
+    public Language SelectedLanguage
+    {
+        get => Loc.Current;
+        set
+        {
+            if (value is null || value.Code == Loc.Current.Code)
+            {
+                return;
+            }
+
+            Localizer.Instance.SetLanguage(value.Code);
+            _settings.Update(s => s.Language = value.Code);
+        }
+    }
+
+    /// <summary>
+    /// The provider cards' sign-in/out tooltips. One key each, taking the provider's name, instead
+    /// of a near-duplicate literal per provider — and the card these sit on is only visible while
+    /// its own provider is active, so the active name is always the right one.
+    /// </summary>
+    public string SignInTooltip => Loc.F(StringKeys.Settings.SignInTooltip, ActiveProviderDisplayName);
+
+    public string SignOutTooltip => Loc.F(StringKeys.Settings.SignOutTooltip, ActiveProviderDisplayName);
+
     public int BandwidthLimitKbps
     {
         get => _bandwidthLimitKbps;
@@ -765,7 +813,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// Which remedy, derived from the typed <see cref="DriveErrorKind"/> rather than from
     /// <see cref="StatusMessage"/>'s text (AGENTS.md: "Errors are typed").
     /// </summary>
-    public string StatusActionLabel => NeedsReauthentication ? "Reconectar" : "Reintentar";
+    public string StatusActionLabel => Loc.T(NeedsReauthentication ? StringKeys.Status.ActionReconnect : StringKeys.Status.ActionRetry);
 
     public AsyncCommand StatusActionCommand => NeedsReauthentication ? AuthenticateCommand : RefreshCommand;
 
@@ -799,13 +847,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
             if (!_quotaUsedIsKnown)
             {
-                return $"— / {total}";
+                return Loc.F(StringKeys.Quota.Unknown, total);
             }
 
             var used = ByteSize.Format(_quotaUsedBytes);
             return _quotaUsedIsPartial
-                ? $"≥ {used} / {total}"
-                : $"{used} / {total} ({QuotaPercent:F0} % usado)";
+                ? Loc.F(StringKeys.Quota.AtLeast, used, total)
+                : Loc.F(StringKeys.Quota.Exact, used, total, QuotaPercent.ToString("F0", Loc.Culture));
         }
     }
 
@@ -817,24 +865,22 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get
         {
-            const string TotalCaveat =
-                "El total es un valor fijo por proveedor: todavía no se consulta la cuota real de la cuenta.";
+            var totalCaveat = Loc.T(StringKeys.Quota.Caveat);
 
             if (!_quotaUsedIsKnown)
             {
-                return $"Uso desconocido: el proveedor no informó tamaños para la carpeta raíz. {TotalCaveat}";
+                return Loc.F(StringKeys.Quota.TooltipUnknown, totalCaveat);
             }
 
             return _quotaUsedIsPartial
-                ? "Mínimo estimado: suma únicamente los archivos de la raíz con tamaño conocido, sin el "
-                  + $"contenido de las subcarpetas. {TotalCaveat}"
-                : $"Suma de los archivos de la raíz. {TotalCaveat}";
+                ? Loc.F(StringKeys.Quota.TooltipPartial, totalCaveat)
+                : Loc.F(StringKeys.Quota.TooltipExact, totalCaveat);
         }
     }
 
     public string QuotaSummary => _quotaUsedIsKnown
-        ? $"{ByteSize.Format(_quotaUsedBytes)} / {ByteSize.Format(_quotaTotalBytes)}"
-        : $"— / {ByteSize.Format(_quotaTotalBytes)}";
+        ? Loc.F(StringKeys.Quota.Summary, ByteSize.Format(_quotaUsedBytes), ByteSize.Format(_quotaTotalBytes))
+        : Loc.F(StringKeys.Quota.Unknown, ByteSize.Format(_quotaTotalBytes));
 
     /// <summary>Human-readable result of the last update check, or the progress of a running install.</summary>
     public string CliUpdateStatus
@@ -947,7 +993,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 return string.Empty;
             }
 
-            return RootItems.Count == 1 ? "1 resultado" : $"{RootItems.Count} resultados";
+            return Loc.Plural(StringKeys.Explorer.SearchResults, RootItems.Count);
         }
     }
 
@@ -1089,7 +1135,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 CliVersion = UnknownCliVersion;
                 _availableRelease = null;
                 IsCliUpdateAvailable = false;
-                CliUpdateStatus = "Todavía no se verificó.";
+                CliUpdateStatus = Loc.T(StringKeys.CliUpdate.Unchecked);
                 PersistSettings();
                 RaiseCommandStates();
             }
@@ -1171,17 +1217,49 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// The standing status line. Settable with a plain string for text that is already final
+    /// (the view's own drag handlers do this); everything inside this view model goes through
+    /// <see cref="SetStatus(LocalizedText)"/> instead, so the line can be re-rendered when the
+    /// interface language changes rather than being frozen in the language it was written in
+    /// (docs/PLAN-I18N.md §6.3).
+    /// </summary>
     public string StatusMessage
     {
         get => _statusMessage;
-        set
+        set => SetStatus(LocalizedText.Verbatim(value));
+    }
+
+    /// <summary>The unrendered form, so tests can assert on a key instead of on prose.</summary>
+    internal LocalizedText StatusText => _statusText;
+
+    private void SetStatus(LocalizedText text)
+    {
+        _statusText = text;
+        if (SetProperty(ref _statusMessage, text.Render(), nameof(StatusMessage)))
         {
-            if (SetProperty(ref _statusMessage, value))
-            {
-                IsWarning = false;
-                UpdateConnectionTelemetry();
-            }
+            IsWarning = false;
+            UpdateConnectionTelemetry();
         }
+    }
+
+    private void SetStatus(string key, params object?[] args) => SetStatus(LocalizedText.Of(key, args));
+
+    private void SetStatusPlural(string keyPrefix, int count, params object?[] args)
+        => SetStatus(LocalizedText.Plural(keyPrefix, count, args));
+
+    /// <summary>
+    /// Re-renders the state that is stored rather than derived, after the interface language
+    /// changes. Deliberately not routed through the normal setters: <see cref="SetStatus(LocalizedText)"/>
+    /// clears <see cref="IsWarning"/>, and a language change must not make a standing warning
+    /// disappear.
+    /// </summary>
+    private void OnLanguageChanged()
+    {
+        _statusMessage = _statusText.Render();
+        RefreshSelectionLabels();
+        UpdateConnectionTelemetry();
+        OnAllPropertiesChanged();
     }
 
     public bool IsWarning
@@ -1218,8 +1296,22 @@ public sealed class MainWindowViewModel : ObservableObject
     public int ActiveOperationCount
     {
         get => _activeOperationCount;
-        private set => SetProperty(ref _activeOperationCount, value);
+        private set
+        {
+            if (SetProperty(ref _activeOperationCount, value))
+            {
+                OnPropertyChanged(nameof(ActiveOperationsText));
+            }
+        }
     }
+
+    /// <summary>
+    /// The floating status line's count. Was a <c>StringFormat</c> in the markup reading
+    /// "{0} operación(es) activa(s)" — a Spanish-specific plural hack that no other language can
+    /// reproduce, and which a XAML format string has no way to express. Plural selection belongs
+    /// here (docs/PLAN-I18N.md §5).
+    /// </summary>
+    public string ActiveOperationsText => Loc.Plural(StringKeys.Console.ActiveOperations, ActiveOperationCount);
 
     /// <summary>The most recent line added to the log, regardless of the search/warnings filter below — always the real last event, not whatever the filter happens to be hiding.</summary>
     public string? LastLogLine
@@ -1431,12 +1523,9 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>Whether the Status panel should show the single-item details block.</summary>
     public bool IsSingleSelected => SelectedCount == 1;
 
-    public string SelectionSummaryText => SelectedCount switch
-    {
-        0 => string.Empty,
-        1 => "1 elemento seleccionado",
-        _ => $"{SelectedCount} elementos seleccionados",
-    };
+    public string SelectionSummaryText => SelectedCount == 0
+        ? string.Empty
+        : Loc.Plural(StringKeys.Explorer.SelectionCount, SelectedCount);
 
     public bool IsCommandConsoleVisible
     {
@@ -1448,7 +1537,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 CommandConsoleMaxHeight = value ? 180 : 0;
                 CommandConsoleOpacity = value ? 1 : 0;
                 CommandConsoleHitTestVisible = value;
-                CommandConsoleToggleLabel = value ? "Ocultar la actividad de la CLI" : "Mostrar la actividad de la CLI";
+                CommandConsoleToggleLabel = Loc.T(value ? StringKeys.Console.ToggleHide : StringKeys.Console.ToggleShow);
                 CommandConsoleToggleGlyph = value ? "▼" : "▲";
                 _settings.Update(s => s.ShowCommandConsole = value);
                 RaiseCommandStates();
@@ -1543,9 +1632,9 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        StatusMessage = needsCliPath && string.IsNullOrWhiteSpace(CliPath)
-            ? $"Seleccioná un ejecutable de la CLI de {_provider.DisplayName} para empezar."
-            : $"Iniciá sesión para cargar {RootPath}.";
+        SetStatus(needsCliPath && string.IsNullOrWhiteSpace(CliPath)
+            ? LocalizedText.Of(StringKeys.Status.PickCli, _provider.DisplayName)
+            : LocalizedText.Of(StringKeys.Status.SignInToLoad, RootPath));
     }
 
     private bool CanAuthenticate() => !IsLoading && !IsAuthenticated && _provider.Id switch
@@ -1610,20 +1699,21 @@ public sealed class MainWindowViewModel : ObservableObject
                 Metrics.Update(metrics);
             }
 
-            StatusMessage = metrics.IsComplete
-                ? $"Analizadas {metrics.ScannedFolderCount} carpetas en {path}."
-                : $"Análisis de {path} cancelado tras {metrics.ScannedFolderCount} carpetas.";
+            SetStatusPlural(
+                metrics.IsComplete ? StringKeys.Status.ScanDone : StringKeys.Status.ScanCancelled,
+                metrics.ScannedFolderCount,
+                path);
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatDriveError(path, ex);
+            SetStatus(FormatDriveError(path, ex));
             IsWarning = true;
         }
         catch (DbException ex)
         {
             // The scan itself succeeded; only storing it failed. Say so rather than implying the
             // minutes were wasted.
-            StatusMessage = $"Se analizó {path} pero no se pudo guardar el resultado: {ex.Message}";
+            SetStatus(StringKeys.Status.ScanSaveFailed, path, ex.Message);
             IsWarning = true;
         }
         finally
@@ -1677,7 +1767,7 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Abriendo la autenticación de {_provider.DisplayName}...";
+            SetStatus(StringKeys.Status.AuthOpening, _provider.DisplayName);
             await _provider.Auth.AuthenticateAsync();
             IsAuthenticated = true;
             _settings.Update(settings =>
@@ -1706,7 +1796,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatDriveError("auth login", ex);
+            SetStatus(FormatDriveError("auth login", ex));
         }
         finally
         {
@@ -1719,7 +1809,7 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Cerrando la sesión de {_provider.DisplayName}...";
+            SetStatus(StringKeys.Status.AuthSigningOut, _provider.DisplayName);
             await _provider.Auth.LogoutAsync();
             IsAuthenticated = false;
             _settings.Update(settings => settings.SetProviderAuthenticated(_provider.Id, false));
@@ -1731,11 +1821,11 @@ public sealed class MainWindowViewModel : ObservableObject
             OnPropertyChanged(nameof(OneDriveAccountLabel));
             OnPropertyChanged(nameof(GoogleDriveAccountLabel));
             ResetBrowserState();
-            StatusMessage = $"Se cerró la sesión de {_provider.DisplayName}.";
+            SetStatus(StringKeys.Status.AuthSignedOut, _provider.DisplayName);
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatDriveError("auth logout", ex);
+            SetStatus(FormatDriveError("auth logout", ex));
         }
         finally
         {
@@ -1795,7 +1885,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var session = _browserSessions.FirstOrDefault(candidate => candidate.Provider.Id == id);
         if (session is null)
         {
-            StatusMessage = $"{id} no está configurado.";
+            SetStatus(StringKeys.Status.ProviderNotConfigured, id);
             OnPropertyChanged(nameof(SelectedProvider));
             OnPropertyChanged(nameof(SelectedProviderIndex));
             return;
@@ -1861,12 +1951,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
         if (!IsAuthenticated)
         {
-            StatusMessage = $"{_provider.DisplayName} requiere autenticación. Iniciá sesión para acceder a los archivos.";
+            SetStatus(StringKeys.Status.ProviderNeedsAuth, _provider.DisplayName);
             ResetBrowserState();
             return;
         }
 
-        StatusMessage = $"Se cambió a {_provider.DisplayName}.";
+        SetStatus(StringKeys.Status.ProviderSwitched, _provider.DisplayName);
 
         try
         {
@@ -1876,7 +1966,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsAuthenticated = false;
             UpdateConnectionTelemetry();
-            StatusMessage = $"{_provider.DisplayName} requiere autenticación. Iniciá sesión para acceder a los archivos.";
+            SetStatus(StringKeys.Status.ProviderNeedsAuth, _provider.DisplayName);
             ResetBrowserState();
         }
     }
@@ -1906,7 +1996,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             _navigationHistory.Push(previousPath);
             RaiseCommandStates();
-            StatusMessage = FormatDriveError(previousPath, ex);
+            SetStatus(FormatDriveError(previousPath, ex));
         }
     }
 
@@ -1939,7 +2029,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 RaiseCommandStates();
             }
 
-            StatusMessage = FormatDriveError(path, ex);
+            SetStatus(FormatDriveError(path, ex));
         }
     }
 
@@ -1951,7 +2041,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatDriveError(CurrentPath, ex);
+            SetStatus(FormatDriveError(CurrentPath, ex));
         }
     }
 
@@ -1960,7 +2050,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var picker = RequestUploadFilesAsync;
         if (picker is null)
         {
-            StatusMessage = "Subir no está disponible.";
+            SetStatus(StringKeys.Status.UploadUnavailable);
             return;
         }
 
@@ -1973,23 +2063,23 @@ public sealed class MainWindowViewModel : ObservableObject
         var strategy = await ResolveUploadConflictStrategyAsync(files, CurrentPath);
         if (strategy is null)
         {
-            StatusMessage = "Subida cancelada.";
+            SetStatus(StringKeys.Status.UploadCancelled);
             return;
         }
 
         try
         {
             IsLoading = true;
-            StatusMessage = $"Subiendo {files.Count} archivo(s) a {CurrentPath}...";
+            SetStatusPlural(StringKeys.Status.UploadProgress, files.Count, CurrentPath);
             await _provider.Operations.UploadFilesAsync(files, CurrentPath, strategy.Value);
-            StatusMessage = $"Se subieron {files.Count} archivo(s) a {CurrentPath}.";
+            SetStatusPlural(StringKeys.Status.UploadDone, files.Count, CurrentPath);
             await InvalidateDeepMetricsAsync(CurrentPath);
 
             _ = RefreshAsync(); // Refresh in background
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatDriveError(CurrentPath, ex);
+            SetStatus(FormatDriveError(CurrentPath, ex));
         }
         finally
         {
@@ -2050,7 +2140,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var strategy = await ResolveUploadConflictStrategyAsync(localPaths, targetPath);
         if (strategy is null)
         {
-            StatusMessage = "Subida cancelada.";
+            SetStatus(StringKeys.Status.UploadCancelled);
             return;
         }
 
@@ -2060,12 +2150,13 @@ public sealed class MainWindowViewModel : ObservableObject
         // "Loading.../Showing cached items..." messages would otherwise immediately overwrite this
         // one. It's still the last word for a moment, and the refresh's own eventual "Loaded N
         // items..." is itself a second, later confirmation once it lands.
-        StatusMessage = result.Status switch
+        var batch = DescribeBatchForStatus(localPaths);
+        SetStatus(result.Status switch
         {
-            TransferStatus.Done => $"Subido {DescribeBatchForStatus(localPaths)} a {targetPath}.",
-            TransferStatus.Failed => $"Error al subir {DescribeBatchForStatus(localPaths)}: {result.ErrorMessage}",
-            _ => $"Subida de {DescribeBatchForStatus(localPaths)} cancelada.",
-        };
+            TransferStatus.Done => LocalizedText.Of(StringKeys.Status.UploadDoneItem, batch, targetPath),
+            TransferStatus.Failed => LocalizedText.Of(StringKeys.Status.UploadFailedItem, batch, result.ErrorMessage),
+            _ => LocalizedText.Of(StringKeys.Status.UploadCancelledItem, batch),
+        });
 
         // Fire-and-forget, same as the toolbar's own UploadAsync: RefreshAsync ends in a
         // Dispatcher.UIThread.InvokeAsync post that only completes with a running Avalonia
@@ -2114,7 +2205,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 var strategy = await RequestConflictStrategyAsync(conflictingNames);
                 if (strategy == UploadConflictStrategy.None)
                 {
-                    StatusMessage = "Descarga cancelada.";
+                    SetStatus(StringKeys.Status.DownloadCancelled);
                     return;
                 }
 
@@ -2143,14 +2234,14 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var failed = results.Where(r => r.Status == TransferStatus.Failed).ToList();
         var done = results.Count(r => r.Status == TransferStatus.Done);
-        StatusMessage = failed.Count switch
+        SetStatus(failed.Count switch
         {
             0 when done > 0 => done == 1
-                ? $"Descargado {toDownload[0].Name} a {targetLocalPath}."
-                : $"Descargados {done} elemento(s) a {targetLocalPath}.",
-            0 => $"Descarga a {targetLocalPath} cancelada.",
-            _ => $"{failed.Count} de {results.Count} descarga(s) fallaron: {failed[0].ErrorMessage}",
-        };
+                ? LocalizedText.Of(StringKeys.Status.DownloadDoneTo, toDownload[0].Name, targetLocalPath)
+                : LocalizedText.Plural(StringKeys.Status.DownloadDone, done, targetLocalPath),
+            0 => LocalizedText.Of(StringKeys.Status.DownloadCancelledTo, targetLocalPath),
+            _ => LocalizedText.Of(StringKeys.Status.DownloadFailed, failed.Count, results.Count, failed[0].ErrorMessage),
+        });
     }
 
     private async Task CreateFolderAsync()
@@ -2158,7 +2249,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var requester = RequestCreateFolderAsync;
         if (requester is null)
         {
-            StatusMessage = "Crear carpeta no está disponible.";
+            SetStatus(StringKeys.Status.NewFolderUnavailable);
             return;
         }
 
@@ -2171,9 +2262,9 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Creando la carpeta '{folderName}' en {CurrentPath}...";
+            SetStatus(StringKeys.Status.NewFolderProgress, folderName, CurrentPath);
             await _provider.Operations.CreateFolderAsync(CurrentPath, folderName);
-            StatusMessage = $"Se creó la carpeta '{folderName}' en {CurrentPath}.";
+            SetStatus(StringKeys.Status.NewFolderDone, folderName, CurrentPath);
             
             // Update DB immediately
             var newFolderPath = _provider.Paths.Combine(CurrentPath, folderName);
@@ -2184,7 +2275,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatDriveError(CurrentPath, ex);
+            SetStatus(FormatDriveError(CurrentPath, ex));
         }
         finally
         {
@@ -2197,7 +2288,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var picker = RequestDownloadFolderAsync;
         if (picker is null)
         {
-            StatusMessage = "Descargar no está disponible.";
+            SetStatus(StringKeys.Status.DownloadUnavailable);
             return;
         }
 
@@ -2210,13 +2301,13 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Descargando {item.Name}...";
+            SetStatus(StringKeys.Status.DownloadProgress, item.Name);
             await _provider.Operations.DownloadFileAsync(item.Path, folder);
-            StatusMessage = $"Se descargó {item.Name} a {folder}.";
+            SetStatus(StringKeys.Status.DownloadDoneTo, item.Name, folder);
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatDriveError(item.Path, ex);
+            SetStatus(FormatDriveError(item.Path, ex));
         }
         finally
         {
@@ -2250,7 +2341,12 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        StatusMessage = $"{item.Name} no se puede abrir en el visor: solo texto (hasta {TextPreviewPolicy.MaxPreviewBytes / 1024} KB), imágenes (hasta {ImagePreviewPolicy.MaxPreviewBytes / (1024 * 1024)} MB) o PDF (hasta {PdfPreviewPolicy.MaxPreviewBytes / (1024 * 1024)} MB).";
+        SetStatus(
+            StringKeys.Status.ViewerUnsupported,
+            item.Name,
+            TextPreviewPolicy.MaxPreviewBytes / 1024,
+            ImagePreviewPolicy.MaxPreviewBytes / (1024 * 1024),
+            PdfPreviewPolicy.MaxPreviewBytes / (1024 * 1024));
         IsWarning = true;
     }
 
@@ -2262,7 +2358,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (_previewLoader is null)
         {
-            StatusMessage = "El visor de texto no está disponible.";
+            SetStatus(StringKeys.Status.ViewerTextUnavailable);
             IsWarning = true;
             return;
         }
@@ -2280,15 +2376,15 @@ public sealed class MainWindowViewModel : ObservableObject
             if (preview.IsBinary)
             {
                 ViewerText = string.Empty;
-                ViewerNote = $"{preview.ByteCount:n0} bytes — no parece ser un archivo de texto, así que no se muestra su contenido.";
-                StatusMessage = $"{item.Name} no es un archivo de texto.";
+                ViewerNote = Loc.F(StringKeys.Viewer.NotAText, preview.ByteCount.ToString("n0", Loc.Culture));
+                SetStatus(StringKeys.Status.ViewerNotAText, item.Name);
                 IsWarning = true;
                 return;
             }
 
             ViewerText = preview.Text;
             ViewerNote = FormatViewerNote(preview);
-            StatusMessage = $"Mostrando {item.Name} en el visor.";
+            SetStatus(StringKeys.Status.ViewerShowing, item.Name);
         }
         catch (OperationCanceledException)
         {
@@ -2296,14 +2392,14 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            ViewerNote = "No se pudo abrir el archivo.";
-            StatusMessage = FormatDriveError(item.Path, ex);
+            ViewerNote = Loc.T(StringKeys.Status.ViewerOpenFailed);
+            SetStatus(FormatDriveError(item.Path, ex));
             IsWarning = true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            ViewerNote = "No se pudo leer el archivo descargado.";
-            StatusMessage = $"No se pudo abrir {item.Name} en el visor: {ex.Message}";
+            ViewerNote = Loc.T(StringKeys.Status.ViewerReadFailed);
+            SetStatus(StringKeys.Status.ViewerError, item.Name, ex.DescribeForUser().Render());
             IsWarning = true;
         }
         finally
@@ -2317,7 +2413,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (_imagePreviewLoader is null)
         {
-            StatusMessage = "El visor de imágenes no está disponible.";
+            SetStatus(StringKeys.Status.ViewerImageUnavailable);
             IsWarning = true;
             return;
         }
@@ -2333,8 +2429,8 @@ public sealed class MainWindowViewModel : ObservableObject
             }
 
             ViewerImageBytes = preview.Bytes;
-            ViewerNote = $"{preview.ByteCount:n0} bytes";
-            StatusMessage = $"Mostrando {item.Name} en el visor.";
+            ViewerNote = Loc.F(StringKeys.Viewer.NoteBytes, preview.ByteCount.ToString("n0", Loc.Culture));
+            SetStatus(StringKeys.Status.ViewerShowing, item.Name);
         }
         catch (OperationCanceledException)
         {
@@ -2342,14 +2438,14 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            ViewerNote = "No se pudo abrir el archivo.";
-            StatusMessage = FormatDriveError(item.Path, ex);
+            ViewerNote = Loc.T(StringKeys.Status.ViewerOpenFailed);
+            SetStatus(FormatDriveError(item.Path, ex));
             IsWarning = true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            ViewerNote = "No se pudo leer el archivo descargado.";
-            StatusMessage = $"No se pudo abrir {item.Name} en el visor: {ex.Message}";
+            ViewerNote = Loc.T(StringKeys.Status.ViewerReadFailed);
+            SetStatus(StringKeys.Status.ViewerError, item.Name, ex.DescribeForUser().Render());
             IsWarning = true;
         }
         finally
@@ -2363,7 +2459,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (_pdfPreviewLoader is null)
         {
-            StatusMessage = "El visor de PDF no está disponible.";
+            SetStatus(StringKeys.Status.ViewerPdfUnavailable);
             IsWarning = true;
             return;
         }
@@ -2380,9 +2476,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
             ViewerPdfPages = preview.Pages;
             ViewerNote = preview.Pages.Count < preview.TotalPageCount
-                ? $"Mostrando las primeras {preview.Pages.Count} de {preview.TotalPageCount} páginas"
-                : $"{preview.TotalPageCount:n0} página(s)";
-            StatusMessage = $"Mostrando {item.Name} en el visor.";
+                ? Loc.F(StringKeys.Viewer.NotePages, preview.Pages.Count, preview.TotalPageCount)
+                : Loc.Plural(StringKeys.Viewer.NotePageCount, preview.TotalPageCount);
+            SetStatus(StringKeys.Status.ViewerShowing, item.Name);
         }
         catch (OperationCanceledException)
         {
@@ -2390,14 +2486,14 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            ViewerNote = "No se pudo abrir el archivo.";
-            StatusMessage = FormatDriveError(item.Path, ex);
+            ViewerNote = Loc.T(StringKeys.Status.ViewerOpenFailed);
+            SetStatus(FormatDriveError(item.Path, ex));
             IsWarning = true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            ViewerNote = "No se pudo leer el archivo descargado.";
-            StatusMessage = $"No se pudo abrir {item.Name} en el visor: {ex.Message}";
+            ViewerNote = Loc.T(StringKeys.Status.ViewerReadFailed);
+            SetStatus(StringKeys.Status.ViewerError, item.Name, ex.DescribeForUser().Render());
             IsWarning = true;
         }
         finally
@@ -2425,8 +2521,8 @@ public sealed class MainWindowViewModel : ObservableObject
         ViewerText = string.Empty;
         ViewerImageBytes = null;
         ViewerPdfPages = null;
-        ViewerNote = "Descargando el archivo…";
-        StatusMessage = $"Abriendo {item.Name} en el visor…";
+        ViewerNote = Loc.T(StringKeys.Viewer.NoteDownloading);
+        SetStatus(StringKeys.Status.ViewerOpening, item.Name);
         return cts;
     }
 
@@ -2444,12 +2540,13 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         // "más de" when the read stopped at the byte limit: ByteCount is what was read, not the
         // file's size, and printing it as the size would be a lie of exactly one byte.
+        var localizer = Localizer.Instance;
         var size = preview.ByteCount > TextPreviewPolicy.MaxPreviewBytes
-            ? $"más de {TextPreviewPolicy.MaxPreviewBytes:n0} bytes"
-            : $"{preview.ByteCount:n0} bytes";
-        var note = $"{preview.LineCount:n0} líneas · {size} · {preview.EncodingName}";
+            ? localizer.F(StringKeys.Viewer.NoteMoreThan, TextPreviewPolicy.MaxPreviewBytes.ToString("n0", localizer.Culture))
+            : localizer.F(StringKeys.Viewer.NoteBytes, preview.ByteCount.ToString("n0", localizer.Culture));
+        var note = localizer.F(StringKeys.Viewer.NoteText, preview.LineCount.ToString("n0", localizer.Culture), size, preview.EncodingName);
         return preview.IsTruncated
-            ? note + " · vista parcial: el archivo es más largo de lo que muestra el visor"
+            ? note + localizer.T(StringKeys.Viewer.NoteTruncated)
             : note;
     }
 
@@ -2460,7 +2557,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (_selectedNode is not { } node)
         {
-            StatusMessage = "Seleccioná un archivo para verlo.";
+            SetStatus(StringKeys.Status.ViewerSelectFile);
             IsWarning = true;
             return;
         }
@@ -2485,7 +2582,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var requester = RequestRenameAsync;
         if (requester is null)
         {
-            StatusMessage = "Renombrar no está disponible.";
+            SetStatus(StringKeys.Status.RenameUnavailable);
             return;
         }
 
@@ -2498,9 +2595,9 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Renombrando {item.Name} a {newName}...";
+            SetStatus(StringKeys.Status.RenameProgress, item.Name, newName);
             await _provider.Operations.RenameItemAsync(item.Path, newName);
-            StatusMessage = $"Se renombró {item.Name} a {newName}.";
+            SetStatus(StringKeys.Status.RenameDone, item.Name, newName);
 
             // Update DB immediately
             var parentPath = GetParentPath(item.Path);
@@ -2516,7 +2613,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatDriveError(item.Path, ex);
+            SetStatus(FormatDriveError(item.Path, ex));
         }
         finally
         {
@@ -2529,7 +2626,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var requester = RequestCopyNameAsync;
         if (requester is null)
         {
-            StatusMessage = "Copiar no está disponible.";
+            SetStatus(StringKeys.Status.CopyUnavailable);
             return;
         }
 
@@ -2544,16 +2641,16 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Creando una copia de {item.Name} como {displayTarget} en {CurrentPath}...";
+            SetStatus(StringKeys.Status.CopyProgress, item.Name, displayTarget, CurrentPath);
             await _provider.Operations.CopyItemAsync(item.Path, CurrentPath, string.IsNullOrEmpty(newName) ? null : newName);
-            StatusMessage = $"Se copió {item.Name} correctamente.";
+            SetStatus(StringKeys.Status.CopyDone, item.Name);
             await InvalidateDeepMetricsAsync(CurrentPath);
             
             _ = RefreshAsync(); // Refresh in background
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatDriveError(item.Path, ex);
+            SetStatus(FormatDriveError(item.Path, ex));
         }
         finally
         {
@@ -2567,9 +2664,9 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             var confirm = RequestConfirmationAsync;
             if (confirm is not null && !await confirm(
-                $"¿Mover la carpeta \"{item.Name}\" y todo su contenido a la papelera?"))
+                Loc.F(StringKeys.Status.TrashConfirmFolder, item.Name)))
             {
-                StatusMessage = $"Cancelado: no se movió {item.Name} a la papelera.";
+                SetStatus(StringKeys.Status.TrashCancelledOne, item.Name);
                 return;
             }
         }
@@ -2577,9 +2674,9 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Moviendo {item.Name} a la papelera...";
+            SetStatus(StringKeys.Status.TrashProgress, item.Name);
             await _provider.Operations.TrashItemAsync(item.Path);
-            StatusMessage = $"Se movió {item.Name} a la papelera.";
+            SetStatus(StringKeys.Status.TrashDoneOne, item.Name);
 
             // Update DB immediately
             await _cacheService.RemoveItemAsync(item.Path);
@@ -2589,7 +2686,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatDriveError(item.Path, ex);
+            SetStatus(FormatDriveError(item.Path, ex));
         }
         finally
         {
@@ -2603,12 +2700,12 @@ public sealed class MainWindowViewModel : ObservableObject
         var copy = RequestCopyToClipboardAsync;
         if (copy is null)
         {
-            StatusMessage = "Copiar no está disponible.";
+            SetStatus(StringKeys.Status.CopyUnavailable);
             return;
         }
 
         await copy(item.Path);
-        StatusMessage = $"Ruta copiada: {item.Path}";
+        SetStatus(StringKeys.Status.ClipboardPath, item.Path);
     }
 
     /// <summary>
@@ -2621,7 +2718,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (!_provider.Capabilities.SupportsShareLinks)
         {
-            StatusMessage = $"{_provider.DisplayName} no permite generar enlaces para compartir.";
+            SetStatus(StringKeys.Status.ShareUnsupported, _provider.DisplayName);
             IsWarning = true;
             return;
         }
@@ -2629,23 +2726,23 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Generando un enlace para compartir {item.Name}...";
+            SetStatus(StringKeys.Status.ShareProgress, item.Name);
             var url = await _provider.Operations.CreateShareLinkAsync(item.Path);
 
             var copy = RequestCopyToClipboardAsync;
             if (copy is not null)
             {
                 await copy(url);
-                StatusMessage = $"Enlace copiado al portapapeles: {url}";
+                SetStatus(StringKeys.Status.ShareCopied, url);
             }
             else
             {
-                StatusMessage = $"Enlace para compartir: {url}";
+                SetStatus(StringKeys.Status.ShareLink, url);
             }
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatDriveError(item.Path, ex);
+            SetStatus(FormatDriveError(item.Path, ex));
             IsWarning = true;
         }
         finally
@@ -2669,7 +2766,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var picker = RequestUploadFilesAsync;
         if (picker is null)
         {
-            StatusMessage = "Subir no está disponible.";
+            SetStatus(StringKeys.Status.UploadUnavailable);
             return;
         }
 
@@ -2682,16 +2779,16 @@ public sealed class MainWindowViewModel : ObservableObject
         var strategy = await ResolveUploadConflictStrategyAsync(files, folder.Path);
         if (strategy is null)
         {
-            StatusMessage = "Subida cancelada.";
+            SetStatus(StringKeys.Status.UploadCancelled);
             return;
         }
 
         try
         {
             IsLoading = true;
-            StatusMessage = $"Subiendo {files.Count} archivo(s) a {folder.Path}...";
+            SetStatusPlural(StringKeys.Status.UploadProgress, files.Count, folder.Path);
             await _provider.Operations.UploadFilesAsync(files, folder.Path, strategy.Value);
-            StatusMessage = $"Se subieron {files.Count} archivo(s) a {folder.Path}.";
+            SetStatusPlural(StringKeys.Status.UploadDone, files.Count, folder.Path);
             await InvalidateDeepMetricsAsync(folder.Path);
 
             if (string.Equals(folder.Path, CurrentPath, StringComparison.Ordinal))
@@ -2701,7 +2798,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = FormatDriveError(folder.Path, ex);
+            SetStatus(FormatDriveError(folder.Path, ex));
         }
         finally
         {
@@ -2759,26 +2856,26 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var fields = new List<PropertyField>
         {
-            new("Nombre", item.Name),
-            new("Ruta", item.Path, IsCopyable: true),
-            new("Tipo", item.IsFolder ? "Carpeta" : "Archivo"),
+            new(Loc.T(StringKeys.Common.Name), item.Name),
+            new(Loc.T(StringKeys.Common.Path), item.Path, IsCopyable: true),
+            new(Loc.T(StringKeys.Common.Type), Loc.T(item.IsFolder ? StringKeys.Common.Folder : StringKeys.Common.File)),
         };
 
         // Where this lives on the machine, when it is inside a sync pair. The pair already knows;
         // the dialog just never asked (docs/PLAN-UX-ROUND-2.md §12).
         if (LocalPathFor(item.Path) is { } localPath)
         {
-            fields.Add(new PropertyField("Ruta local", localPath, IsCopyable: true));
+            fields.Add(new PropertyField(Loc.T(StringKeys.Explorer.LocalPath), localPath, IsCopyable: true));
         }
 
         if (item.Size is not null)
         {
-            fields.Add(new PropertyField("Tamaño", $"{item.Size:n0} bytes"));
+            fields.Add(new PropertyField(Loc.T(StringKeys.Common.Size), Loc.F(StringKeys.Common.Bytes, item.Size.Value.ToString("n0", Loc.Culture))));
         }
 
         if (item.ModifiedAt is not null)
         {
-            fields.Add(new PropertyField("Modificado", item.ModifiedAt.Value.ToLocalTime().ToString("g")));
+            fields.Add(new PropertyField(Loc.T(StringKeys.Common.Modified), item.ModifiedAt.Value.ToLocalTime().ToString("g", Loc.Culture)));
         }
 
         await show(item.Name, fields);
@@ -2883,7 +2980,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var files = RootItems.Where(n => n.IsSelected && n.IsFile).Select(n => n.Item).ToList();
         if (files.Count == 0)
         {
-            StatusMessage = "Selecciona al menos un archivo (las carpetas no se pueden descargar en lote).";
+            SetStatus(StringKeys.Status.DownloadSelectFiles);
             IsWarning = true;
             return;
         }
@@ -2891,7 +2988,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var picker = RequestDownloadFolderAsync;
         if (picker is null)
         {
-            StatusMessage = "Descargar no está disponible.";
+            SetStatus(StringKeys.Status.DownloadUnavailable);
             return;
         }
 
@@ -2909,12 +3006,12 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 try
                 {
-                    StatusMessage = $"Descargando {file.Name}...";
+                    SetStatus(StringKeys.Status.DownloadProgress, file.Name);
                     await _provider.Operations.DownloadFileAsync(file.Path, folder);
                 }
                 catch (InvalidOperationException ex)
                 {
-                    failed.Add($"{file.Name}: {FormatDriveError(file.Path, ex)}");
+                    failed.Add(Loc.F(StringKeys.Status.DownloadItemError, file.Name, FormatDriveError(file.Path, ex).Render()));
                 }
             }
         }
@@ -2923,9 +3020,9 @@ public sealed class MainWindowViewModel : ObservableObject
             IsLoading = false;
         }
 
-        StatusMessage = failed.Count == 0
-            ? $"Se descargaron {files.Count} archivo(s) a {folder}."
-            : $"Se descargaron {files.Count - failed.Count} de {files.Count} archivo(s). Fallos: {string.Join("; ", failed)}";
+        SetStatus(failed.Count == 0
+            ? LocalizedText.Plural(StringKeys.Status.DownloadBatchDone, files.Count, folder)
+            : LocalizedText.Of(StringKeys.Status.DownloadBatchPartial, files.Count - failed.Count, files.Count, string.Join("; ", failed)));
         IsWarning = failed.Count > 0;
     }
 
@@ -2941,9 +3038,9 @@ public sealed class MainWindowViewModel : ObservableObject
         if (selected.Any(item => item.IsFolder))
         {
             var confirm = RequestConfirmationAsync;
-            if (confirm is not null && !await confirm($"¿Mover {selected.Count} elemento(s) seleccionado(s) a la papelera? Algunos son carpetas — todo lo que contienen se va también."))
+            if (confirm is not null && !await confirm(Loc.Plural(StringKeys.Status.TrashConfirmMany, selected.Count)))
             {
-                StatusMessage = $"Cancelado: no se movieron {selected.Count} elemento(s) a la papelera.";
+                SetStatusPlural(StringKeys.Status.TrashCancelledMany, selected.Count);
                 return;
             }
         }
@@ -2956,14 +3053,14 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 try
                 {
-                    StatusMessage = $"Moviendo {item.Name} a la papelera...";
+                    SetStatus(StringKeys.Status.TrashProgress, item.Name);
                     await _provider.Operations.TrashItemAsync(item.Path);
                     await _cacheService.RemoveItemAsync(item.Path);
                     await InvalidateDeepMetricsAsync(item.Path);
                 }
                 catch (InvalidOperationException ex)
                 {
-                    failed.Add($"{item.Name}: {FormatDriveError(item.Path, ex)}");
+                    failed.Add(Loc.F(StringKeys.Status.DownloadItemError, item.Name, FormatDriveError(item.Path, ex).Render()));
                 }
             }
         }
@@ -2972,9 +3069,9 @@ public sealed class MainWindowViewModel : ObservableObject
             IsLoading = false;
         }
 
-        StatusMessage = failed.Count == 0
-            ? $"Se movieron {selected.Count} elemento(s) a la papelera."
-            : $"Se movieron {selected.Count - failed.Count} de {selected.Count} elemento(s) a la papelera. Fallos: {string.Join("; ", failed)}";
+        SetStatus(failed.Count == 0
+            ? LocalizedText.Plural(StringKeys.Status.TrashDoneMany, selected.Count)
+            : LocalizedText.Of(StringKeys.Status.TrashPartial, selected.Count - failed.Count, selected.Count, string.Join("; ", failed)));
         IsWarning = failed.Count > 0;
 
         _ = RefreshAsync();
@@ -2989,7 +3086,7 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             IsLoading = true;
-            StatusMessage = $"Cargando {path}...";
+            SetStatus(StringKeys.Status.LoadProgress, path);
 
             // Always update current path and breadcrumbs immediately to show transition
             var previousPath = CurrentPath;
@@ -3008,7 +3105,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (hasCache)
             {
                 DisplayItems(cachedItems);
-                StatusMessage = $"Mostrando los elementos en caché de {path}. Buscando lo último en la CLI...";
+                SetStatus(StringKeys.Status.LoadCached, path);
                 IsLoading = false;
 
                 // Fire and forget CLI fetch to keep UI responsive and command finished. (Tried
@@ -3082,7 +3179,7 @@ public sealed class MainWindowViewModel : ObservableObject
                         ClearSelection();
                     }
 
-                    StatusMessage = $"Se cargaron {RootItems.Count} elementos de {path}.";
+                    SetStatusPlural(StringKeys.Status.LoadDone, RootItems.Count, path);
                     IsLoading = false;
                 }
             });
@@ -3105,7 +3202,7 @@ public sealed class MainWindowViewModel : ObservableObject
             // hanging, so it needs to actually say something.
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                StatusMessage = $"Se cargó {path} pero no se pudo actualizar la caché local: {ex.Message}";
+                SetStatus(StringKeys.Status.LoadCacheFailed, path, ex.Message);
                 IsWarning = true;
             });
         }
@@ -3118,7 +3215,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         if (kind == DriveErrorKind.NotFound)
         {
-            StatusMessage = $"Atención: la ruta '{path}' ya no existe.";
+            SetStatus(StringKeys.Status.LoadGone, path);
             IsWarning = true;
             return;
         }
@@ -3128,7 +3225,7 @@ public sealed class MainWindowViewModel : ObservableObject
             IsAuthenticated = false;
         }
 
-        StatusMessage = FormatDriveError(path, ex);
+        SetStatus(FormatDriveError(path, ex));
         IsWarning = true;
     }
 
@@ -3228,7 +3325,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // a kind chip can be active at once, and the count on screen is the result of whichever of
         // them are, not just the last one applied.
         FilterSummary = _kindFilter is not null || _searchText.Length > 0
-            ? $"Mostrando {RootItems.Count:n0} de {_loadedItems.Count:n0} elementos."
+            ? Loc.F(StringKeys.Explorer.FilterSummary, RootItems.Count.ToString("n0", Loc.Culture), _loadedItems.Count.ToString("n0", Loc.Culture))
             : string.Empty;
 
         // Fire and forget: a stored folder size is a nice-to-have annotation, and the rows must
@@ -3316,15 +3413,39 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void SelectItem(DriveItem item)
     {
-        SelectedName = item.Name;
-        SelectedKind = item.IsFolder ? "Carpeta" : "Archivo";
-        SelectedPath = item.Path;
-        SelectedSize = item.Size is null ? "Ninguno" : $"{item.Size:n0} bytes";
-        SelectedModified = item.ModifiedAt is { } modifiedAt ? modifiedAt.ToLocalTime().ToString("g") : "Ninguno";
-        SelectedOwner = item.Owner ?? "Ninguno";
-        SelectedShared = item.IsShared ? "Sí" : "No";
+        _selectedItem = item;
+        RefreshSelectionLabels();
         HasSelection = true;
-        StatusMessage = $"Se seleccionó {item.Name}.";
+        SetStatus(StringKeys.Status.Selected, item.Name);
+    }
+
+    /// <summary>
+    /// Derives the details sidebar's seven labels from the selected item. Split out of
+    /// <see cref="SelectItem"/> so a language change can re-derive them without also re-announcing
+    /// the selection in the status line.
+    /// </summary>
+    private void RefreshSelectionLabels()
+    {
+        var none = Loc.T(StringKeys.Common.None);
+        if (_selectedItem is not { } item)
+        {
+            SelectedName = none;
+            SelectedKind = none;
+            SelectedPath = none;
+            SelectedSize = none;
+            SelectedModified = none;
+            SelectedOwner = none;
+            SelectedShared = none;
+            return;
+        }
+
+        SelectedName = item.Name;
+        SelectedKind = Loc.T(item.IsFolder ? StringKeys.Common.Folder : StringKeys.Common.File);
+        SelectedPath = item.Path;
+        SelectedSize = item.Size is { } size ? Loc.F(StringKeys.Common.Bytes, size.ToString("n0", Loc.Culture)) : none;
+        SelectedModified = item.ModifiedAt is { } modifiedAt ? modifiedAt.ToLocalTime().ToString("g", Loc.Culture) : none;
+        SelectedOwner = item.Owner ?? none;
+        SelectedShared = Loc.T(item.IsShared ? StringKeys.Common.Yes : StringKeys.Common.No);
     }
 
     private void ClearSelection()
@@ -3336,13 +3457,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
         _selectedNode = null;
         _selectionAnchorPath = null;
-        SelectedName = "Ninguno";
-        SelectedKind = "Ninguno";
-        SelectedPath = "Ninguno";
-        SelectedSize = "Ninguno";
-        SelectedModified = "Ninguno";
-        SelectedOwner = "Ninguno";
-        SelectedShared = "Ninguno";
+        _selectedItem = null;
+        RefreshSelectionLabels();
         HasSelection = false;
         ViewSelectedFileCommand.RaiseCanExecuteChanged();
         RaiseSelectionSummaryChanged();
@@ -3368,6 +3484,7 @@ public sealed class MainWindowViewModel : ObservableObject
             settings.SortKey = SortKey.ToString();
             settings.SortDescending = SortDescending;
             settings.Theme = _theme;
+            settings.Language = Loc.Current.Code;
             settings.BandwidthLimitKbps = _bandwidthLimitKbps;
             settings.DefaultSyncFolder = _defaultSyncFolder;
         });
@@ -3377,39 +3494,39 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (!IsAuthenticated)
         {
-            _connectionStatus = "Desconectado";
+            _connectionStatus = Loc.T(StringKeys.Connection.StateDisconnected);
             _connectionStatusKind = "Disconnected";
-            _connectionStatusDescription = $"Desconectado — no hay sesión iniciada en {_provider.DisplayName}.";
+            _connectionStatusDescription = Loc.F(StringKeys.Connection.DescDisconnected, _provider.DisplayName);
         }
         else if (_isWarning && _lastErrorKind == DriveErrorKind.RateLimited)
         {
-            _connectionStatus = "Limitado";
+            _connectionStatus = Loc.T(StringKeys.Connection.StateRateLimited);
             _connectionStatusKind = "RateLimited";
-            _connectionStatusDescription = $"{_provider.DisplayName} está limitando el ritmo de las peticiones.";
+            _connectionStatusDescription = Loc.F(StringKeys.Connection.DescRateLimited, _provider.DisplayName);
         }
         else if (_isWarning && IsConnectionFailure(_lastErrorKind))
         {
             // Deliberately ahead of the Syncing branch: a sync running on top of a broken
             // connection is not the headline, the broken connection is.
-            _connectionStatus = "Con errores";
+            _connectionStatus = Loc.T(StringKeys.Connection.StateDegraded);
             _connectionStatusKind = "Degraded";
-            _connectionStatusDescription = $"La última operación contra {_provider.DisplayName} falló: {_statusMessage}";
+            _connectionStatusDescription = Loc.F(StringKeys.Connection.DescDegraded, _provider.DisplayName, _statusMessage);
         }
         else if ((_isSyncInProgress is not null && _isSyncInProgress()) || IsLoading || IsDeepScanRunning)
         {
-            _connectionStatus = "Sincronizando";
+            _connectionStatus = Loc.T(StringKeys.Connection.StateSyncing);
             _connectionStatusKind = "Syncing";
             _connectionStatusDescription = IsDeepScanRunning
-                ? $"Analizando las métricas de {_currentPath}..."
+                ? Loc.F(StringKeys.Connection.DescScanning, _currentPath)
                 : IsLoading
-                    ? $"Cargando {CurrentPath}..."
-                    : "Sincronización de archivos en curso.";
+                    ? Loc.F(StringKeys.Connection.DescLoading, CurrentPath)
+                    : Loc.T(StringKeys.Connection.DescSyncing);
         }
         else
         {
-            _connectionStatus = "En línea";
+            _connectionStatus = Loc.T(StringKeys.Connection.StateOnline);
             _connectionStatusKind = "Online";
-            _connectionStatusDescription = $"Conectado a {_provider.DisplayName}.";
+            _connectionStatusDescription = Loc.F(StringKeys.Connection.DescConnected, _provider.DisplayName);
         }
 
         OnPropertyChanged(nameof(ConnectionStatus));
@@ -3663,18 +3780,18 @@ public sealed class MainWindowViewModel : ObservableObject
                 ? await _provider.Diagnostics.GetVersionAsync()
                 : null;
             CliVersion = string.IsNullOrWhiteSpace(version)
-                ? "La CLI no informó ninguna versión."
+                ? Loc.T(StringKeys.CliVersion.NoVersionReported)
                 : version;
         }
         catch (InvalidOperationException ex)
         {
             // Includes DriveException. The CLI's own text is the most useful thing on screen here:
             // if `--version` is not the flag this build understands, the user sees exactly that.
-            CliVersion = $"No disponible: {ex.Message}";
+            CliVersion = Loc.F(StringKeys.CliVersion.Unavailable, ex.DescribeForUser().Render());
         }
         catch (FileNotFoundException ex)
         {
-            CliVersion = $"No disponible: {ex.Message}";
+            CliVersion = Loc.F(StringKeys.CliVersion.Unavailable, ex.DescribeForUser().Render());
         }
         finally
         {
@@ -3692,7 +3809,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (_releaseFeed is null)
         {
-            CliUpdateStatus = "La verificación de actualizaciones no está disponible.";
+            CliUpdateStatus = Loc.T(StringKeys.CliUpdate.Unavailable);
             return;
         }
 
@@ -3711,7 +3828,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 _availableRelease = null;
                 IsCliUpdateAvailable = false;
-                CliUpdateStatus = "Proton no publica una compilación Stable para esta plataforma.";
+                CliUpdateStatus = Loc.T(StringKeys.CliUpdate.NoBuildForPlatform);
                 return;
             }
 
@@ -3720,13 +3837,13 @@ public sealed class MainWindowViewModel : ObservableObject
                 case CliUpdateAvailability.UpdateAvailable:
                     _availableRelease = release;
                     IsCliUpdateAvailable = true;
-                    CliUpdateStatus = $"La versión {release.Version} está disponible ({release.ReleaseDate}).";
+                    CliUpdateStatus = Loc.F(StringKeys.CliUpdate.Available, release.Version, release.ReleaseDate);
                     break;
 
                 case CliUpdateAvailability.UpToDate:
                     _availableRelease = null;
                     IsCliUpdateAvailable = false;
-                    CliUpdateStatus = $"Al día — {release.Version} es la versión Stable actual.";
+                    CliUpdateStatus = Loc.F(StringKeys.CliUpdate.UpToDate, release.Version);
                     break;
 
                 default:
@@ -3735,7 +3852,7 @@ public sealed class MainWindowViewModel : ObservableObject
                     // than not updating.
                     _availableRelease = null;
                     IsCliUpdateAvailable = false;
-                    CliUpdateStatus = $"La versión Stable es {release.Version}, pero no se pudo leer la versión instalada — no se ofrece una actualización.";
+                    CliUpdateStatus = Loc.F(StringKeys.CliUpdate.InstalledVersionUnknown, release.Version);
                     break;
             }
         }
@@ -3743,7 +3860,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             _availableRelease = null;
             IsCliUpdateAvailable = false;
-            CliUpdateStatus = $"No se pudo acceder al manifiesto de versiones de Proton: {ex.Message}";
+            CliUpdateStatus = Loc.F(StringKeys.CliUpdate.ManifestUnreachable, ex.Message);
         }
         finally
         {
@@ -3768,25 +3885,25 @@ public sealed class MainWindowViewModel : ObservableObject
         // mid-operation, which is not a state worth reasoning about.
         if (_isSyncInProgress())
         {
-            CliUpdateStatus = "Hay una sincronización en curso. Esperá a que termine y actualizá.";
+            CliUpdateStatus = Loc.T(StringKeys.CliUpdate.SyncInProgress);
             return;
         }
 
         IsCliUpdateBusy = true;
         try
         {
-            CliUpdateStatus = $"Descargando {release.Version}…";
+            CliUpdateStatus = Loc.F(StringKeys.CliUpdate.Downloading, release.Version);
             await _updateInstaller.InstallAsync(
                 release,
                 CliPath,
                 onProgress: bytes => Dispatcher.UIThread.Post(
-                    () => CliUpdateStatus = $"Descargando {release.Version}… {bytes / (1024 * 1024)} MB"));
+                    () => CliUpdateStatus = Loc.F(StringKeys.CliUpdate.DownloadingWithSize, release.Version, bytes / (1024 * 1024))));
 
             _availableRelease = null;
             IsCliUpdateAvailable = false;
             CliVersion = UnknownCliVersion;
             await CheckCliVersionAsync();
-            CliUpdateStatus = $"Se actualizó a {release.Version}. Verificado contra el SHA-512 publicado.";
+            CliUpdateStatus = Loc.F(StringKeys.CliUpdate.Done, release.Version);
         }
         catch (CliUpdateException ex)
         {
@@ -3796,7 +3913,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or TaskCanceledException)
         {
-            CliUpdateStatus = $"La actualización falló, se conservó la CLI existente: {ex.Message}";
+            CliUpdateStatus = Loc.F(StringKeys.CliUpdate.Failed, ex.DescribeForUser().Render());
             IsWarning = true;
         }
         finally
@@ -3810,7 +3927,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var picker = RequestSaveActivityAsync;
         if (picker is null)
         {
-            StatusMessage = "Exportar la actividad no está disponible.";
+            SetStatus(StringKeys.Status.ActivityUnavailable);
             return;
         }
 
@@ -3823,11 +3940,11 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             await File.WriteAllTextAsync(path, CommandLogText);
-            StatusMessage = $"Se guardó la actividad de la CLI en {path}.";
+            SetStatus(StringKeys.Status.ActivitySaved, path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            StatusMessage = $"No se pudo guardar la actividad de la CLI en {path}: {ex.Message}";
+            SetStatus(StringKeys.Status.ActivitySaveFailed, path, ex.Message);
             IsWarning = true;
         }
     }
@@ -3840,8 +3957,8 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         _commandLog.Clear();
-        CommandLogText = "No hay ningún comando de la CLI en ejecución.";
-        ActiveCommand = "Inactivo";
+        CommandLogText = Loc.T(StringKeys.Console.NoCommandRunning);
+        ActiveCommand = Loc.T(StringKeys.Console.Idle);
         LastLogLine = null;
         RaiseCommandStates();
         await Task.CompletedTask;
@@ -3998,7 +4115,7 @@ public sealed class MainWindowViewModel : ObservableObject
         Dispatcher.UIThread.Post(() =>
         {
             CrashLog.Write(ex);
-            StatusMessage = $"Error inesperado: {ex.Message}";
+            SetStatus(StringKeys.Status.UnexpectedError, ex.Message);
             IsWarning = true;
             QueueCommandLine($"[err] Unexpected error: {ex}");
             IsLoading = false;
@@ -4008,7 +4125,13 @@ public sealed class MainWindowViewModel : ObservableObject
     // Records the kind alongside formatting the message so callers like UpdateConnectionTelemetry
     // can switch on the shared DriveErrorKind taxonomy instead of pattern-matching the human-readable
     // StatusMessage text it produces (AGENTS.md: "Errors are typed").
-    private string FormatDriveError(string path, Exception ex)
+    /// <summary>
+    /// The framing sentence around a provider failure. Returns an unrendered
+    /// <see cref="LocalizedText"/> so a status line holding one follows the language picker; the
+    /// provider's own message goes in verbatim as an argument, untranslated, because that sentence
+    /// is the provider's and not ours (docs/PLAN-I18N.md §9).
+    /// </summary>
+    private LocalizedText FormatDriveError(string path, Exception ex)
     {
         var kind = (ex as DriveException)?.Kind ?? DriveErrorKind.Unknown;
         _lastErrorKind = kind;
@@ -4016,16 +4139,23 @@ public sealed class MainWindowViewModel : ObservableObject
         if (kind == DriveErrorKind.NotAuthenticated)
         {
             return path == "auth login"
-                ? "Se requiere autenticación. Usá Autenticar para iniciar sesión."
-                : $"Se requiere autenticación para cargar {path}.";
+                ? LocalizedText.Of(StringKeys.Error.NeedAuth)
+                : LocalizedText.Of(StringKeys.Error.NeedAuthToLoad, path);
         }
+
+        // Three sources, in order of how much they know. The exception's own translated sentence
+        // when it has one (PLAN-TECH-DEBT.md B6.5); otherwise the provider's own words verbatim,
+        // because paraphrasing them loses the detail that says whose problem this is; and if there
+        // are none, the typed kind still has something to say.
+        var described = ex.DescribeForUser();
+        var detail = described.IsEmpty ? DriveErrorPresenter.Describe(kind) : described.Render();
 
         if (path == "auth logout")
         {
-            return $"No se pudo cerrar la sesión: {ex.Message}";
+            return LocalizedText.Of(StringKeys.Error.LogoutFailed, detail);
         }
 
-        return $"No se pudo cargar {path}: {ex.Message}";
+        return LocalizedText.Of(StringKeys.Error.LoadFailed, path, detail);
     }
 
     private static string? PlaceholderIdentity(ProviderId id) => id switch

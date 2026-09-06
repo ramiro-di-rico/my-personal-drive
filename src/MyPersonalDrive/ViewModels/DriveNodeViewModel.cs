@@ -2,6 +2,8 @@ using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
 using MyPersonalDrive.ViewModels.Sync;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.ViewModels;
 
 public sealed class DriveNodeViewModel : ObservableObject
@@ -84,7 +86,7 @@ public sealed class DriveNodeViewModel : ObservableObject
     /// </summary>
     public FileKind FileKind { get; }
 
-    public string? SizeText => Item.Size is null ? null : $"{Item.Size:n0} bytes";
+    public string? SizeText => Item.Size is { } size ? Loc.F(StringKeys.Common.Bytes, size.ToString("n0", Loc.Culture)) : null;
 
     /// <summary>
     /// A folder's recursive size, once someone has paid for the scan that produced it
@@ -106,7 +108,7 @@ public sealed class DriveNodeViewModel : ObservableObject
 
     public bool HasDeepSize => !string.IsNullOrEmpty(DeepSizeText);
 
-    public string? ModifiedText => Item.ModifiedAt?.ToLocalTime().ToString("g");
+    public string? ModifiedText => Item.ModifiedAt?.ToLocalTime().ToString("g", Loc.Culture);
 
     public string? OwnerText => Item.Owner;
 
@@ -129,8 +131,8 @@ public sealed class DriveNodeViewModel : ObservableObject
 
     /// <summary>Explains a disabled "Share Link" menu entry — Avalonia's ToolTip.ShowOnDisabled keeps this visible even though the item can't be clicked.</summary>
     public string ShareLinkTooltip => CanShareLink
-        ? "Copiar un enlace para compartir este elemento"
-        : "Esta funcionalidad no está disponible para el proveedor actual";
+        ? Loc.T(StringKeys.Node.ShareLinkTooltip)
+        : Loc.T(StringKeys.Node.ShareLinkUnsupported);
 
     /// <summary>
     /// A Google-native Doc/Sheet/Slide has no binary content to fetch at all — Drive rejects a plain
@@ -143,8 +145,8 @@ public sealed class DriveNodeViewModel : ObservableObject
 
     /// <summary>Explains a disabled "Download" button/menu entry the same way <see cref="ShareLinkTooltip"/> does.</summary>
     public string DownloadTooltip => Item.IsRemoteOnlyDocument
-        ? "Los documentos de Google (Docs/Sheets/Slides) no se pueden descargar directamente — abrilos en Google Drive."
-        : "Descargar este elemento";
+        ? Loc.T(StringKeys.Node.DownloadGoogleDoc)
+        : Loc.T(StringKeys.Node.DownloadTooltip);
 
     public AsyncCommand RowCommand { get; }
 

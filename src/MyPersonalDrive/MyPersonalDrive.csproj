@@ -38,6 +38,11 @@
     <PackageReference Include="PDFtoImage" Version="5.2.1" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Globbed, not listed: adding an interface language must be a locale file plus a row in
+         LanguageCatalog, with no .csproj edit (docs/PLAN-I18N.md §2.2). -->
+    <EmbeddedResource Include="Services/Localization/Locales/*.json" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="MyPersonalDrive.Tests" />
   </ItemGroup>
 </Project>

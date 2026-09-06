@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 
 namespace MyPersonalDrive.Services;
@@ -80,14 +81,14 @@ public static class SqliteMigrationRunner
     {
         var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
-        return Convert.ToInt32(command.ExecuteScalar());
+        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
     private static bool GetForeignKeysEnabled(SqliteConnection connection)
     {
         var command = connection.CreateCommand();
         command.CommandText = "PRAGMA foreign_keys;";
-        return Convert.ToInt32(command.ExecuteScalar()) != 0;
+        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) != 0;
     }
 
     /// <summary>

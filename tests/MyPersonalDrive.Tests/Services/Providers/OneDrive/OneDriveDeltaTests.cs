@@ -172,6 +172,6 @@ public class OneDriveDeltaTests : IDisposable
 
         var ex = await Assert.ThrowsAsync<DriveException>(() => _sut.GetChangesAsync(null));
 
-        Assert.Contains("no terminó", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("did not finish", ex.Message, StringComparison.Ordinal);
     }
 }

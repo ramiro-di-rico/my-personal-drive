@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Providers;
@@ -85,7 +86,7 @@ public class OneDriveOperationsTests : IDisposable
         Assert.Equal(42, file.Size);
         Assert.Equal("abc123==", file.ContentHash);
         Assert.Equal("me@example.com", file.Owner);
-        Assert.Equal(DateTimeOffset.Parse("2026-01-02T03:04:05Z"), file.ModifiedAt);
+        Assert.Equal(DateTimeOffset.Parse("2026-01-02T03:04:05Z", CultureInfo.InvariantCulture), file.ModifiedAt);
         Assert.Equal("/notes.txt", file.Path);
     }
 

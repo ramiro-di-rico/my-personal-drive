@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
@@ -18,7 +19,7 @@ public class SyncSchedulerTests : IDisposable
 {
     private readonly string _localRoot = Directory.CreateTempSubdirectory("mypersonaldrive-scheduler-tests").FullName;
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"mypersonaldrive-scheduler-{Guid.NewGuid():N}.db");
-    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-03-01T12:00:00Z");
+    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture);
     private const string RemoteRoot = "/my-files/Docs";
 
     public void Dispose()
@@ -190,8 +191,8 @@ public class SyncSchedulerTests : IDisposable
 
         // And every failure was recorded for the user, with the wait spelled out.
         var logs = await h.Store.GetRecentLogsAsync(null, 20);
-        Assert.Contains(logs, l => l.Level == SyncLogLevel.Error && l.Message.Contains("La sincronización automática falló"));
-        Assert.Contains(logs, l => l.Message.Contains("próximo intento en 30 min"));
+        Assert.Contains(logs, l => l.Level == SyncLogLevel.Error && l.Message.Contains("Automatic sync failed"));
+        Assert.Contains(logs, l => l.Message.Contains("next attempt in 30 min"));
 
         await h.Scheduler.DisposeAsync();
     }

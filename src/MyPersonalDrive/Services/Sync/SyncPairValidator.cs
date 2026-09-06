@@ -5,7 +5,8 @@ namespace MyPersonalDrive.Services.Sync;
 /// <summary>
 /// The checks from docs/PLAN-LOCAL-SYNC.md §12 that need no IO, so they can be tested exhaustively:
 /// path shape, the refuse-to-sync-your-whole-home rule, and overlap against pairs that already
-/// exist. Returns the message to show the user, or null when the pair is acceptable.
+/// exist. Returns the typed reason to show the user, or null when the pair is acceptable — the
+/// wording lives in <c>ViewModels.SyncIssuePresenter</c>, not here (docs/PLAN-I18N.md §9).
 /// </summary>
 public static class SyncPairValidator
 {
@@ -13,23 +14,23 @@ public static class SyncPairValidator
     /// <param name="allAccountPairs">
     /// Every account's pairs, for the local-path overlap check — defaults to <paramref name="sameAccountPairs"/> for a single-account caller. A local folder is a real filesystem path shared by whichever provider looks at it, so overlap there has to be checked account-wide, not just within one account. See <see cref="FindOverlap"/> for the upload-only exception to that.
     /// </param>
-    public static string? Validate(string remotePath, string localPath, SyncDirection direction, IReadOnlyList<SyncPair> sameAccountPairs, IReadOnlyList<SyncPair>? allAccountPairs = null)
+    public static SyncPairIssue? Validate(string remotePath, string localPath, SyncDirection direction, IReadOnlyList<SyncPair> sameAccountPairs, IReadOnlyList<SyncPair>? allAccountPairs = null)
     {
         if (string.IsNullOrWhiteSpace(remotePath) || !remotePath.StartsWith('/'))
         {
-            return "La ruta remota tiene que ser una ruta absoluta que empiece con '/'.";
+            return new SyncPairIssue(SyncPairIssueKind.RemotePathNotAbsolute);
         }
 
         if (string.IsNullOrWhiteSpace(localPath))
         {
-            return "Elegí una carpeta local.";
+            return new SyncPairIssue(SyncPairIssueKind.LocalPathMissing);
         }
 
         var trimmedLocal = localPath.TrimEnd('/', '\\');
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (trimmedLocal.Length == 0 || trimmedLocal == "/" || string.Equals(trimmedLocal, home.TrimEnd('/', '\\'), StringComparison.Ordinal))
         {
-            return "No se sincroniza tu carpeta personal entera ni la raíz del sistema de archivos — elegí una subcarpeta específica.";
+            return new SyncPairIssue(SyncPairIssueKind.LocalPathIsHomeOrRoot);
         }
 
         return FindOverlap(remotePath, localPath, direction, sameAccountPairs, allAccountPairs ?? sameAccountPairs);
@@ -45,7 +46,7 @@ public static class SyncPairValidator
     /// <see cref="SyncDirection.LocalToRemote"/> by that same rule, so any surviving overlap here is
     /// exactly the case to block.
     /// </summary>
-    public static string? ValidateDirectionChange(SyncPair pair, SyncDirection newDirection, IReadOnlyList<SyncPair> allAccountPairs)
+    public static SyncPairIssue? ValidateDirectionChange(SyncPair pair, SyncDirection newDirection, IReadOnlyList<SyncPair> allAccountPairs)
     {
         if (newDirection == pair.Direction || newDirection == SyncDirection.LocalToRemote)
         {
@@ -66,9 +67,7 @@ public static class SyncPairValidator
             var otherLocal = NormalizeLocal(other.LocalPath);
             if (Overlaps(thisLocal, otherLocal, Path.DirectorySeparatorChar))
             {
-                return $"'{pair.LocalPath}' también está sincronizada (solo subida) con '{other.RemotePath}'. " +
-                       "Cambiar este par a una dirección que escribe en la carpeta local podría borrar o " +
-                       "sobrescribir lo que ese par sube. Eliminá o cambiá el otro par primero.";
+                return new SyncPairIssue(SyncPairIssueKind.DirectionUnsafeOverlap, pair.LocalPath, other.RemotePath);
             }
         }
 
@@ -98,7 +97,7 @@ public static class SyncPairValidator
     /// (<paramref name="sameAccountPairs"/>): two different providers' remote trees are unrelated
     /// storage systems, so an identical-looking remote path string across them means nothing.
     /// </summary>
-    private static string? FindOverlap(string remotePath, string localPath, SyncDirection direction, IReadOnlyList<SyncPair> sameAccountPairs, IReadOnlyList<SyncPair> allAccountPairs)
+    private static SyncPairIssue? FindOverlap(string remotePath, string localPath, SyncDirection direction, IReadOnlyList<SyncPair> sameAccountPairs, IReadOnlyList<SyncPair> allAccountPairs)
     {
         var newLocal = NormalizeLocal(localPath);
         var newRemote = NormalizeRemote(remotePath);
@@ -117,10 +116,8 @@ public static class SyncPairValidator
             }
 
             return string.Equals(newLocal, existingLocal, StringComparison.Ordinal)
-                ? $"'{pair.LocalPath}' ya está sincronizada con '{pair.RemotePath}'."
-                : $"Esa carpeta local se superpone con '{pair.LocalPath}', que ya está sincronizada con " +
-                  $"'{pair.RemotePath}'. Dos pares compartiendo una carpeta tratarían los archivos del otro como " +
-                  "eliminaciones. Elegí una carpeta fuera de ella.";
+                ? new SyncPairIssue(SyncPairIssueKind.LocalAlreadySynced, pair.LocalPath, pair.RemotePath)
+                : new SyncPairIssue(SyncPairIssueKind.LocalOverlaps, pair.LocalPath, pair.RemotePath);
         }
 
         foreach (var pair in sameAccountPairs)
@@ -129,10 +126,8 @@ public static class SyncPairValidator
             if (Overlaps(newRemote, existingRemote, '/'))
             {
                 return string.Equals(newRemote, existingRemote, StringComparison.Ordinal)
-                    ? $"'{pair.RemotePath}' ya está sincronizada con '{pair.LocalPath}'."
-                    : $"Esa carpeta remota se superpone con '{pair.RemotePath}', que ya está sincronizada con " +
-                      $"'{pair.LocalPath}'. Dos pares cubriendo el mismo subárbol remoto pueden deshacer las " +
-                      "eliminaciones del otro. Elegí una carpeta fuera de ella.";
+                    ? new SyncPairIssue(SyncPairIssueKind.RemoteAlreadySynced, pair.RemotePath, pair.LocalPath)
+                    : new SyncPairIssue(SyncPairIssueKind.RemoteOverlaps, pair.RemotePath, pair.LocalPath);
             }
         }
 

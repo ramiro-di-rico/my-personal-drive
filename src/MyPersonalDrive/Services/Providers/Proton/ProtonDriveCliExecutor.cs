@@ -2,6 +2,8 @@ using MyPersonalDrive.Services;
 using System.Diagnostics;
 using System.Text;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.Services.Providers.Proton;
 
 public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
@@ -312,7 +314,9 @@ public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
 
         if (!process.Start())
         {
-            throw new InvalidOperationException("No se pudo iniciar la CLI de Proton Drive.");
+            throw new LocalizedInvalidOperationException(
+                "The Proton Drive CLI could not be started.",
+                LocalizedText.Of(StringKeys.Error.CliCannotStart));
         }
 
         var stdout = new StringBuilder();

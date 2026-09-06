@@ -57,7 +57,7 @@ public class CliUpdateInstallerTests : IDisposable
         var ex = await Assert.ThrowsAsync<CliUpdateException>(
             () => InstallerServing("tampered payload").InstallAsync(Release(Sha512Of("what was promised")), target));
 
-        Assert.Contains("El checksum", ex.Message);
+        Assert.Contains("checksum", ex.Message);
         Assert.Equal("old binary", await File.ReadAllTextAsync(target));
     }
 
@@ -80,7 +80,7 @@ public class CliUpdateInstallerTests : IDisposable
         await File.WriteAllTextAsync(target, "old binary");
         var installer = new CliUpdateInstaller((_, _) => throw new IOException("connection reset"));
 
-        await Assert.ThrowsAsync<IOException>(() => installer.InstallAsync(Release(Sha512Of("x")), target));
+        await Assert.ThrowsAnyAsync<IOException>(() => installer.InstallAsync(Release(Sha512Of("x")), target));
 
         Assert.Equal("old binary", await File.ReadAllTextAsync(target));
         Assert.Equal([target], Directory.GetFileSystemEntries(_root));

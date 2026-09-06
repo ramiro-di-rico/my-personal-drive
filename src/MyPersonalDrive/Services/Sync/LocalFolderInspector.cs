@@ -1,3 +1,5 @@
+using MyPersonalDrive.Models;
+
 namespace MyPersonalDrive.Services.Sync;
 
 /// <summary>
@@ -20,13 +22,13 @@ public static class LocalFolderInspector
     /// Worth checking up front rather than discovering it per file: an unwritable folder fails every
     /// single download, which reads as "sync is broken" rather than "that folder is read-only".
     /// </summary>
-    public static string? CheckWritable(string localPath)
+    public static SyncPairIssue? CheckWritable(string localPath)
     {
         try
         {
             if (File.Exists(localPath))
             {
-                return $"'{localPath}' es un archivo, no una carpeta.";
+                return new SyncPairIssue(SyncPairIssueKind.LocalPathIsAFile, localPath);
             }
 
             if (!Directory.Exists(localPath))
@@ -48,7 +50,7 @@ public static class LocalFolderInspector
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            return $"No se puede escribir en '{localPath}': {ex.Message}";
+            return new SyncPairIssue(SyncPairIssueKind.LocalPathNotWritable, localPath, ex.Message);
         }
     }
 
@@ -102,7 +104,7 @@ public static class LocalFolderInspector
     /// The 10% headroom is because <c>Bytes</c> comes from the remote listing's claimed sizes, and a
     /// download also needs room for its temp copy before the move into place.
     /// </summary>
-    public static string? CheckFreeSpace(string localPath, long bytesToDownload)
+    public static SyncPairIssue? CheckFreeSpace(string localPath, long bytesToDownload)
     {
         if (bytesToDownload <= 0)
         {
@@ -117,14 +119,7 @@ public static class LocalFolderInspector
         var needed = bytesToDownload + bytesToDownload / 10;
         return available >= needed
             ? null
-            : $"Esto descargaría {FormatBytes(bytesToDownload)} pero solo hay {FormatBytes(available)} libres en ese disco.";
+            : new SyncPairIssue(SyncPairIssueKind.NotEnoughFreeSpace, ByteSize.Format(bytesToDownload), ByteSize.Format(available));
     }
 
-    private static string FormatBytes(long bytes) => bytes switch
-    {
-        < 1024 => $"{bytes} B",
-        < 1024 * 1024 => $"{bytes / 1024.0:F1} KB",
-        < 1024L * 1024 * 1024 => $"{bytes / 1024.0 / 1024.0:F1} MB",
-        _ => $"{bytes / 1024.0 / 1024.0 / 1024.0:F1} GB",
-    };
 }

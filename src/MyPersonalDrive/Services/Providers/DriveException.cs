@@ -12,7 +12,7 @@ namespace MyPersonalDrive.Services.Providers;
 /// (Microsoft Graph, see docs/PLAN-CLOUD-PROVIDERS.md P6) would populate them with its request
 /// description and response body instead of leaving the shape provider-specific.
 /// </summary>
-public class DriveException : InvalidOperationException
+public class DriveException : InvalidOperationException, Localization.ILocalizedError
 {
     public DriveException(string commandText, int exitCode, string stdout, string stderr, string message, DriveErrorKind kind = DriveErrorKind.Unknown)
         : base(message)
@@ -33,4 +33,13 @@ public class DriveException : InvalidOperationException
     public string Stderr { get; }
 
     public DriveErrorKind Kind { get; init; }
+
+    /// <summary>
+    /// This app's own sentence about the failure, translatable, when the failure is one we can
+    /// describe rather than one we are quoting. Empty when <see cref="Exception.Message"/> is the
+    /// provider's own words — those are shown verbatim (docs/PLAN-I18N.md §9, PLAN-TECH-DEBT.md
+    /// B6.5). <see cref="Exception.Message"/> stays English either way, because it is what reaches
+    /// the CLI console and the crash log.
+    /// </summary>
+    public Localization.LocalizedText Detail { get; init; }
 }

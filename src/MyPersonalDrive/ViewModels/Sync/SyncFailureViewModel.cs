@@ -1,5 +1,7 @@
 using MyPersonalDrive.Models;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.ViewModels.Sync;
 
 /// <summary>
@@ -27,16 +29,16 @@ public sealed class SyncFailureViewModel
     /// <summary>What the sync was trying to do, in the user's terms rather than the enum's.</summary>
     public string OperationText => _action.Operation switch
     {
-        SyncOperation.DownloadFile => "Descargar",
-        SyncOperation.UploadFile => "Subir",
-        SyncOperation.CreateLocalFolder => "Crear la carpeta local",
-        SyncOperation.CreateRemoteFolder => "Crear la carpeta remota",
-        SyncOperation.DeleteLocal => "Eliminar el archivo local",
-        SyncOperation.TrashRemote => "Mover el archivo remoto a la papelera",
-        SyncOperation.RenameLocal => "Renombrar el archivo local",
-        SyncOperation.RenameRemote => "Renombrar el archivo remoto",
-        SyncOperation.UpdateBaselineOnly => "Actualizar la referencia",
-        SyncOperation.ResolveConflictKeepBoth => "Conservar ambas versiones",
+        SyncOperation.DownloadFile => Localizer.Instance.T(StringKeys.Sync.OpDownload),
+        SyncOperation.UploadFile => Localizer.Instance.T(StringKeys.Sync.OpUpload),
+        SyncOperation.CreateLocalFolder => Localizer.Instance.T(StringKeys.Sync.OpCreateLocalFolder),
+        SyncOperation.CreateRemoteFolder => Localizer.Instance.T(StringKeys.Sync.OpCreateRemoteFolder),
+        SyncOperation.DeleteLocal => Localizer.Instance.T(StringKeys.Sync.OpDeleteLocal),
+        SyncOperation.TrashRemote => Localizer.Instance.T(StringKeys.Sync.OpTrashRemote),
+        SyncOperation.RenameLocal => Localizer.Instance.T(StringKeys.Sync.OpRenameLocal),
+        SyncOperation.RenameRemote => Localizer.Instance.T(StringKeys.Sync.OpRenameRemote),
+        SyncOperation.UpdateBaselineOnly => Localizer.Instance.T(StringKeys.Sync.OpUpdateBaseline),
+        SyncOperation.ResolveConflictKeepBoth => Localizer.Instance.T(StringKeys.Sync.OpKeepBoth),
         _ => _action.Operation.ToString()
     };
 
@@ -46,13 +48,11 @@ public sealed class SyncFailureViewModel
     /// CLI/API message is how you lose the detail that makes it actionable.
     /// </summary>
     public string ReasonText => string.IsNullOrWhiteSpace(_action.LastError)
-        ? "El proveedor no informó un motivo."
+        ? Localizer.Instance.T(StringKeys.Sync.FailureNoReason)
         : _action.LastError!;
 
-    public string AttemptText => _action.AttemptCount == 1
-        ? "1 intento"
-        : $"{_action.AttemptCount} intentos";
+    public string AttemptText => Localizer.Instance.Plural(StringKeys.Sync.FailureAttempts, _action.AttemptCount);
 
     /// <summary>Path, operation and attempts on one line, for the dialog's row header.</summary>
-    public string Summary => $"{OperationText} · {AttemptText}";
+    public string Summary => Localizer.Instance.F(StringKeys.Sync.FailureSummary, OperationText, AttemptText);
 }

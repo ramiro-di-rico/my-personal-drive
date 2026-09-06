@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.Services.Providers.GoogleDrive;
 
 /// <summary>
@@ -84,7 +86,7 @@ public sealed class GoogleDriveHttpClient : IDisposable
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new DriveException("Google Drive request", exitCode: 1, stdout: string.Empty, stderr: ex.Message, "La solicitud a Google Drive superó el tiempo de espera.", DriveErrorKind.Timeout);
+            throw new DriveException("Google Drive request", exitCode: 1, stdout: string.Empty, stderr: ex.Message, "The request to Google Drive timed out.", DriveErrorKind.Timeout) { Detail = LocalizedText.Of(StringKeys.Error.HttpTimeout, "Google Drive") };
         }
 
         if (response.StatusCode == HttpStatusCode.Unauthorized && !retriedAuth)

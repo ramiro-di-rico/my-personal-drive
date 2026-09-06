@@ -43,7 +43,7 @@ public class FolderMetricsViewModelTests
         Load(sut);
 
         Assert.False(sut.HasItems);
-        Assert.Equal("Carpeta vacía.", sut.Headline);
+        Assert.Equal("This folder is empty.", sut.Headline);
         Assert.Empty(sut.Buckets);
         Assert.False(sut.HasLargestItems);
         Assert.Equal(string.Empty, sut.ScopeNote);
@@ -56,7 +56,7 @@ public class FolderMetricsViewModelTests
 
         Load(sut, Folder("Fotos"), File("a.pdf", 100), File("b.pdf", 100));
 
-        Assert.Equal("2 archivos · 1 carpeta", sut.Headline);
+        Assert.Equal("2 files · 1 folder", sut.Headline);
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public class FolderMetricsViewModelTests
         Load(sut, Folder("Fotos"), Folder("Libros"), File("a.pdf", 1024));
 
         Assert.Equal("1.0 KB", sut.TotalSizeText);
-        Assert.Equal("No incluye el contenido de 2 subcarpetas.", sut.ScopeNote);
+        Assert.Equal("Does not include the contents of 2 subfolders.", sut.ScopeNote);
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public class FolderMetricsViewModelTests
 
         Load(sut, File("a.pdf", 1024), File("b.pdf", null));
 
-        Assert.Equal("1 archivo sin tamaño conocido.", sut.ScopeNote);
+        Assert.Equal("1 file with no known size.", sut.ScopeNote);
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public class FolderMetricsViewModelTests
 
         // The sizes are the CLI's claimed (pre-encryption) sizes, so they won't match Proton's
         // own quota figure. Saying nothing at all here would be the dishonest option.
-        Assert.Equal("Tamaño declarado al subir los archivos.", sut.ScopeNote);
+        Assert.Equal("Size as declared when the files were uploaded.", sut.ScopeNote);
     }
 
     [Fact]
@@ -100,7 +100,7 @@ public class FolderMetricsViewModelTests
         Load(sut, File("clip.webm", 1000), File("photo.jpg", 500));
 
         Assert.Equal(2, sut.Buckets.Count);
-        Assert.Equal("Vídeos", sut.Buckets[0].Label);
+        Assert.Equal("Videos", sut.Buckets[0].Label);
         Assert.Equal(FolderMetricBucketViewModel.BarMaxWidth, sut.Buckets[0].BarWidth);
         Assert.Equal(FolderMetricBucketViewModel.BarMaxWidth / 2, sut.Buckets[1].BarWidth);
     }

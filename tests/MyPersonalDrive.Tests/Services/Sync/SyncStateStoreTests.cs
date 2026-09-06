@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Sync;
@@ -8,7 +9,7 @@ namespace MyPersonalDrive.Tests.Services.Sync;
 public class SyncStateStoreTests : IDisposable
 {
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"mypersonaldrive-sync-tests-{Guid.NewGuid():N}.db");
-    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
+    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture);
 
     private SyncStateStore CreateSut() => new(_dbPath);
 
@@ -738,8 +739,8 @@ public class SyncStateStoreTests : IDisposable
         // even though it is four hours later, which would hand the row out far too early.
         await sut.MarkFailedAsync(queued.Id, "connection reset", nextAttemptAt: new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.FromHours(-3)));
 
-        Assert.Empty(await sut.GetPendingActionsAsync(pair.Id, DateTimeOffset.Parse("2026-01-01T09:00:00Z")));
-        Assert.Single(await sut.GetPendingActionsAsync(pair.Id, DateTimeOffset.Parse("2026-01-01T13:00:00Z")));
+        Assert.Empty(await sut.GetPendingActionsAsync(pair.Id, DateTimeOffset.Parse("2026-01-01T09:00:00Z", CultureInfo.InvariantCulture)));
+        Assert.Single(await sut.GetPendingActionsAsync(pair.Id, DateTimeOffset.Parse("2026-01-01T13:00:00Z", CultureInfo.InvariantCulture)));
     }
 
     [Fact]

@@ -189,7 +189,7 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         SetWarning(sut);
 
         Assert.True(sut.HasStatusAction);
-        Assert.Equal("Reconectar", sut.StatusActionLabel);
+        Assert.Equal("Reconnect", sut.StatusActionLabel);
         Assert.Same(sut.AuthenticateCommand, sut.StatusActionCommand);
     }
 
@@ -203,7 +203,7 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         SetWarning(sut);
 
         Assert.True(sut.HasStatusAction);
-        Assert.Equal("Reintentar", sut.StatusActionLabel);
+        Assert.Equal("Retry", sut.StatusActionLabel);
         Assert.Same(sut.RefreshCommand, sut.StatusActionCommand);
     }
 
@@ -300,11 +300,11 @@ public class MainWindowHeaderTelemetryTests : IDisposable
 
         sut.SearchText = "informe";
         Assert.True(sut.HasSearchText);
-        Assert.Equal("2 resultados", sut.SearchResultText);
+        Assert.Equal("2 results", sut.SearchResultText);
         Assert.True(sut.ClearSearchCommand.CanExecute(null));
 
         sut.SearchText = "informe-final";
-        Assert.Equal("1 resultado", sut.SearchResultText);
+        Assert.Equal("1 result", sut.SearchResultText);
 
         await sut.ClearSearchCommand.ExecuteAsync();
         Assert.Equal(string.Empty, sut.SearchText);

@@ -12,6 +12,12 @@
 > [PLAN-TECH-DEBT.md](PLAN-TECH-DEBT.md#7-mapping-to-plan-local-syncmd).
 >
 > Implementation branch: `feature/ux-round-2`, branched from `feature/google-drive-provider`.
+>
+> Round 3 is [PLAN-UX-ROUND-3.md](PLAN-UX-ROUND-3.md), written after this round shipped and after
+> [PLAN-I18N.md](PLAN-I18N.md) made English the default. It picks up two things this round left
+> open — the status card's visibility conditions (U1 gave it a recovery button; X1 is that the card
+> itself is optional) and the per-item sync badges — and adds the accessibility and keyboard pass
+> neither round took.
 
 ## Status
 

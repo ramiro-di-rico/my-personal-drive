@@ -1,6 +1,8 @@
 using System.Collections.Frozen;
 using MyPersonalDrive.Models;
 
+using MyPersonalDrive.Services.Localization;
+
 namespace MyPersonalDrive.Services;
 
 /// <summary>
@@ -144,21 +146,22 @@ public static class FileKindClassifier
     }
 
     /// <summary>
-    /// The label shown in the metrics histogram. Spanish, matching the settings view's copy.
+    /// The label shown in the metrics histogram and the type filter chips. A label, not an error
+    /// message — so unlike a provider's own wording it does get localized (docs/PLAN-I18N.md §9).
     /// </summary>
-    public static string DisplayName(FileKind kind) => kind switch
+    public static string DisplayName(FileKind kind) => Localizer.Instance.T(kind switch
     {
-        FileKind.Folder => "Carpetas",
-        FileKind.Image => "Imágenes",
-        FileKind.Video => "Vídeos",
-        FileKind.Audio => "Audio",
-        FileKind.Document => "Documentos",
-        FileKind.Spreadsheet => "Hojas de cálculo",
-        FileKind.Presentation => "Presentaciones",
-        FileKind.Pdf => "PDF",
-        FileKind.Archive => "Archivos comprimidos",
-        FileKind.Code => "Código",
-        FileKind.Text => "Texto",
-        _ => "Otros",
-    };
+        FileKind.Folder => StringKeys.FileKind.Folder,
+        FileKind.Image => StringKeys.FileKind.Image,
+        FileKind.Video => StringKeys.FileKind.Video,
+        FileKind.Audio => StringKeys.FileKind.Audio,
+        FileKind.Document => StringKeys.FileKind.Document,
+        FileKind.Spreadsheet => StringKeys.FileKind.Spreadsheet,
+        FileKind.Presentation => StringKeys.FileKind.Presentation,
+        FileKind.Pdf => StringKeys.FileKind.Pdf,
+        FileKind.Archive => StringKeys.FileKind.Archive,
+        FileKind.Code => StringKeys.FileKind.Code,
+        FileKind.Text => StringKeys.FileKind.Text,
+        _ => StringKeys.FileKind.Other,
+    });
 }

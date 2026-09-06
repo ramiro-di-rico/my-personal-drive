@@ -12,10 +12,10 @@ public class SyncPairValidatorTests
         IsEnabled: true, IsPaused: false, ExcludeGlobs: [],
         LastSyncAt: null, LastStatus: SyncPairStatus.Never, LastError: null);
 
-    private static string? Validate(string remotePath, string localPath, params SyncPair[] existing)
+    private static SyncPairIssue? Validate(string remotePath, string localPath, params SyncPair[] existing)
         => SyncPairValidator.Validate(remotePath, localPath, SyncDirection.TwoWay, existing);
 
-    private static string? ValidateUpload(string remotePath, string localPath, params SyncPair[] existing)
+    private static SyncPairIssue? ValidateUpload(string remotePath, string localPath, params SyncPair[] existing)
         => SyncPairValidator.Validate(remotePath, localPath, SyncDirection.LocalToRemote, existing);
 
     // ---------------------------------------------------------------- path shape
@@ -29,25 +29,25 @@ public class SyncPairValidatorTests
     [InlineData("")]
     [InlineData("   ")]
     public void ARemotePathThatIsNotAbsolute_IsRejected(string remotePath)
-        => Assert.Contains("ruta absoluta", Validate(remotePath, "/home/user/Docs"));
+        => Assert.Equal(SyncPairIssueKind.RemotePathNotAbsolute, Validate(remotePath, "/home/user/Docs")!.Kind);
 
     [Fact]
     public void AnEmptyLocalPath_IsRejected()
-        => Assert.Contains("Elegí una carpeta local", Validate("/my-files/Docs", "  "));
+        => Assert.Equal(SyncPairIssueKind.LocalPathMissing, Validate("/my-files/Docs", "  ")!.Kind);
 
     [Theory]
     [InlineData("/")]
     [InlineData("//")]
     public void TheFilesystemRoot_IsRejected(string localPath)
-        => Assert.Contains("carpeta personal entera ni la raíz del sistema de archivos", Validate("/my-files/Docs", localPath));
+        => Assert.Equal(SyncPairIssueKind.LocalPathIsHomeOrRoot, Validate("/my-files/Docs", localPath)!.Kind);
 
     [Fact]
     public void TheHomeDirectoryItself_IsRejected_EvenWithATrailingSeparator()
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-        Assert.Contains("carpeta personal", Validate("/my-files/Docs", home));
-        Assert.Contains("carpeta personal", Validate("/my-files/Docs", home + "/"));
+        Assert.Equal(SyncPairIssueKind.LocalPathIsHomeOrRoot, Validate("/my-files/Docs", home)!.Kind);
+        Assert.Equal(SyncPairIssueKind.LocalPathIsHomeOrRoot, Validate("/my-files/Docs", home + "/")!.Kind);
     }
 
     [Fact]
@@ -69,20 +69,20 @@ public class SyncPairValidatorTests
         var error = Validate("/my-files/Other", "/home/user/Docs/Sub", Existing("/my-files/Docs", "/home/user/Docs"));
 
         Assert.NotNull(error);
-        Assert.Contains("se superpone", error);
-        Assert.Contains("/home/user/Docs", error);
+        Assert.Equal(SyncPairIssueKind.LocalOverlaps, error.Kind);
+        Assert.Contains("/home/user/Docs", error.Args.Select(a => a?.ToString()));
     }
 
     [Fact]
     public void ALocalFolderContainingAnExistingPair_IsRejectedToo()
-        => Assert.Contains("se superpone", Validate("/my-files/Other", "/home/user", Existing("/my-files/Docs", "/home/user/Docs")));
+        => Assert.Equal(SyncPairIssueKind.LocalOverlaps, Validate("/my-files/Other", "/home/user", Existing("/my-files/Docs", "/home/user/Docs"))!.Kind);
 
     [Fact]
     public void TheSameLocalFolderTwice_SaysSoPlainly()
     {
         var error = Validate("/my-files/Other", "/home/user/Docs", Existing("/my-files/Docs", "/home/user/Docs"));
 
-        Assert.Contains("ya está sincronizada", error);
+        Assert.Equal(SyncPairIssueKind.LocalAlreadySynced, error.Kind);
     }
 
     [Theory]
@@ -110,13 +110,12 @@ public class SyncPairValidatorTests
         var error = Validate("/my-files/Docs/Sub", "/home/user/Elsewhere", Existing("/my-files/Docs", "/home/user/Docs"));
 
         Assert.NotNull(error);
-        Assert.Contains("carpeta remota se superpone", error);
-        Assert.Contains("deshacer las eliminaciones del otro", error);
+        Assert.Equal(SyncPairIssueKind.RemoteOverlaps, error.Kind);
     }
 
     [Fact]
     public void ARemoteFolderContainingAnExistingPair_IsRejectedToo()
-        => Assert.Contains("se superpone", Validate("/my-files", "/home/user/Elsewhere", Existing("/my-files/Docs", "/home/user/Docs")));
+        => Assert.Equal(SyncPairIssueKind.RemoteOverlaps, Validate("/my-files", "/home/user/Elsewhere", Existing("/my-files/Docs", "/home/user/Docs"))!.Kind);
 
     [Theory]
     [InlineData("/my-files/Docs/")]
@@ -136,7 +135,7 @@ public class SyncPairValidatorTests
             Existing("/my-files/A", "/home/user/A"),
             Existing("/my-files/B", "/home/user/B"));
 
-        Assert.Contains("/home/user/B", error);
+        Assert.Contains("/home/user/B", error.Args.Select(a => a?.ToString()));
     }
 
     [Fact]
@@ -164,7 +163,7 @@ public class SyncPairValidatorTests
         // destroy what the new upload-only pair sends there.
         var error = ValidateUpload("/my-files/Other", "/home/user/Docs", Existing("/my-files/Docs", "/home/user/Docs"));
 
-        Assert.Contains("ya está sincronizada", error);
+        Assert.Equal(SyncPairIssueKind.LocalAlreadySynced, error.Kind);
     }
 
     [Fact]
@@ -234,7 +233,8 @@ public class SyncPairValidatorTests
         var error = SyncPairValidator.ValidateDirectionChange(pair, SyncDirection.TwoWay, [pair, other]);
 
         Assert.NotNull(error);
-        Assert.Contains("/my-files/B", error);
+        Assert.Equal(SyncPairIssueKind.DirectionUnsafeOverlap, error.Kind);
+        Assert.Contains("/my-files/B", error.Args.Select(a => a?.ToString()));
     }
 
     [Fact]

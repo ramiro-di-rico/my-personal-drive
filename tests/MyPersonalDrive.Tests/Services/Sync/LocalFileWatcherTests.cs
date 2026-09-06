@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Sync;
@@ -15,7 +16,7 @@ namespace MyPersonalDrive.Tests.Services.Sync;
 public class LocalFileWatcherTests : IDisposable
 {
     private readonly string _localRoot = Directory.CreateTempSubdirectory("mypersonaldrive-watcher-tests").FullName;
-    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-03-01T12:00:00Z");
+    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture);
 
     public void Dispose()
     {

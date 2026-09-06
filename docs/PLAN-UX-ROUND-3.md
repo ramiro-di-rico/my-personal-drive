@@ -15,6 +15,11 @@
 >
 > Implementation branch: `feature/ux-round-3`, branched from `main` at `bc84166`.
 
+> **Audited in [PLAN-UX-ROUND-4.md](PLAN-UX-ROUND-4.md), which found three defects this round
+> introduced** — one of them a gesture X2's own commit message described as working. That
+> document's Appendix A lists every claim below that did not survive review, and Y1/Y5/Y6/Y7 fix
+> what could be fixed without widening the diff.
+
 ## Status
 
 > **All ten items implemented on branch `feature/ux-round-3`, 2026-09-06**, from `main` at

@@ -39,8 +39,13 @@
 - [x] **B6.4** — folded into `ByteSize.Format` during [PLAN-I18N.md](PLAN-I18N.md) L8, which
       also moved `ByteSize` from invariant to the interface language's culture.
 - [ ] **B3.1** — `FakeCliExecutor.Calls` is a bare `List<T>` read while a fire-and-forget refresh
-      may still be appending to it. Found as a one-in-five flake during
-      [PLAN-UX-ROUND-3.md](PLAN-UX-ROUND-3.md); see §5.
+      may still be appending to it. Seen three times in about twenty runs during
+      [PLAN-UX-ROUND-3.md](PLAN-UX-ROUND-3.md) and round 4, never captured by name; see §5.
+- [ ] **Round 4's open items** live in [PLAN-UX-ROUND-4.md](PLAN-UX-ROUND-4.md), not here: Y2 (the
+      quota total is a constant), Y3 (a recovery button on warnings with no remedy), Y4 (the
+      keyboard map is unverified), Y6's viewer-zoom half (a slider that writes settings.json on
+      every tick) and Y7's `CliVersion`/`CliUpdateStatus` half (localized text stored once, plus two
+      comparisons against a rendered display string).
 
 ---
 
@@ -399,7 +404,7 @@ start. `Assert.Contains(executor.Calls, …)` then enumerates a `List<T>` anothe
 to, which either throws `InvalidOperationException` ("collection was modified") or reads a
 half-published list.
 
-Observed twice in about a dozen suite runs. The first was on
+Observed three times in about twenty suite runs. The first was on
 `MainWindowMultiSelectTests.TrashSelectedCommand_AsksOnceWhenTheSelectionIncludesAFolder_ThenTrashesEveryItem`
 (2026-09-06); the second, later the same day, was not captured by name — the run output was being
 grepped for its summary line only, which is a lesson about how to watch for this one. Both times

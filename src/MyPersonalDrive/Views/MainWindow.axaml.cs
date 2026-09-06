@@ -855,20 +855,20 @@ public partial class MainWindow : Window
         }
 
         viewModel.RequestUploadFilesAsync = PickUploadFilesAsync;
-        viewModel.RequestConflictStrategyAsync = PickConflictStrategyAsync;
+        viewModel.RequestConflictStrategyAsync = files => Dialogs.UploadConflictDialog.ShowAsync(this, files);
         viewModel.RequestRenameAsync = PromptForRenameAsync;
         viewModel.RequestCopyNameAsync = PromptForCopyNameAsync;
         viewModel.RequestCreateFolderAsync = PromptForNewFolderNameAsync;
         viewModel.RequestDownloadFolderAsync = PickDownloadFolderAsync;
         viewModel.RequestSaveActivityAsync = PickSaveActivityAsync;
-        viewModel.RequestConfirmationAsync = AskAsync;
+        viewModel.RequestConfirmationAsync = question => Dialogs.ConfirmDialog.ShowAsync(this, question);
         viewModel.RequestCopyToClipboardAsync = CopyToClipboardAsync;
-        viewModel.RequestShowPropertiesAsync = ShowPropertiesAsync;
+        viewModel.RequestShowPropertiesAsync = (title, fields) => Dialogs.PropertiesDialog.ShowAsync(this, title, fields);
 
-        viewModel.LocalExplorer.RequestConfirmationAsync = AskAsync;
+        viewModel.LocalExplorer.RequestConfirmationAsync = question => Dialogs.ConfirmDialog.ShowAsync(this, question);
         viewModel.LocalExplorer.RequestRenameAsync = PromptForRenameAsync;
         viewModel.LocalExplorer.RequestCopyToClipboardAsync = CopyToClipboardAsync;
-        viewModel.LocalExplorer.RequestShowPropertiesAsync = ShowPropertiesAsync;
+        viewModel.LocalExplorer.RequestShowPropertiesAsync = (title, fields) => Dialogs.PropertiesDialog.ShowAsync(this, title, fields);
 
 
         // ExplorerColumnsGrid.ColumnDefinitions[2] is star-sized so the splitter can resize it —
@@ -882,9 +882,9 @@ public partial class MainWindow : Window
         viewModel.SyncPanel.RequestPreviewConfirmationAsync = ShowPreviewAsync;
         viewModel.SyncPanel.RequestConflictResolutionsAsync = ShowConflictsAsync;
         viewModel.SyncPanel.RequestFailureReviewAsync = ShowFailuresAsync;
-        viewModel.SyncPanel.RequestConfirmationAsync = AskAsync;
+        viewModel.SyncPanel.RequestConfirmationAsync = question => Dialogs.ConfirmDialog.ShowAsync(this, question);
         viewModel.SyncPanel.RequestEditPairAsync = PromptForEditPairAsync;
-        viewModel.SyncPanel.RequestAlertAsync = ShowAlertAsync;
+        viewModel.SyncPanel.RequestAlertAsync = message => Dialogs.AlertDialog.ShowAsync(this, message);
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -935,7 +935,8 @@ public partial class MainWindow : Window
     }
 
     private Task<string?> PromptForRenameAsync(string currentName)
-        => PromptForNameAsync(
+        => Dialogs.NamePromptDialog.ShowAsync(
+            this,
             Loc.T(StringKeys.Dialog.RenameTitle),
             Loc.F(StringKeys.Dialog.RenamePrompt, currentName),
             Loc.T(StringKeys.Menu.Rename),
@@ -944,7 +945,8 @@ public partial class MainWindow : Window
             mustDifferFrom: currentName);
 
     private Task<string?> PromptForNewFolderNameAsync()
-        => PromptForNameAsync(
+        => Dialogs.NamePromptDialog.ShowAsync(
+            this,
             Loc.T(StringKeys.Dialog.NewFolderTitle),
             Loc.T(StringKeys.Dialog.NewFolderPrompt),
             Loc.T(StringKeys.Common.Create),
@@ -952,7 +954,8 @@ public partial class MainWindow : Window
             placeholder: Loc.T(StringKeys.Dialog.NewFolderPlaceholder));
 
     private Task<string?> PromptForCopyNameAsync(string currentName)
-        => PromptForNameAsync(
+        => Dialogs.NamePromptDialog.ShowAsync(
+            this,
             Loc.T(StringKeys.Menu.Copy),
             Loc.F(StringKeys.Dialog.CopyPrompt, currentName),
             Loc.T(StringKeys.Common.Copy),
@@ -960,169 +963,7 @@ public partial class MainWindow : Window
             placeholder: Loc.T(StringKeys.Dialog.CopyPlaceholder),
             mustDifferFrom: currentName);
 
-    /// <summary>
-    /// The one name prompt behind rename, new folder and copy (docs/PLAN-UX-ROUND-3.md X9). Those
-    /// were three copies of the same forty lines differing in four strings, and between them they
-    /// carried every defect the item lists: a fixed 180px window around a prompt line that
-    /// interpolates a file name and did not wrap, no initial focus, no selection, no validation of
-    /// what was typed, and buttons pinned at 80px.
-    ///
-    /// <paramref name="mustDifferFrom"/> is the current name where there is one: a rename to the
-    /// same name and a copy onto its own source are both requests the provider will refuse, and
-    /// refusing them here costs a round trip and an error card.
-    /// </summary>
-    private async Task<string?> PromptForNameAsync(
-        string title,
-        string prompt,
-        string confirmLabel,
-        string? initialText,
-        string? placeholder,
-        string? mustDifferFrom = null)
-    {
-        var textBox = new TextBox
-        {
-            Text = initialText,
-            PlaceholderText = placeholder,
-            MinWidth = 320,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
 
-        // No fixed width: "Rename" fits 80px and Italian's "Rinomina" is a different length, and
-        // there is no reason to pin either.
-        var confirm = new Button { Content = confirmLabel, IsDefault = true, MinWidth = 90 };
-        var cancel = new Button { Content = Loc.T(StringKeys.Common.Cancel), IsCancel = true, MinWidth = 90 };
-
-        var dialog = new Window
-        {
-            Title = title,
-            Width = 460,
-            // Grows with the prompt instead of clipping it: the rename prompt carries the file's
-            // own name, so its height is not something a constant can know.
-            SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Spacing = 15,
-                Margin = new Avalonia.Thickness(20),
-                Children =
-                {
-                    new TextBlock
-                    {
-                        Text = prompt,
-                        FontWeight = Avalonia.Media.FontWeight.Bold,
-                        TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-                    },
-                    textBox,
-                    new StackPanel
-                    {
-                        Spacing = 10,
-                        Orientation = Orientation.Horizontal,
-                        HorizontalAlignment = HorizontalAlignment.Right,
-                        Children = { confirm, cancel },
-                    },
-                },
-            },
-        };
-
-        void Validate()
-        {
-            var value = textBox.Text?.Trim();
-            confirm.IsEnabled = !string.IsNullOrEmpty(value)
-                && value.IndexOfAny(['/', '\\']) < 0
-                && !string.Equals(value, mustDifferFrom, StringComparison.Ordinal);
-        }
-
-        textBox.TextChanged += (_, _) => Validate();
-        Validate();
-
-        dialog.Opened += (_, _) =>
-        {
-            // Focus, because nothing was focused before and the user had to click into the box
-            // before typing. Selection stops at the last dot: renaming "report.final.pdf" is
-            // almost always about the part before the extension, and replacing the extension by
-            // accident is the expensive mistake.
-            textBox.Focus();
-            var text = textBox.Text ?? string.Empty;
-            var extension = text.LastIndexOf('.');
-            textBox.SelectionStart = 0;
-            textBox.SelectionEnd = extension > 0 ? extension : text.Length;
-        };
-
-        string? result = null;
-        confirm.Click += (_, _) =>
-        {
-            result = textBox.Text?.Trim();
-            dialog.Close();
-        };
-
-        cancel.Click += (_, _) =>
-        {
-            result = null;
-            dialog.Close();
-        };
-
-        await dialog.ShowDialog(this);
-        return result;
-    }
-
-    private async Task<UploadConflictStrategy> PickConflictStrategyAsync(IReadOnlyList<string> conflictingFiles)
-    {
-        var filesList = string.Join("\n", conflictingFiles.Take(10).Select(f => "- " + f));
-        if (conflictingFiles.Count > 10)
-        {
-            filesList += Loc.Plural(StringKeys.Common.More, conflictingFiles.Count - 10);
-        }
-
-        var dialog = new Window
-        {
-            Title = Loc.T(StringKeys.Dialog.UploadConflictTitle),
-            Width = 450,
-            Height = 350,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Spacing = 15,
-                Margin = new Avalonia.Thickness(20),
-                Children =
-                {
-                    new TextBlock { Text = Loc.T(StringKeys.Dialog.UploadConflictIntro), FontWeight = Avalonia.Media.FontWeight.Bold },
-                    new TextBlock { Text = filesList, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                    new TextBlock { Text = Loc.T(StringKeys.Dialog.UploadConflictQuestion), FontWeight = Avalonia.Media.FontWeight.Bold },
-                    new StackPanel
-                    {
-                        Spacing = 10,
-                        Orientation = Avalonia.Layout.Orientation.Vertical,
-                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
-                        Children =
-                        {
-                            new Button { Content = Loc.T(StringKeys.Dialog.UploadConflictKeepBoth), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.KeepBoth },
-                            new Button { Content = Loc.T(StringKeys.Dialog.UploadConflictReplace), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.Replace },
-                            new Button { Content = Loc.T(StringKeys.Dialog.UploadConflictSkip), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.Skip },
-                            new Button { Content = Loc.T(StringKeys.Common.Cancel), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.None }
-                        }
-                    }
-                }
-            }
-        };
-
-        var result = UploadConflictStrategy.None;
-        var panel = (StackPanel)dialog.Content;
-        var buttonsPanel = (StackPanel)panel.Children[3];
-        foreach (var child in buttonsPanel.Children)
-        {
-            if (child is Button button)
-            {
-                button.Click += (_, _) =>
-                {
-                    result = (UploadConflictStrategy)button.Tag!;
-                    dialog.Close();
-                };
-            }
-        }
-
-        await dialog.ShowDialog(this);
-        return result;
-    }
 
     private async Task<string?> PickSaveActivityAsync()
     {
@@ -1859,162 +1700,8 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>A read-only "Properties" info panel — "Propiedades" (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6).</summary>
-    private async Task ShowPropertiesAsync(string title, IReadOnlyList<PropertyField> fields)
-    {
-        var children = new List<Control>
-        {
-            new TextBlock { Text = title, FontWeight = Avalonia.Media.FontWeight.Bold, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-        };
 
-        foreach (var field in fields)
-        {
-            var text = new TextBlock
-            {
-                Text = Loc.F(StringKeys.Dialog.PropertiesField, field.Label, field.Value),
-                TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
 
-            if (!field.IsCopyable)
-            {
-                children.Add(text);
-                continue;
-            }
-
-            // Paths are the only values here anyone needs elsewhere, and the only ones long enough
-            // that retyping them is not an option (docs/PLAN-UX-ROUND-2.md §12).
-            var copyButton = new Button
-            {
-                Content = Loc.T(StringKeys.Common.Copy),
-                FontSize = 11,
-                Padding = new Avalonia.Thickness(8, 2),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-
-            var value = field.Value;
-            copyButton.Click += async (_, _) =>
-            {
-                await CopyToClipboardAsync(value);
-                // Confirm in place: a clipboard write is otherwise completely invisible.
-                copyButton.Content = Loc.T(StringKeys.Common.Copied);
-            };
-
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8 };
-            Grid.SetColumn(text, 0);
-            Grid.SetColumn(copyButton, 1);
-            row.Children.Add(text);
-            row.Children.Add(copyButton);
-            children.Add(row);
-        }
-
-        var okButton = new Button { Content = Loc.T(StringKeys.Common.Ok), IsDefault = true, IsCancel = true, Width = 80 };
-        children.Add(new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Children = { okButton },
-        });
-
-        var contentPanel = new StackPanel { Spacing = 10, Margin = new Avalonia.Thickness(20) };
-        contentPanel.Children.AddRange(children);
-
-        var dialog = new Window
-        {
-            Title = Loc.T(StringKeys.Dialog.PropertiesTitle),
-            Width = 420,
-            SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = contentPanel,
-        };
-
-        okButton.Click += (_, _) => dialog.Close();
-        await dialog.ShowDialog(this);
-    }
-
-    /// <summary>
-    /// A plain yes/no. "Cancel" is the default button, not "Continue": every question routed here is
-    /// a warning about doing something big, so the safe answer should be the one a stray Enter picks.
-    /// </summary>
-    private async Task<bool> AskAsync(string question)
-    {
-        var yes = new Button { Content = Loc.T(StringKeys.Common.Continue), Width = 100 };
-        var no = new Button { Content = Loc.T(StringKeys.Common.Cancel), IsCancel = true, IsDefault = true, Width = 100 };
-
-        var dialog = new Window
-        {
-            Title = Loc.T(StringKeys.Dialog.ConfirmTitle),
-            Width = 480,
-            SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Spacing = 16,
-                Margin = new Avalonia.Thickness(20),
-                Children =
-                {
-                    new TextBlock { Text = question, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 10,
-                        HorizontalAlignment = HorizontalAlignment.Right,
-                        Children = { yes, no }
-                    }
-                }
-            }
-        };
-
-        var confirmed = false;
-        yes.Click += (_, _) =>
-        {
-            confirmed = true;
-            dialog.Close();
-        };
-        no.Click += (_, _) => dialog.Close();
-
-        await dialog.ShowDialog(this);
-        return confirmed;
-    }
-
-    /// <summary>
-    /// A blocking, single-button notice — for a rejection the user has to actually see, not a
-    /// <c>StatusMessage</c> line that can change again (or scroll away) before anyone reads it.
-    /// Mirrors <see cref="AskAsync"/>'s shape with the "Cancel" button dropped: there's nothing to
-    /// decide here, only something to acknowledge (docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2 —
-    /// a rejected sync-pair-direction change looked indistinguishable from a silently-failed save).
-    /// </summary>
-    private async Task ShowAlertAsync(string message)
-    {
-        var ok = new Button { Content = Loc.T(StringKeys.Common.Ok), IsCancel = true, IsDefault = true, Width = 100 };
-
-        var dialog = new Window
-        {
-            Title = Loc.T(StringKeys.Dialog.AlertTitle),
-            Width = 480,
-            SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Spacing = 16,
-                Margin = new Avalonia.Thickness(20),
-                Children =
-                {
-                    new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        HorizontalAlignment = HorizontalAlignment.Right,
-                        Children = { ok }
-                    }
-                }
-            }
-        };
-
-        ok.Click += (_, _) => dialog.Close();
-
-        await dialog.ShowDialog(this);
-    }
 
     private static string DescribeReason(string? reason) => reason switch
     {

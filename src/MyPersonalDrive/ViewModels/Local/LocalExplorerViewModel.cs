@@ -324,7 +324,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         Items.Clear();
         foreach (var item in visible)
         {
-            Items.Add(new LocalNodeViewModel(item, HandleRowClickAsync, _onError, new LocalNodeSyncActions
+            Items.Add(new LocalNodeViewModel(item, HandleRowClickAsync, SelectRowAsync, _onError, new LocalNodeSyncActions
             {
                 FindSyncPair = i => FindSyncPairByPath?.Invoke(i.Path),
                 SyncSelectedPathAsync = SyncSelectedPathAsync,
@@ -356,6 +356,16 @@ public sealed class LocalExplorerViewModel : ObservableObject
         {
             await NavigateAsync(item.Path);
         }
+    }
+
+    /// <summary>
+    /// A plain click: selection only, matching the cloud pane (docs/PLAN-UX-ROUND-3.md X2).
+    /// Opening a folder is the double click.
+    /// </summary>
+    private async Task SelectRowAsync(DriveItem item)
+    {
+        SelectSingle(item.Path);
+        await Task.CompletedTask;
     }
 
     private void SelectSingle(string path)

@@ -17,13 +17,14 @@ public sealed class LocalNodeViewModel : ObservableObject
     private readonly LocalNodeSyncActions? _syncActions;
     private bool _isSelected;
 
-    public LocalNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Action<Exception>? onError = null, LocalNodeSyncActions? syncActions = null)
+    public LocalNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Func<DriveItem, Task> selectRowAsync, Action<Exception>? onError = null, LocalNodeSyncActions? syncActions = null)
     {
         Item = item;
         FileKind = FileKindClassifier.Classify(item.Name, item.IsFolder);
         _syncActions = syncActions;
         SyncPair = syncActions?.FindSyncPair?.Invoke(item);
-        RowCommand = new AsyncCommand(() => handleRowClickAsync(Item), onError: onError);
+        ActivateCommand = new AsyncCommand(() => handleRowClickAsync(Item), onError: onError);
+        SelectCommand = new AsyncCommand(() => selectRowAsync(Item), onError: onError);
         CopyPathCommand = new AsyncCommand(CopyPathAsync, () => _syncActions?.CopyPathAsync is not null, onError);
         RenameCommand = new AsyncCommand(RenameAsync, () => _syncActions?.RenameAsync is not null, onError);
         DeleteCommand = new AsyncCommand(DeleteAsync, () => _syncActions?.DeleteAsync is not null, onError);
@@ -62,7 +63,11 @@ public sealed class LocalNodeViewModel : ObservableObject
 
     public bool CanCreateSyncPair => IsFolder && !HasSyncPair;
 
-    public AsyncCommand RowCommand { get; }
+    /// <summary>Opens: into the folder, or nothing for a file. Double click or Enter (docs/PLAN-UX-ROUND-3.md X2).</summary>
+    public AsyncCommand ActivateCommand { get; }
+
+    /// <summary>A plain click. Marks this row and clears the rest; opens nothing.</summary>
+    public AsyncCommand SelectCommand { get; }
 
     public AsyncCommand CopyPathCommand { get; }
 

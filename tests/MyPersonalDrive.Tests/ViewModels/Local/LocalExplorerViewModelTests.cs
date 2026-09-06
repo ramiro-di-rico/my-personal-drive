@@ -90,10 +90,27 @@ public class LocalExplorerViewModelTests : IDisposable
 
         var sut = Build(_root);
         await sut.NavigateAsync(_root);
-        await sut.Items.Single(i => i.DisplayName == "sub").RowCommand.ExecuteAsync();
+        await sut.Items.Single(i => i.DisplayName == "sub").ActivateCommand.ExecuteAsync();
 
         Assert.Equal(sub, sut.CurrentPath);
         Assert.Contains(sut.BreadcrumbItems, b => b.Label == "sub" && b.IsCurrent);
+    }
+
+    /// <summary>
+    /// docs/PLAN-UX-ROUND-3.md X2: a plain click selects, in both panes. Opening the folder is the
+    /// double click, which <see cref="LocalNodeViewModel.ActivateCommand"/> carries.
+    /// </summary>
+    [Fact]
+    public async Task ClickingAFolder_SelectsIt_WithoutNavigatingIntoIt()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "sub"));
+        var sut = Build(_root);
+        await sut.NavigateAsync(_root);
+
+        await sut.Items.Single(i => i.DisplayName == "sub").SelectCommand.ExecuteAsync();
+
+        Assert.Equal(_root, sut.CurrentPath);
+        Assert.True(sut.Items.Single(i => i.DisplayName == "sub").IsSelected);
     }
 
     [Fact]
@@ -316,7 +333,7 @@ public class LocalExplorerViewModelTests : IDisposable
         var sut = await LoadFourFilesAsync();
         await sut.SelectAllCommand.ExecuteAsync();
 
-        await Row(sut, "b.txt").RowCommand.ExecuteAsync();
+        await Row(sut, "b.txt").SelectCommand.ExecuteAsync();
 
         Assert.Equal(1, sut.SelectedCount);
         Assert.True(Row(sut, "b.txt").IsSelected);

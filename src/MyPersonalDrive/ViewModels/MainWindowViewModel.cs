@@ -2972,6 +2972,23 @@ public sealed class MainWindowViewModel : ObservableObject
         await show(item.Name, fields);
     }
 
+    /// <summary>
+    /// A plain click. Selection only, in every view mode (docs/PLAN-UX-ROUND-3.md X2) — opening
+    /// moved to the double click. Before this, a single click both selected and opened, which is
+    /// why the tile modes could not select at all: their only gesture already meant "navigate".
+    /// </summary>
+    private async Task SelectRowAsync(DriveItem item)
+    {
+        SelectRow(RootItems.FirstOrDefault(node => node.Item.Path == item.Path));
+        SelectItem(item);
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A double click, Enter, or the context menu's "Open": into the folder, or the preview for a
+    /// file that has one. Selects first, so activating a row a keyboard moved to also updates the
+    /// details panel.
+    /// </summary>
     private async Task HandleRowClickAsync(DriveItem item)
     {
         SelectRow(RootItems.FirstOrDefault(node => node.Item.Path == item.Path));
@@ -3376,7 +3393,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RootItems.Clear();
         foreach (var item in DriveItemSorter.Sort(visible, SortKey, SortDescending))
         {
-            var node = new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, PreviewItemAsync, HandleUnexpectedError, new DriveNodeSyncActions
+            var node = new DriveNodeViewModel(item, HandleRowClickAsync, SelectRowAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, PreviewItemAsync, HandleUnexpectedError, new DriveNodeSyncActions
             {
                 FindSyncPair = i => SyncPanel.FindPairByRemotePath(i.Path),
                 SyncSelectedPathAsync = SyncSelectedRemotePathAsync,

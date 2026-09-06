@@ -129,7 +129,7 @@ public class MainWindowViewModeTests : IDisposable
     {
         var sut = Build();
         var item = new DriveItem("/my-files/Fotos", "Fotos", IsFolder: true);
-        var node = new DriveNodeViewModel(item, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask)
+        var node = new DriveNodeViewModel(item, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask)
         {
             IsSelected = true
         };

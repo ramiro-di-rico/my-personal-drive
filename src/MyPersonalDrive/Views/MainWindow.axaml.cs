@@ -40,6 +40,95 @@ public partial class MainWindow : Window
         LocalListing.AddHandler(InputElement.PointerMovedEvent, OnLocalRowPointerMoved, RoutingStrategies.Tunnel);
         ListModeListing.AddHandler(InputElement.PointerPressedEvent, OnCloudRowPointerPressed, RoutingStrategies.Tunnel);
         ListModeListing.AddHandler(InputElement.PointerMovedEvent, OnCloudRowPointerMoved, RoutingStrategies.Tunnel);
+
+        // The tile modes get exactly the same gestures as list mode (docs/PLAN-UX-ROUND-3.md X2).
+        // They had none: an ItemsRepeater has no selection or keyboard model of its own, and the
+        // three handlers above were attached to the ListBox by name, so switching view mode
+        // silently dropped multi-select, drag-and-drop and any way to select a tile without
+        // opening it. Nothing about them is list-specific — they resolve the row by walking up
+        // from the hit element to whatever is bound to a node.
+        foreach (var tiles in new Control[] { IconsModeListing, GalleryModeListing })
+        {
+            tiles.AddHandler(InputElement.PointerPressedEvent, OnCloudRowPointerPressed, RoutingStrategies.Tunnel);
+            tiles.AddHandler(InputElement.PointerMovedEvent, OnCloudRowPointerMoved, RoutingStrategies.Tunnel);
+        }
+
+        // Double click opens, in all three modes and in both panes. Tunnel for the same reason the
+        // pointer handlers tunnel: the row and tile roots are Buttons, which handle the gesture on
+        // the way back up.
+        foreach (var listing in new Control[] { ListModeListing, IconsModeListing, GalleryModeListing })
+        {
+            listing.AddHandler(InputElement.DoubleTappedEvent, OnCloudRowDoubleTapped, RoutingStrategies.Tunnel);
+        }
+
+        LocalListing.AddHandler(InputElement.DoubleTappedEvent, OnLocalRowDoubleTapped, RoutingStrategies.Tunnel);
+    }
+
+    /// <summary>
+    /// The node a pointer event landed on, whichever container materialized it — a ListBoxItem in
+    /// list mode, a tile Border in the other two. DataContext is inherited, so walking up from the
+    /// hit element (usually a TextBlock or a Path) finds the node without knowing the container
+    /// type at all.
+    /// </summary>
+    private static T? NodeUnder<T>(object? source) where T : class
+    {
+        var visual = source as Visual;
+        while (visual is not null)
+        {
+            if (visual is StyledElement { DataContext: T node })
+            {
+                return node;
+            }
+
+            visual = visual.GetVisualParent();
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The row or tile itself: the outermost element still bound to <paramref name="node"/>. The
+    /// innermost one is whatever was hit, which is no use for a highlight class — that has to go on
+    /// the container the .dropTarget styles select.
+    /// </summary>
+    private static Control? ContainerFor(object? source, object node)
+    {
+        Control? outermost = null;
+        var visual = source as Visual;
+        while (visual is not null)
+        {
+            if (visual is Control control && ReferenceEquals(control.DataContext, node))
+            {
+                outermost = control;
+            }
+            else if (outermost is not null)
+            {
+                break;
+            }
+
+            visual = visual.GetVisualParent();
+        }
+
+        return outermost;
+    }
+
+    /// <summary>Double click on a row or tile: open the folder, or preview the file (X2).</summary>
+    private void OnCloudRowDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (NodeUnder<DriveNodeViewModel>(e.Source) is { } node)
+        {
+            node.ActivateCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    private void OnLocalRowDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (NodeUnder<LocalNodeViewModel>(e.Source) is { } node)
+        {
+            node.ActivateCommand.Execute(null);
+            e.Handled = true;
+        }
     }
 
     /// <summary>
@@ -76,7 +165,7 @@ public partial class MainWindow : Window
         e.Handled = true;
         // Fire and forget through the command, so the AsyncCommand's own error routing applies
         // rather than this handler becoming an `async void` that can take the process down.
-        node.RowCommand.Execute(null);
+        node.ActivateCommand.Execute(null);
     }
 
     /// <summary>The local pane's counterpart to <see cref="OnListingKeyDown"/>'s Ctrl/Cmd+A handling — the local pane has no Enter/Space activation to also cover, since its rows aren't focusable buttons the way the cloud pane's are.</summary>
@@ -153,8 +242,7 @@ public partial class MainWindow : Window
     {
         // Attached at the ListBox (see the constructor), not the row itself, so the row has to be
         // resolved by walking up from whatever was actually hit — usually the icon/text inside it.
-        var row = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>(includeSelf: true);
-        if (row?.DataContext is not LocalNodeViewModel node || !e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        if (NodeUnder<LocalNodeViewModel>(e.Source) is not { } node || !e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
         {
             return;
         }
@@ -247,7 +335,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private ListBoxItem? _cloudHighlightedDropRow;
+    private Control? _cloudHighlightedDropRow;
 
     /// <summary>
     /// The three-part drop-target affordance (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4):
@@ -259,20 +347,21 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnCloudListingDragOver(object? sender, DragEventArgs e)
     {
-        var listBox = sender as ListBox;
+        var listing = sender as Control;
         var hasFormat = e.DataTransfer.Contains(LocalPathsDataFormat);
         if (!hasFormat || DataContext is not MainWindowViewModel viewModel)
         {
             e.DragEffects = DragDropEffects.None;
-            ClearCloudDropHighlight(listBox);
+            ClearCloudDropHighlight(listing);
             return;
         }
 
         e.DragEffects = DragDropEffects.Copy;
-        listBox?.Classes.Add("dropTarget");
+        listing?.Classes.Add("dropTarget");
 
-        var hoveredRow = e.Source is Visual visual ? visual.FindAncestorOfType<ListBoxItem>(includeSelf: true) : null;
-        var targetsAFolderRow = hoveredRow?.DataContext is DriveNodeViewModel { IsFolder: true };
+        var hoveredNode = NodeUnder<DriveNodeViewModel>(e.Source);
+        var targetsAFolderRow = hoveredNode is { IsFolder: true };
+        var hoveredRow = targetsAFolderRow ? ContainerFor(e.Source, hoveredNode!) : null;
         if (!ReferenceEquals(hoveredRow, _cloudHighlightedDropRow) || !targetsAFolderRow)
         {
             _cloudHighlightedDropRow?.Classes.Remove("dropTarget");
@@ -285,11 +374,11 @@ public partial class MainWindow : Window
         CloudDropOverlay.IsVisible = true;
     }
 
-    private void OnCloudListingDragLeave(object? sender, DragEventArgs e) => ClearCloudDropHighlight(sender as ListBox);
+    private void OnCloudListingDragLeave(object? sender, DragEventArgs e) => ClearCloudDropHighlight(sender as Control);
 
-    private void ClearCloudDropHighlight(ListBox? listBox)
+    private void ClearCloudDropHighlight(Control? listing)
     {
-        listBox?.Classes.Remove("dropTarget");
+        listing?.Classes.Remove("dropTarget");
         _cloudHighlightedDropRow?.Classes.Remove("dropTarget");
         _cloudHighlightedDropRow = null;
         CloudDropOverlay.IsVisible = false;
@@ -297,7 +386,7 @@ public partial class MainWindow : Window
 
     private async void OnCloudListingDrop(object? sender, DragEventArgs e)
     {
-        ClearCloudDropHighlight(sender as ListBox);
+        ClearCloudDropHighlight(sender as Control);
 
         if (DataContext is not MainWindowViewModel viewModel)
         {
@@ -330,13 +419,9 @@ public partial class MainWindow : Window
     /// <summary>The folder row under the drop point, if any — otherwise the currently browsed folder.</summary>
     private static string ResolveCloudDropTargetPath(DragEventArgs e, MainWindowViewModel viewModel)
     {
-        if (e.Source is Visual visual)
+        if (NodeUnder<DriveNodeViewModel>(e.Source) is { IsFolder: true } node)
         {
-            var listBoxItem = visual.FindAncestorOfType<ListBoxItem>(includeSelf: true);
-            if (listBoxItem?.DataContext is DriveNodeViewModel { IsFolder: true } node)
-            {
-                return node.Path;
-            }
+            return node.Path;
         }
 
         return viewModel.CurrentPath;
@@ -352,10 +437,9 @@ public partial class MainWindow : Window
 
     private void OnCloudRowPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        // Attached at the ListBox (see the constructor), not the row itself — see the matching
-        // comment on OnLocalRowPointerPressed.
-        var row = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>(includeSelf: true);
-        if (row?.DataContext is not DriveNodeViewModel node || !e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        // Attached at the listing container (see the constructor), not the row itself — see the
+        // matching comment on OnLocalRowPointerPressed.
+        if (NodeUnder<DriveNodeViewModel>(e.Source) is not { } node || !e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
         {
             return;
         }
@@ -420,7 +504,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private ListBoxItem? _localHighlightedDropRow;
+    private Control? _localHighlightedDropRow;
 
     /// <summary>Mirrors <see cref="OnCloudListingDragOver"/> for the opposite direction — see its doc comment.</summary>
     private void OnLocalListingDragOver(object? sender, DragEventArgs e)

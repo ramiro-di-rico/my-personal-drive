@@ -99,6 +99,16 @@
     <Style Selector="ListBox.driveListing ListBoxItem.dropTarget">
       <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
     </Style>
+    <!-- The tile modes' equivalents: the whole pane while a drag is over it, the tile itself when
+         the drop would land inside that folder (docs/PLAN-UX-ROUND-3.md X2). -->
+    <Style Selector="ScrollViewer.dropTarget">
+      <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+    </Style>
+    <Style Selector="Border.tile.dropTarget">
+      <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+      <Setter Property="BorderThickness" Value="2" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
 
     <!-- Tile chrome, shared by the icons and gallery modes. -->
     <Style Selector="Border.tile">
@@ -643,6 +653,10 @@
                       Margin="0,0,0,6">
                   <Grid.ContextMenu>
                     <ContextMenu>
+                      <!-- Open is an entry here now: a plain click selects rather than opens
+                           (docs/PLAN-UX-ROUND-3.md X2), so the menu has to carry the verb the
+                           tile modes' menus always did. -->
+                      <MenuItem Header="{Binding Loc[menu.open]}" Command="{Binding ActivateCommand}" />
                       <MenuItem Header="{Binding Loc[menu.downloadhere]}" Command="{Binding DownloadHereCommand}" />
                       <MenuItem Header="{Binding Loc[menu.uploadhere]}" Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
                       <MenuItem Header="{Binding Loc[menu.copypath]}" Command="{Binding CopyPathCommand}" />
@@ -661,7 +675,7 @@
                     </ContextMenu>
                   </Grid.ContextMenu>
                   <Button Grid.Column="0"
-                          Command="{Binding RowCommand}"
+                          Command="{Binding SelectCommand}"
                           ToolTip.Tip="{Binding Loc[explorer.row.open.tooltip]}"
                           HorizontalAlignment="Stretch"
                           HorizontalContentAlignment="Left"
@@ -742,8 +756,13 @@
                of having no selection or keyboard model of its own - which costs this app nothing,
                because row selection is the view model's (Classes.selected on IsSelected) and
                activation is the tile's own Button. -->
-          <ScrollViewer IsVisible="{Binding IsIconsView}" HorizontalScrollBarVisibility="Disabled">
-          <ItemsRepeater ItemsSource="{Binding RootItems}">
+          <ScrollViewer IsVisible="{Binding IsIconsView}"
+                        HorizontalScrollBarVisibility="Disabled"
+                        DragDrop.AllowDrop="True"
+                        DragDrop.DragOver="OnCloudListingDragOver"
+                        DragDrop.DragLeave="OnCloudListingDragLeave"
+                        DragDrop.Drop="OnCloudListingDrop">
+          <ItemsRepeater x:Name="IconsModeListing" ItemsSource="{Binding RootItems}">
             <ItemsRepeater.Layout>
               <UniformGridLayout ItemsStretch="Fill" MinItemWidth="112" MinItemHeight="112" />
             </ItemsRepeater.Layout>
@@ -752,7 +771,7 @@
                 <Border Classes="tile" Classes.selected="{Binding IsSelected}">
                   <Border.ContextMenu>
                     <ContextMenu>
-                      <MenuItem Header="{Binding Loc[menu.open]}" Command="{Binding RowCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.open]}" Command="{Binding ActivateCommand}" />
                       <MenuItem Header="{Binding Loc[menu.preview]}" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
                       <MenuItem Header="{Binding Loc[menu.copy]}" Command="{Binding CopyCommand}" />
                       <MenuItem Header="{Binding Loc[menu.rename]}" Command="{Binding RenameCommand}" />
@@ -780,7 +799,7 @@
                       <MenuItem Header="{Binding Loc[menu.properties]}" Command="{Binding PropertiesCommand}" />
                     </ContextMenu>
                   </Border.ContextMenu>
-                  <Button Command="{Binding RowCommand}"
+                  <Button Command="{Binding SelectCommand}"
                           ToolTip.Tip="{Binding DisplayName}"
                           Background="Transparent"
                           BorderThickness="0"
@@ -811,8 +830,13 @@
           <!-- Gallery mode: large tiles with a metadata line. Deliberately NOT image previews -
                the CLI exposes no thumbnails, and generating them would mean downloading every file
                (docs/PLAN-BROWSER-VIEWS.md §7). -->
-          <ScrollViewer IsVisible="{Binding IsGalleryView}" HorizontalScrollBarVisibility="Disabled">
-          <ItemsRepeater ItemsSource="{Binding RootItems}">
+          <ScrollViewer IsVisible="{Binding IsGalleryView}"
+                        HorizontalScrollBarVisibility="Disabled"
+                        DragDrop.AllowDrop="True"
+                        DragDrop.DragOver="OnCloudListingDragOver"
+                        DragDrop.DragLeave="OnCloudListingDragLeave"
+                        DragDrop.Drop="OnCloudListingDrop">
+          <ItemsRepeater x:Name="GalleryModeListing" ItemsSource="{Binding RootItems}">
             <ItemsRepeater.Layout>
               <UniformGridLayout ItemsStretch="Fill" MinItemWidth="176" MinItemHeight="200" />
             </ItemsRepeater.Layout>
@@ -821,7 +845,7 @@
                 <Border Classes="tile" Classes.selected="{Binding IsSelected}">
                   <Border.ContextMenu>
                     <ContextMenu>
-                      <MenuItem Header="{Binding Loc[menu.open]}" Command="{Binding RowCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.open]}" Command="{Binding ActivateCommand}" />
                       <MenuItem Header="{Binding Loc[menu.preview]}" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
                       <MenuItem Header="{Binding Loc[menu.copy]}" Command="{Binding CopyCommand}" />
                       <MenuItem Header="{Binding Loc[menu.rename]}" Command="{Binding RenameCommand}" />
@@ -849,7 +873,7 @@
                       <MenuItem Header="{Binding Loc[menu.properties]}" Command="{Binding PropertiesCommand}" />
                     </ContextMenu>
                   </Border.ContextMenu>
-                  <Button Command="{Binding RowCommand}"
+                  <Button Command="{Binding SelectCommand}"
                           ToolTip.Tip="{Binding DisplayName}"
                           Background="Transparent"
                           BorderThickness="0"
@@ -1065,7 +1089,7 @@
                 <DataTemplate x:DataType="local:LocalNodeViewModel">
                   <Button Classes="hoverGroup"
                           Classes.selected="{Binding IsSelected}"
-                          Command="{Binding RowCommand}"
+                          Command="{Binding SelectCommand}"
                           HorizontalContentAlignment="Stretch">
                     <Button.ContextMenu>
                       <ContextMenu>

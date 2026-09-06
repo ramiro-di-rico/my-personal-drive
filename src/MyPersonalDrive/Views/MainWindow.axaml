@@ -1062,7 +1062,7 @@
             <Border Grid.Column="0" Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
               <StackPanel Spacing="4">
                 <views:BreadcrumbBar ItemsSource="{Binding BreadcrumbItems}"
-                                     Label="Este equipo (local)"
+                                     Label="{Binding Loc[local.breadcrumb.label]}"
                                      Icon="{StaticResource IconHome}" />
               <!-- Quick filter over this folder's names — the local pane's counterpart to the
                    cloud pane's own search box (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1). -->

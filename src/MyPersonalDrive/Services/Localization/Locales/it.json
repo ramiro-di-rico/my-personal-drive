@@ -274,6 +274,7 @@
   "issue.remote.alreadysynced": "'{0}' è già sincronizzata con '{1}'.",
   "issue.remote.overlaps": "Quella cartella remota si sovrappone a '{0}', che è già sincronizzata con '{1}'. Due coppie che coprono lo stesso sottoalbero remoto possono annullare a vicenda le eliminazioni. Scegli una cartella al di fuori.",
   "issue.remotepath.notabsolute": "Il percorso remoto deve essere un percorso assoluto che inizia con '/'.",
+  "local.breadcrumb.label": "Questo computer (locale)",
   "local.confirm.deletefolder": "Eliminare la cartella '{0}' e tutto il suo contenuto? L'operazione non si può annullare.",
   "local.confirm.deletemany.one": "Eliminare {0} elemento selezionato? L'operazione non si può annullare.",
   "local.confirm.deletemany.other": "Eliminare {0} elementi selezionati? L'operazione non si può annullare.",

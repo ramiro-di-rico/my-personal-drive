@@ -239,8 +239,9 @@ public sealed class LocalExplorerViewModel : ObservableObject
                 return string.Empty;
             }
 
-            var shown = Items.Count;
-            return shown == 1 ? "1 resultado" : $"{shown} resultados";
+            // Same plural key the cloud pane uses: this counter was two Spanish literals built by
+            // hand, in an interface that ships English by default (docs/PLAN-UX-ROUND-3.md X8).
+            return Loc.Plural(StringKeys.Explorer.SearchResults, Items.Count);
         }
     }
 

@@ -274,6 +274,7 @@
   "issue.remote.alreadysynced": "'{0}' is already synced with '{1}'.",
   "issue.remote.overlaps": "That remote folder overlaps '{0}', which is already synced with '{1}'. Two pairs covering the same remote subtree can undo each other's deletions. Choose a folder outside it.",
   "issue.remotepath.notabsolute": "The remote path has to be an absolute path starting with '/'.",
+  "local.breadcrumb.label": "This computer (local)",
   "local.confirm.deletefolder": "Delete the folder '{0}' and everything in it? This cannot be undone.",
   "local.confirm.deletemany.one": "Delete {0} selected item? This cannot be undone.",
   "local.confirm.deletemany.other": "Delete {0} selected items? This cannot be undone.",

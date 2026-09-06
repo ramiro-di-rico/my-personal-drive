@@ -15,9 +15,43 @@ namespace MyPersonalDrive.Tests.Services.Localization;
 /// </summary>
 public class NoHardcodedStringsTests
 {
+    /// <summary>
+    /// The framework's own text-bearing properties. The repo's own controls contribute theirs at
+    /// run time — see <see cref="LocalizableAttribute"/>.
+    /// </summary>
+    private static readonly string[] BuiltInTextProperties =
+        ["Text", "Content", "PlaceholderText", "Watermark", "Header", "ToolTip.Tip"];
+
+    /// <summary>
+    /// Built-in text properties plus every <c>StyledProperty&lt;string&gt;</c> this repository's own
+    /// UserControls declare.
+    ///
+    /// The fixed list missed one for an entire release: <c>BreadcrumbBar.Label</c> carried
+    /// "Este equipo (local)" through the whole i18n round and the round that added Italian, because
+    /// a custom control's own property is not called Text or Content and nothing here looked at it
+    /// (docs/PLAN-UX-ROUND-3.md X8). Deriving the list from the declarations means the next such
+    /// property is covered on the day it is written, rather than on the day someone remembers this
+    /// test exists.
+    /// </summary>
     private static readonly Regex LocalizableAttribute = new(
-        @"(?<attr>Text|Content|PlaceholderText|Watermark|Header|ToolTip\.Tip)\s*=\s*""(?<value>[^""]*)""",
+        @"(?<attr>" + string.Join("|", BuiltInTextProperties.Select(Regex.Escape).Concat(CustomStringProperties())) + @")\s*=\s*""(?<value>[^""]*)""",
         RegexOptions.Compiled);
+
+    /// <summary>
+    /// Every <c>AvaloniaProperty.Register&lt;TOwner, string?&gt;(nameof(X))</c> in src/, as X.
+    /// </summary>
+    private static IEnumerable<string> CustomStringProperties()
+    {
+        var declarations = new Regex(
+            @"AvaloniaProperty\.Register<\s*\w+\s*,\s*string\??\s*>\(\s*nameof\(\s*(?<name>\w+)\s*\)",
+            RegexOptions.Compiled);
+
+        return Directory
+            .EnumerateFiles(Path.Combine(RepositoryRoot(), "src"), "*.cs", SearchOption.AllDirectories)
+            .SelectMany(file => declarations.Matches(File.ReadAllText(file)).Select(match => match.Groups["name"].Value))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.Ordinal);
+    }
 
     /// <summary>
     /// Everything the gate accepts as a literal, and why. Proper nouns and glyphs — nothing that

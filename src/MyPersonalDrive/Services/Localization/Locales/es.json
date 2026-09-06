@@ -274,6 +274,7 @@
   "issue.remote.alreadysynced": "'{0}' ya está sincronizada con '{1}'.",
   "issue.remote.overlaps": "Esa carpeta remota se superpone con '{0}', que ya está sincronizada con '{1}'. Dos pares cubriendo el mismo subárbol remoto pueden deshacer las eliminaciones del otro. Elegí una carpeta fuera de ella.",
   "issue.remotepath.notabsolute": "La ruta remota tiene que ser una ruta absoluta que empiece con '/'.",
+  "local.breadcrumb.label": "Este equipo (local)",
   "local.confirm.deletefolder": "¿Eliminar la carpeta '{0}' y todo su contenido? Esta acción no se puede deshacer.",
   "local.confirm.deletemany.one": "¿Eliminar {0} elemento seleccionado? Esta acción no se puede deshacer.",
   "local.confirm.deletemany.other": "¿Eliminar {0} elementos seleccionados? Esta acción no se puede deshacer.",

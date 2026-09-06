@@ -146,6 +146,7 @@ public static class StringKeys
     /// <summary>What only the local pane has: home, hidden files, free space, local deletes.</summary>
     public static class Local
     {
+        public const string BreadcrumbLabel = "local.breadcrumb.label";
         public const string ConfirmDeleteFolder = "local.confirm.deletefolder";
         /// <summary>Plural prefix.</summary>
         public const string ConfirmDeleteMany = "local.confirm.deletemany";

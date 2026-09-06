@@ -20,7 +20,7 @@ public partial class BreadcrumbBar : UserControl
     public static readonly StyledProperty<IEnumerable?> ItemsSourceProperty =
         AvaloniaProperty.Register<BreadcrumbBar, IEnumerable?>(nameof(ItemsSource));
 
-    /// <summary>The heading above the segments — the provider's name, or "Este equipo (local)".</summary>
+    /// <summary>The heading above the segments — the provider's name, or the local pane's own label. Localizable, so it is bound rather than set (docs/PLAN-UX-ROUND-3.md X8).</summary>
     public static readonly StyledProperty<string?> LabelProperty =
         AvaloniaProperty.Register<BreadcrumbBar, string?>(nameof(Label));
 

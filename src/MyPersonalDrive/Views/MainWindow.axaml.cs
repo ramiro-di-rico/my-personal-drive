@@ -62,6 +62,14 @@ public partial class MainWindow : Window
         }
 
         LocalListing.AddHandler(InputElement.DoubleTappedEvent, OnLocalRowDoubleTapped, RoutingStrategies.Tunnel);
+
+        // Everything else on the keyboard (docs/PLAN-UX-ROUND-3.md X5). Bubble at the window, not
+        // KeyBindings and not a per-control handler: a focused TextBox marks Ctrl+A, Delete and F2
+        // as handled while it is doing its own editing, so a bubble-phase handler is guarded
+        // against stealing them for free — which is exactly the concern that kept Ctrl+A scoped to
+        // one ListBox before, and the reason the tile modes never got it (an ItemsRepeater takes no
+        // focus, so it has no KeyDown of its own to hang anything on).
+        KeyDown += OnWindowKeyDown;
     }
 
     /// <summary>
@@ -142,15 +150,9 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnListingKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
     {
-        // Ctrl/Cmd+A (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) — scoped to this ListBox's own
-        // KeyDown rather than a window-level KeyBinding, so it never steals the same gesture from a
-        // focused TextBox (the search box, the CLI log filter) selecting its own text instead.
-        if (e.Key == Avalonia.Input.Key.A && e.KeyModifiers.HasFlag(KeyModifiers.Control) && DataContext is MainWindowViewModel viewModel)
-        {
-            viewModel.SelectAllRowsCommand.Execute(null);
-            e.Handled = true;
-            return;
-        }
+        // Ctrl/Cmd+A moved to OnWindowKeyDown, so that it also reaches the two tile modes
+        // (docs/PLAN-UX-ROUND-3.md X5). This handler keeps what genuinely needs the list: which
+        // row the ListBox has focused.
 
         if (e.Key is not (Avalonia.Input.Key.Enter or Avalonia.Input.Key.Space))
         {
@@ -168,14 +170,131 @@ public partial class MainWindow : Window
         node.ActivateCommand.Execute(null);
     }
 
-    /// <summary>The local pane's counterpart to <see cref="OnListingKeyDown"/>'s Ctrl/Cmd+A handling — the local pane has no Enter/Space activation to also cover, since its rows aren't focusable buttons the way the cloud pane's are.</summary>
-    private void OnLocalListingKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
+    /// <summary>
+    /// Everything the keyboard can reach that is not a row activation (docs/PLAN-UX-ROUND-3.md X5).
+    /// Before this the entire inventory was Ctrl+, / Ctrl+~ / Ctrl+A / Enter — no F5, no F2, no
+    /// Delete, no way back up a folder, no way to the search box, and Escape did not close the
+    /// viewer.
+    ///
+    /// Bubble phase, so a control that is genuinely using the key has already marked it handled: a
+    /// TextBox consumes Ctrl+A, Delete and F2 while it is being edited, which is the guard that
+    /// keeps these from firing mid-typing. Anything that must work even inside a text box (F5,
+    /// Escape) is keyed off gestures a TextBox does not claim.
+    /// </summary>
+    private void OnWindowKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
     {
-        if (e.Key == Avalonia.Input.Key.A && e.KeyModifiers.HasFlag(KeyModifiers.Control) && DataContext is MainWindowViewModel { LocalExplorer: { } explorer })
+        if (e.Handled || DataContext is not MainWindowViewModel viewModel)
         {
-            explorer.SelectAllCommand.Execute(null);
-            e.Handled = true;
+            return;
         }
+
+        var control = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
+
+        switch (e.Key)
+        {
+            // Closes the viewer panel and nothing else: unguarded, Escape would also be the way out
+            // of a dialog, and those are separate windows with their own IsCancel buttons.
+            case Avalonia.Input.Key.Escape when viewModel.IsViewerVisible:
+                Run(viewModel.CloseViewerCommand);
+                break;
+
+            case Avalonia.Input.Key.F5:
+                Run(ActivePaneIsLocal() ? viewModel.LocalExplorer.RefreshCommand : viewModel.RefreshCommand);
+                break;
+
+            case Avalonia.Input.Key.N when control && e.KeyModifiers.HasFlag(KeyModifiers.Shift):
+                Run(viewModel.CreateFolderCommand);
+                break;
+
+            case Avalonia.Input.Key.F when control:
+                (ActivePaneIsLocal() ? LocalSearchBox : CloudSearchBox).Focus();
+                e.Handled = true;
+                break;
+
+            case Avalonia.Input.Key.A when control:
+                Run(ActivePaneIsLocal() ? viewModel.LocalExplorer.SelectAllCommand : viewModel.SelectAllRowsCommand);
+                break;
+
+            // Back a folder. Backspace is the file-manager idiom; Alt+Left is the browser one, and
+            // both are free here because neither pane hosts an editable surface that wants them.
+            case Avalonia.Input.Key.Back:
+            case Avalonia.Input.Key.Left when e.KeyModifiers.HasFlag(KeyModifiers.Alt):
+                Run(ActivePaneIsLocal() ? viewModel.LocalExplorer.BackCommand : viewModel.BackCommand);
+                break;
+
+            // F2 renames exactly one row. With several marked there is no single name to edit, and
+            // silently renaming the first would be worse than doing nothing.
+            case Avalonia.Input.Key.F2 when ActivePaneIsLocal():
+                Run(SingleSelected(viewModel.LocalExplorer.Items, node => node.IsSelected)?.RenameCommand);
+                break;
+
+            case Avalonia.Input.Key.F2:
+                Run(SingleSelected(viewModel.RootItems, node => node.IsSelected)?.RenameCommand);
+                break;
+
+            // Delete acts on the whole selection, and goes through the same command the buttons
+            // use — so it inherits their confirmation prompt rather than deleting on a keypress.
+            case Avalonia.Input.Key.Delete when ActivePaneIsLocal():
+                Run(viewModel.LocalExplorer.DeleteSelectedCommand);
+                break;
+
+            case Avalonia.Input.Key.Delete:
+                Run(viewModel.TrashSelectedCommand);
+                break;
+        }
+
+        void Run(AsyncCommand? command)
+        {
+            if (command?.CanExecute(null) != true)
+            {
+                return;
+            }
+
+            e.Handled = true;
+            // Through the command, so AsyncCommand's error routing applies and this handler never
+            // becomes an `async void` that can take the process down.
+            command.Execute(null);
+        }
+    }
+
+    /// <summary>The one row marked in a pane, or null when zero or several are.</summary>
+    private static T? SingleSelected<T>(IEnumerable<T> rows, Func<T, bool> isSelected) where T : class
+    {
+        T? found = null;
+        foreach (var row in rows.Where(isSelected))
+        {
+            if (found is not null)
+            {
+                return null;
+            }
+
+            found = row;
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Which pane a keystroke belongs to. Focus decides it, and the cloud pane is the default —
+    /// the local pane can be hidden entirely, so "wherever focus last was" has to fall back to the
+    /// pane that is always there.
+    /// </summary>
+    private bool ActivePaneIsLocal()
+    {
+        if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not Visual focused)
+        {
+            return false;
+        }
+
+        for (var visual = focused; visual is not null; visual = visual.GetVisualParent())
+        {
+            if (ReferenceEquals(visual, LocalPane))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -672,6 +791,16 @@ public partial class MainWindow : Window
             catch
             {
                 // The view-model already surfaced the error in the status panel.
+            }
+
+            // Something has to be focused for arrow keys and Enter to do anything, and nothing was:
+            // the app opened with focus nowhere, so the keyboard did not work until the user had
+            // clicked a row first (docs/PLAN-UX-ROUND-3.md X5). Only in list mode — an
+            // ItemsRepeater takes no focus, and the window-level shortcuts default to the cloud
+            // pane anyway, so the tile modes lose nothing by starting unfocused.
+            if (viewModel.IsListView)
+            {
+                ListModeListing.Focus();
             }
         }
     }

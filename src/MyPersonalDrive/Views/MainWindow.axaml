@@ -37,8 +37,15 @@
     <Style Selector=".hoverGroup:pointerover Button.rowAction">
       <Setter Property="Opacity" Value="1" />
     </Style>
-    <Style Selector=".hoverGroup Button.rowAction:focus-visible">
-      <Setter Property="Opacity" Value="1" />
+    <!-- A listing row's five inline actions are not tab stops (docs/PLAN-UX-ROUND-3.md X5). They
+         were, which put five stops on every row: tabbing past a fifty-item folder took some 250
+         presses to reach whatever came after the list. Every one of them is in the row's context
+         menu — reachable with Shift+F10 — and rename and trash also have F2 and Delete now, so
+         nothing became unreachable by dropping them out of the traversal. The sync panel's own
+         .rowAction buttons are deliberately untouched: a sync pair has no context menu, so there
+         they are the only way in. -->
+    <Style Selector="ListBox.driveListing Button.rowAction">
+      <Setter Property="IsTabStop" Value="False" />
     </Style>
 
     <!--
@@ -526,7 +533,8 @@
                  the kind chips below rather than replacing them. -->
             <!-- U9 (docs/PLAN-UX-ROUND-2.md §9): the box used to hide rows without saying how many
                  it hid, and the only way out was selecting the text and deleting it. -->
-            <TextBox Width="200"
+            <TextBox x:Name="CloudSearchBox"
+                     Width="200"
                      PlaceholderText="{Binding Loc[explorer.search.placeholder]}"
                      AutomationProperties.Name="{Binding Loc[explorer.search.placeholder]}"
                      Text="{Binding SearchText, Mode=TwoWay}" />
@@ -670,6 +678,20 @@
                            (docs/PLAN-UX-ROUND-3.md X2), so the menu has to carry the verb the
                            tile modes' menus always did. -->
                       <MenuItem Header="{Binding Loc[menu.open]}" Command="{Binding ActivateCommand}" />
+                      <!-- The five that used to be inline-only. They are how the row's actions stay
+                           reachable now that the inline buttons are out of the tab order (X5), and
+                           they make this menu the same menu the tile modes already offered. -->
+                      <MenuItem Header="{Binding Loc[menu.preview]}" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
+                      <MenuItem Header="{Binding Loc[menu.copy]}" Command="{Binding CopyCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.rename]}" Command="{Binding RenameCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.download]}"
+                                Command="{Binding DownloadCommand}"
+                                IsVisible="{Binding IsFile}"
+                                IsEnabled="{Binding CanDownload}"
+                                ToolTip.Tip="{Binding DownloadTooltip}"
+                                ToolTip.ShowOnDisabled="True" />
+                      <MenuItem Header="{Binding Loc[menu.trash]}" Command="{Binding TrashCommand}" />
+                      <Separator />
                       <MenuItem Header="{Binding Loc[menu.downloadhere]}" Command="{Binding DownloadHereCommand}" />
                       <MenuItem Header="{Binding Loc[menu.uploadhere]}" Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
                       <MenuItem Header="{Binding Loc[menu.copypath]}" Command="{Binding CopyPathCommand}" />
@@ -1016,7 +1038,7 @@
              column doesn't shrink on its own just because its content is invisible. IsVisible sits
              on this outer Grid (still bound to the window's own DataContext) rather than the inner
              one, which switches DataContext to LocalExplorer and so can't see this VM's property. -->
-        <Grid Grid.Column="2" Margin="0,0,16,16" IsVisible="{Binding IsLocalExplorerPanelVisible}">
+        <Grid x:Name="LocalPane" Grid.Column="2" Margin="0,0,16,16" IsVisible="{Binding IsLocalExplorerPanelVisible}">
         <Grid RowDefinitions="Auto,*" DataContext="{Binding LocalExplorer}">
           <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,8">
             <Grid.Styles>
@@ -1033,7 +1055,8 @@
               <!-- Quick filter over this folder's names — the local pane's counterpart to the
                    cloud pane's own search box (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1). -->
               <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Left">
-                <TextBox Width="200"
+                <TextBox x:Name="LocalSearchBox"
+                         Width="200"
                          PlaceholderText="{Binding Loc[explorer.search.placeholder]}"
                          AutomationProperties.Name="{Binding Loc[explorer.search.placeholder]}"
                          Text="{Binding SearchText, Mode=TwoWay}" />
@@ -1101,7 +1124,6 @@
                      Grid.Row="2"
                      Classes="driveListing"
                      ItemsSource="{Binding Items}"
-                     KeyDown="OnLocalListingKeyDown"
                      DragDrop.AllowDrop="True"
                      DragDrop.DragOver="OnLocalListingDragOver"
                      DragDrop.DragLeave="OnLocalListingDragLeave"

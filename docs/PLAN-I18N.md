@@ -38,6 +38,14 @@
 > What that confirms is the *mechanism*. Layout under English copy — which is a different length
 > from the Spanish it replaced, in a UI full of fixed widths — has still not been looked at.
 >
+> **The sweep is 619/620, not complete.** `Views/MainWindow.axaml:909` still carries
+> `Label="Este equipo (local)"` — the local pane's breadcrumb heading — and the L9 gate cannot see
+> it, because its regex covers `Text`/`Content`/`PlaceholderText`/`Watermark`/`Header`/`ToolTip.Tip`
+> and not a custom control's own styled property. Recorded as
+> [PLAN-UX-ROUND-3.md X8](PLAN-UX-ROUND-3.md#8-x8--one-spanish-literal-survived-the-i18n-sweep),
+> which also carries the fix for the gate. The locale tables themselves are clean: 620 keys in each
+> of the three files, no Spanish under `en`.
+>
 > L3 turned up one thing worth carrying forward: `{Binding Loc[key]}` needs the DataContext to be
 > a view model, and one `DataTemplate` in the header is typed against `ProviderDescriptor`. That
 > single site names the singleton explicitly —

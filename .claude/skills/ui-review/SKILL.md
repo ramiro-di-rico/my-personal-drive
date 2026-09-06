@@ -43,8 +43,10 @@ in practice:
 
 ## Against the plan
 
-The visual work is tracked in `docs/PLAN-UX-ROUND-2.md` and
-`docs/INTERFACE_IMPROVEMENT_PLAN.md`. Review against the specific item you're implementing, tick
+The visual work is tracked in `docs/PLAN-UX-ROUND-3.md` (current round),
+`docs/PLAN-UX-ROUND-2.md` and `docs/INTERFACE_IMPROVEMENT_PLAN.md`. Round 3's Appendix B lists the
+five screenshots that would close its open items — if you can render a window in your environment,
+take those first. Review against the specific item you're implementing, tick
 its status block when it's genuinely done, and use the `debt` skill for anything you notice but
 aren't fixing — don't widen the diff mid-review.
 

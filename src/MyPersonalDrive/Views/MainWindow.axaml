@@ -11,7 +11,9 @@
         x:DataType="vm:MainWindowViewModel"
         Title="MyPersonalDrive"
         Width="1280"
-        Height="800">
+        Height="800"
+        MinWidth="960"
+        MinHeight="600">
   <Window.KeyBindings>
     <KeyBinding Gesture="Ctrl+OemComma" Command="{Binding ToggleSettingsCommand}" />
     <KeyBinding Gesture="Cmd+OemComma" Command="{Binding ToggleSettingsCommand}" />
@@ -515,19 +517,29 @@
                separate control for the tiles: the state is the same either way, and two ways to set
                it means two places to keep in step (docs/PLAN-BROWSER-VIEWS.md V4). Sorting is done
                in memory over the rows already loaded, so it costs no CLI call. -->
-          <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="4" Margin="0,0,0,8">
-            <StackPanel.Styles>
+          <!-- WrapPanel, not StackPanel: this row carries a search box, a clear button, a result
+               count, a label, four sort buttons and a filter summary, and at a narrow window a
+               horizontal StackPanel pushes the tail of that off the pane instead of reflowing it
+               (docs/PLAN-UX-ROUND-3.md X7). The kind chips below already wrap. -->
+          <WrapPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
+            <WrapPanel.Styles>
+              <!-- A WrapPanel has no Spacing, so the 4px the StackPanel used to add between
+                   children comes from the children now. -->
               <Style Selector="Button.sortKey">
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="Padding" Value="8,4" />
                 <Setter Property="FontSize" Value="12" />
+                <Setter Property="Margin" Value="0,0,4,4" />
+              </Style>
+              <Style Selector="WrapPanel > TextBox">
+                <Setter Property="Margin" Value="0,0,4,4" />
               </Style>
               <Style Selector="Button.sortKey.active">
                 <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
                 <Setter Property="FontWeight" Value="Bold" />
               </Style>
-            </StackPanel.Styles>
+            </WrapPanel.Styles>
             <!-- Quick filter over the folder's names (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.1's
                  "Global Quick Search") — narrows what's already loaded, no CLI call, combines with
                  the kind chips below rather than replacing them. -->
@@ -585,7 +597,7 @@
                        Opacity="0.7"
                        FontSize="12"
                        IsVisible="{Binding FilterSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-          </StackPanel>
+          </WrapPanel>
 
           <!-- Batch action bar (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) — only worth showing once
                Ctrl/Shift+Click or Ctrl+A has actually marked more than one row; a single selection
@@ -1435,6 +1447,21 @@
 
       <Border Grid.Row="1" Margin="16,0,16,16" Padding="12" Background="{DynamicResource ConsoleBackgroundBrush}" CornerRadius="6">
         <StackPanel Spacing="8">
+          <!-- Drag handle for the console body (docs/PLAN-UX-ROUND-3.md X7). Round 1's Task 4
+               asked for "panel height resizing via drag handle"; the collapse toggle shipped and
+               this did not, leaving the body a hard-coded 140px. Not a GridSplitter: the console
+               is not in a resizable grid row — it is an auto-sized band whose body height is a
+               view-model number, so the drag adjusts that number directly. -->
+          <Border x:Name="ConsoleResizeHandle"
+                  Height="6"
+                  CornerRadius="3"
+                  Margin="0,0,0,2"
+                  Background="{DynamicResource CardBackgroundBrush}"
+                  Cursor="SizeNorthSouth"
+                  IsVisible="{Binding IsCommandConsoleVisible}"
+                  ToolTip.Tip="{Binding Loc[console.resize.tooltip]}"
+                  AutomationProperties.Name="{Binding Loc[console.resize.tooltip]}" />
+
           <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsLoading}">
             <ProgressBar Width="120" IsIndeterminate="True" />
             <TextBlock VerticalAlignment="Center" Text="{Binding Loc[common.loading]}" />
@@ -1520,7 +1547,7 @@
                  on every update: a captured stack during a 30-second UI hang was TextBlock.Measure
                  -> TextLayout.CreateTextLines -> HarfBuzzTextShaper.ShapeText. Long lines are also
                  easier to read unwrapped in a console, and CommandLogBuffer now caps their length. -->
-            <ScrollViewer Height="140" HorizontalScrollBarVisibility="Auto">
+            <ScrollViewer Height="{Binding CommandConsoleHeight}" HorizontalScrollBarVisibility="Auto">
               <TextBlock TextWrapping="NoWrap" Text="{Binding CommandLogText}" />
             </ScrollViewer>
           </Border>
@@ -1702,14 +1729,17 @@
               <!-- Default Sync Folder -->
               <StackPanel Spacing="6">
                 <TextBlock FontWeight="SemiBold" Text="{Binding Loc[settings.syncfolder.label]}" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <TextBox Width="420"
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                  <TextBox Grid.Column="0"
+                           MinWidth="200"
+                           MaxWidth="420"
+                           HorizontalAlignment="Stretch"
                            PlaceholderText="{Binding Loc[settings.syncfolder.placeholder]}"
                            Text="{Binding DefaultSyncFolder, Mode=TwoWay}" />
-                  <Button ToolTip.Tip="{Binding Loc[settings.syncfolder.browse.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.syncfolder.browse.tooltip]}" Click="BrowseDefaultSyncFolder">
+                  <Button Grid.Column="1" ToolTip.Tip="{Binding Loc[settings.syncfolder.browse.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.syncfolder.browse.tooltip]}" Click="BrowseDefaultSyncFolder">
                     <Path Classes="icon" Data="{StaticResource IconFolder}" />
                   </Button>
-                </StackPanel>
+                </Grid>
               </StackPanel>
 
               <!-- Bandwidth Throttling -->
@@ -1743,8 +1773,10 @@
                bind only Is*Active, so a provider that had never been configured looked exactly
                like a signed-in one. The ring matches the header dropdown's own auth indicator,
                the same shape for the same meaning. -->
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <StackPanel.Styles>
+          <!-- Wraps for the same reason as the sort row: five tabs in a fixed horizontal row run
+               off the card well before the window hits its minimum width (X7). -->
+          <WrapPanel Orientation="Horizontal">
+            <WrapPanel.Styles>
               <Style Selector="Ellipse.providerAuth">
                 <Setter Property="Width" Value="8" />
                 <Setter Property="Height" Value="8" />
@@ -1756,38 +1788,38 @@
               <Style Selector="Ellipse.providerAuth.auth">
                 <Setter Property="Stroke" Value="{DynamicResource StatusOkBrush}" />
               </Style>
-            </StackPanel.Styles>
-            <Button Classes.primary="{Binding IsProtonActive}" Command="{Binding SwitchToProtonCommand}">
+            </WrapPanel.Styles>
+            <Button Classes.primary="{Binding IsProtonActive}" Command="{Binding SwitchToProtonCommand}" Margin="0,0,8,8">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <TextBlock Text="Proton Drive" VerticalAlignment="Center" />
                 <Ellipse Classes="providerAuth" Classes.auth="{Binding IsProtonAuthenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.provider.signedin.tooltip]}" />
               </StackPanel>
             </Button>
-            <Button Classes.primary="{Binding IsOneDriveActive}" Command="{Binding SwitchToOneDriveCommand}">
+            <Button Classes.primary="{Binding IsOneDriveActive}" Command="{Binding SwitchToOneDriveCommand}" Margin="0,0,8,8">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <TextBlock Text="OneDrive" VerticalAlignment="Center" />
                 <Ellipse Classes="providerAuth" Classes.auth="{Binding IsOneDriveAuthenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.provider.signedin.tooltip]}" />
               </StackPanel>
             </Button>
-            <Button Classes.primary="{Binding IsGoogleDriveActive}" Command="{Binding SwitchToGoogleDriveCommand}">
+            <Button Classes.primary="{Binding IsGoogleDriveActive}" Command="{Binding SwitchToGoogleDriveCommand}" Margin="0,0,8,8">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <TextBlock Text="Google Drive" VerticalAlignment="Center" />
                 <Ellipse Classes="providerAuth" Classes.auth="{Binding IsGoogleDriveAuthenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.provider.signedin.tooltip]}" />
               </StackPanel>
             </Button>
-            <Button Classes.primary="{Binding IsNextcloudActive}" Command="{Binding SwitchToNextcloudCommand}">
+            <Button Classes.primary="{Binding IsNextcloudActive}" Command="{Binding SwitchToNextcloudCommand}" Margin="0,0,8,8">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <TextBlock Text="Nextcloud" VerticalAlignment="Center" />
                 <Ellipse Classes="providerAuth" Classes.auth="{Binding IsNextcloudAuthenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.provider.signedin.tooltip]}" />
               </StackPanel>
             </Button>
-            <Button Classes.primary="{Binding IsS3Active}" Command="{Binding SwitchToS3Command}">
+            <Button Classes.primary="{Binding IsS3Active}" Command="{Binding SwitchToS3Command}" Margin="0,0,8,8">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <TextBlock Text="Custom S3" VerticalAlignment="Center" />
                 <Ellipse Classes="providerAuth" Classes.auth="{Binding IsS3Authenticated}" ToolTip.Tip="{Binding Loc[settings.provider.signedin.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.provider.signedin.tooltip]}" />
               </StackPanel>
             </Button>
-          </StackPanel>
+          </WrapPanel>
 
           <!-- Proton's card: CLI path, auth, version, self-update. -->
           <Border Padding="16"
@@ -1797,23 +1829,26 @@
             <StackPanel Spacing="10">
               <TextBlock Opacity="0.7" Text="{Binding ActiveProviderDisplayName}" />
               <TextBlock Text="{Binding Loc[settings.proton.clipath.label]}" />
-              <StackPanel Orientation="Horizontal" Spacing="8">
-                <TextBox Width="420"
+              <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0"
+                         MinWidth="200"
+                         MaxWidth="420"
+                         HorizontalAlignment="Stretch"
                          PlaceholderText="{Binding Loc[settings.proton.clipath.placeholder]}"
                          Text="{Binding CliPath, Mode=TwoWay}" />
-                <Button ToolTip.Tip="{Binding Loc[settings.proton.clipath.browse.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.proton.clipath.browse.tooltip]}" Click="BrowseCliPath">
+                <Button Grid.Column="1" ToolTip.Tip="{Binding Loc[settings.proton.clipath.browse.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.proton.clipath.browse.tooltip]}" Click="BrowseCliPath">
                   <Path Classes="icon" Data="{StaticResource IconFolder}" />
                 </Button>
-                <Button Classes="primary" ToolTip.Tip="{Binding SignInTooltip}" AutomationProperties.Name="{Binding SignInTooltip}" Command="{Binding AuthenticateCommand}">
+                <Button Grid.Column="2" Classes="primary" ToolTip.Tip="{Binding SignInTooltip}" AutomationProperties.Name="{Binding SignInTooltip}" Command="{Binding AuthenticateCommand}">
                   <Path Classes="icon" Data="{StaticResource IconKey}" />
                 </Button>
-                <Button ToolTip.Tip="{Binding SignOutTooltip}" AutomationProperties.Name="{Binding SignOutTooltip}" Command="{Binding LogoutCommand}">
+                <Button Grid.Column="3" ToolTip.Tip="{Binding SignOutTooltip}" AutomationProperties.Name="{Binding SignOutTooltip}" Command="{Binding LogoutCommand}">
                   <Path Classes="icon" Data="{StaticResource IconLogout}" />
                 </Button>
-                <Button ToolTip.Tip="{Binding Loc[settings.refresh.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.refresh.tooltip]}" Command="{Binding RefreshCommand}">
+                <Button Grid.Column="4" ToolTip.Tip="{Binding Loc[settings.refresh.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.refresh.tooltip]}" Command="{Binding RefreshCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
-              </StackPanel>
+              </Grid>
 
               <!-- Version/self-update rows: gated on HasDiagnostics rather than a Proton-specific
                    flag, so a third provider with no external binary needs no XAML change here
@@ -1864,20 +1899,23 @@
                          FontSize="12"
                          TextWrapping="Wrap"
                          Text="{Binding Loc[settings.onedrive.clientid.hint]}" />
-              <StackPanel Orientation="Horizontal" Spacing="8">
-                <TextBox Width="420"
+              <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0"
+                         MinWidth="200"
+                         MaxWidth="420"
+                         HorizontalAlignment="Stretch"
                          PlaceholderText="{Binding Loc[settings.onedrive.clientid.placeholder]}"
                          Text="{Binding OneDriveClientId, Mode=TwoWay}" />
-                <Button Classes="primary" ToolTip.Tip="{Binding SignInTooltip}" AutomationProperties.Name="{Binding SignInTooltip}" Command="{Binding AuthenticateCommand}">
+                <Button Grid.Column="1" Classes="primary" ToolTip.Tip="{Binding SignInTooltip}" AutomationProperties.Name="{Binding SignInTooltip}" Command="{Binding AuthenticateCommand}">
                   <Path Classes="icon" Data="{StaticResource IconKey}" />
                 </Button>
-                <Button ToolTip.Tip="{Binding SignOutTooltip}" AutomationProperties.Name="{Binding SignOutTooltip}" Command="{Binding LogoutCommand}">
+                <Button Grid.Column="2" ToolTip.Tip="{Binding SignOutTooltip}" AutomationProperties.Name="{Binding SignOutTooltip}" Command="{Binding LogoutCommand}">
                   <Path Classes="icon" Data="{StaticResource IconLogout}" />
                 </Button>
-                <Button ToolTip.Tip="{Binding Loc[settings.refresh.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.refresh.tooltip]}" Command="{Binding RefreshCommand}">
+                <Button Grid.Column="3" ToolTip.Tip="{Binding Loc[settings.refresh.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.refresh.tooltip]}" Command="{Binding RefreshCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
-              </StackPanel>
+              </Grid>
 
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBlock VerticalAlignment="Center" Text="{Binding Loc[common.account]}" />
@@ -1904,11 +1942,15 @@
                          TextWrapping="Wrap"
                          Text="{Binding Loc[settings.googledrive.hint]}" />
               <TextBlock Text="{Binding Loc[settings.googledrive.clientid.label]}" />
-              <TextBox Width="420"
+              <TextBox MaxWidth="420"
+                       HorizontalAlignment="Left"
+                       MinWidth="200"
                        PlaceholderText="{Binding Loc[settings.googledrive.clientid.placeholder]}"
                        Text="{Binding GoogleDriveClientId, Mode=TwoWay}" />
               <TextBlock Text="{Binding Loc[settings.googledrive.clientsecret.label]}" />
-              <TextBox Width="420"
+              <TextBox MaxWidth="420"
+                       HorizontalAlignment="Left"
+                       MinWidth="200"
                        PlaceholderText="{Binding Loc[settings.googledrive.clientsecret.placeholder]}"
                        PasswordChar="*"
                        Text="{Binding GoogleDriveClientSecret, Mode=TwoWay}" />

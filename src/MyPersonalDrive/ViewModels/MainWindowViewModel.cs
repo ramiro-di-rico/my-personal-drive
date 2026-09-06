@@ -97,6 +97,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _showOnlyWarningsAndErrors;
     private string _logSearchText = string.Empty;
     private double _commandConsoleMaxHeight = 180;
+    private double _commandConsoleHeight = AppSettings.DefaultCommandConsoleHeight;
     private double _commandConsoleOpacity = 1;
     private bool _commandConsoleHitTestVisible = true;
     private string _activeCommand = Localizer.Instance.T(StringKeys.Console.Idle);
@@ -466,6 +467,8 @@ public sealed class MainWindowViewModel : ObservableObject
         _isStatusPanelVisible = appSettings.ShowStatusPanel;
         _isLocalExplorerPanelVisible = appSettings.ShowLocalExplorerPanel;
         _isCommandConsoleVisible = appSettings.ShowCommandConsole;
+        _commandConsoleHeight = appSettings.CommandConsoleHeightOrDefault();
+        _commandConsoleMaxHeight = _commandConsoleHeight + ConsoleChromeHeight;
         if (!_isCommandConsoleVisible)
         {
             // Mirrors IsCommandConsoleVisible's setter directly rather than going through it: this
@@ -1625,7 +1628,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _isCommandConsoleVisible, value))
             {
-                CommandConsoleMaxHeight = value ? 180 : 0;
+                CommandConsoleMaxHeight = value ? _commandConsoleHeight + ConsoleChromeHeight : 0;
                 CommandConsoleOpacity = value ? 1 : 0;
                 CommandConsoleHitTestVisible = value;
                 CommandConsoleToggleLabel = Loc.T(value ? StringKeys.Console.ToggleHide : StringKeys.Console.ToggleShow);
@@ -1635,6 +1638,41 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         }
     }
+
+    /// <summary>
+    /// What the console's own padding and border add on top of the scrolling body, so the collapse
+    /// animation's MaxHeight and the dragged body height stay in step.
+    /// </summary>
+    private const double ConsoleChromeHeight = 40;
+
+    /// <summary>
+    /// The console body's height, dragged by the handle above it (docs/PLAN-UX-ROUND-3.md X7).
+    /// Round 1's Task 4 asked for this and only the collapse toggle shipped; the body has been a
+    /// hard-coded 140px ever since. Persisted, so the size the user leaves it at is next launch's.
+    /// </summary>
+    public double CommandConsoleHeight
+    {
+        get => _commandConsoleHeight;
+        private set
+        {
+            var clamped = Math.Clamp(value, AppSettings.MinCommandConsoleHeight, AppSettings.MaxCommandConsoleHeight);
+            if (SetProperty(ref _commandConsoleHeight, clamped))
+            {
+                if (IsCommandConsoleVisible)
+                {
+                    CommandConsoleMaxHeight = clamped + ConsoleChromeHeight;
+                }
+
+                _settings.Update(s => s.CommandConsoleHeight = clamped);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Applies one drag step. Dragging the handle up makes the console taller, so the delta is
+    /// subtracted — the view passes a raw pointer delta and this owns the direction and the limits.
+    /// </summary>
+    public void ResizeCommandConsole(double verticalDelta) => CommandConsoleHeight -= verticalDelta;
 
     public double CommandConsoleMaxHeight
     {

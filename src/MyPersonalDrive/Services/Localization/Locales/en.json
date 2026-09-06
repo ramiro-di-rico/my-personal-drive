@@ -65,6 +65,7 @@
   "console.download.tooltip": "Download the activity log",
   "console.idle": "Idle",
   "console.nocommand": "No CLI command is running.",
+  "console.resize.tooltip": "Drag to resize the activity console",
   "console.search.placeholder": "Search the log...",
   "console.title": "CLI activity",
   "console.toggle.hide": "Hide the CLI activity",

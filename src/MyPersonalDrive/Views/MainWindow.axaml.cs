@@ -70,6 +70,52 @@ public partial class MainWindow : Window
         // one ListBox before, and the reason the tile modes never got it (an ItemsRepeater takes no
         // focus, so it has no KeyDown of its own to hang anything on).
         KeyDown += OnWindowKeyDown;
+
+        // The console's own resize handle (docs/PLAN-UX-ROUND-3.md X7).
+        ConsoleResizeHandle.PointerPressed += OnConsoleResizeStarted;
+        ConsoleResizeHandle.PointerMoved += OnConsoleResizeMoved;
+        ConsoleResizeHandle.PointerReleased += OnConsoleResizeFinished;
+    }
+
+    private Point? _consoleResizeLastPoint;
+
+    /// <summary>
+    /// Dragging the handle changes the console body's height. Pointer capture rather than a
+    /// window-level handler: without it the drag stops the moment the pointer leaves the 6px strip,
+    /// which is immediately.
+    /// </summary>
+    private void OnConsoleResizeStarted(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        _consoleResizeLastPoint = e.GetPosition(this);
+        e.Pointer.Capture(ConsoleResizeHandle);
+        e.Handled = true;
+    }
+
+    private void OnConsoleResizeMoved(object? sender, PointerEventArgs e)
+    {
+        if (_consoleResizeLastPoint is not { } last || DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var current = e.GetPosition(this);
+        // One step per move rather than an absolute offset from the press: the view model clamps,
+        // so an absolute delta would keep accumulating past the limit and the handle would then
+        // need that distance dragged back before the console moved again.
+        viewModel.ResizeCommandConsole(current.Y - last.Y);
+        _consoleResizeLastPoint = current;
+        e.Handled = true;
+    }
+
+    private void OnConsoleResizeFinished(object? sender, PointerReleasedEventArgs e)
+    {
+        _consoleResizeLastPoint = null;
+        e.Pointer.Capture(null);
     }
 
     /// <summary>

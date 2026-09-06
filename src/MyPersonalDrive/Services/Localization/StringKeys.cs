@@ -362,6 +362,7 @@ public static class StringKeys
         public const string DownloadTooltip = "console.download.tooltip";
         public const string Idle = "console.idle";
         public const string NoCommandRunning = "console.nocommand";
+        public const string ResizeTooltip = "console.resize.tooltip";
         public const string SearchPlaceholder = "console.search.placeholder";
         public const string Title = "console.title";
         public const string ToggleHide = "console.toggle.hide";

@@ -65,6 +65,7 @@
   "console.download.tooltip": "Scarica il registro delle attività",
   "console.idle": "Inattivo",
   "console.nocommand": "Nessun comando della CLI in esecuzione.",
+  "console.resize.tooltip": "Trascina per ridimensionare la console di attività",
   "console.search.placeholder": "Cerca nel registro...",
   "console.title": "Attività della CLI",
   "console.toggle.hide": "Nascondi l'attività della CLI",

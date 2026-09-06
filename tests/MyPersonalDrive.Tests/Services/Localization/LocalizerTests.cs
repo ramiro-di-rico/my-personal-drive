@@ -21,7 +21,7 @@ public class LocalizerTests
         var localizer = new Localizer();
 
         Assert.Equal("en", localizer.Current.Code);
-        Assert.Equal("General preferences", localizer[StringKeys.Settings.GeneralTitle]);
+        Assert.Equal("General preferences", localizer.Strings[StringKeys.Settings.GeneralTitle]);
     }
 
     [Fact]
@@ -30,7 +30,7 @@ public class LocalizerTests
         var localizer = new Localizer("es");
 
         Assert.Equal("es", localizer.Current.Code);
-        Assert.Equal("Preferencias generales", localizer[StringKeys.Settings.GeneralTitle]);
+        Assert.Equal("Preferencias generales", localizer.Strings[StringKeys.Settings.GeneralTitle]);
     }
 
     [Theory]
@@ -54,7 +54,7 @@ public class LocalizerTests
     {
         var localizer = new Localizer("es");
 
-        var rendered = localizer["no.such.key.exists"];
+        var rendered = localizer.Strings["no.such.key.exists"];
 
         Assert.False(string.IsNullOrWhiteSpace(rendered));
         Assert.Contains("no.such.key.exists", rendered, StringComparison.Ordinal);
@@ -62,7 +62,7 @@ public class LocalizerTests
 
     [Fact]
     public void AnEmptyKeyRendersEmptyRatherThanAMarker()
-        => Assert.Equal(string.Empty, new Localizer()[string.Empty]);
+        => Assert.Equal(string.Empty, new Localizer().Strings[string.Empty]);
 
     [Fact]
     public void FormatSubstitutesPositionalArguments()
@@ -109,23 +109,31 @@ public class LocalizerTests
         localizer.SetLanguage("es");
 
         Assert.Equal("es", localizer.Current.Code);
-        Assert.Equal("Conexión", localizer[StringKeys.Settings.ConnectionTitle]);
+        Assert.Equal("Conexión", localizer.Strings[StringKeys.Settings.ConnectionTitle]);
         Assert.Equal("es", localizer.Culture.TwoLetterISOLanguageName);
     }
 
+    /// <summary>
+    /// The markup binds through <see cref="Localizer.Strings"/>, and a compiled binding only
+    /// re-reads a key when the object it came from is a *different* one — so the façade is
+    /// replaced and the notification names it. Naming the indexer instead was the original
+    /// mistake, and it produced an interface that rendered correctly once and then never changed
+    /// again (docs/PLAN-I18N.md §3).
+    /// </summary>
     [Fact]
-    public void SetLanguageRaisesTheIndexerChangeThenLanguageChanged()
+    public void SetLanguageReplacesTheStringsFacadeThenRaisesLanguageChanged()
     {
         var localizer = new Localizer();
+        var before = localizer.Strings;
         var order = new List<string>();
         localizer.PropertyChanged += (_, e) => order.Add("property:" + e.PropertyName);
         localizer.LanguageChanged += (_, _) => order.Add("event");
 
         localizer.SetLanguage("es");
 
-        // The markup re-reads on Item[]; view models re-raise their own labels on LanguageChanged.
         // Both must see the new strings, and the bindings must not be told twice.
-        Assert.Equal(["property:Item[]", "event"], order);
+        Assert.Equal(["property:Strings", "event"], order);
+        Assert.NotSame(before, localizer.Strings);
     }
 
     [Fact]
@@ -149,7 +157,7 @@ public class LocalizerTests
         localizer.SetLanguage("en");
 
         Assert.Equal("en", localizer.Current.Code);
-        Assert.Equal("Connection", localizer[StringKeys.Settings.ConnectionTitle]);
+        Assert.Equal("Connection", localizer.Strings[StringKeys.Settings.ConnectionTitle]);
     }
 
     [Fact]

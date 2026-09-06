@@ -148,19 +148,20 @@
                        a filled dot, and the two measure different things — this one is "hay sesión
                        iniciada", that one is "se puede llegar al proveedor" (U2). Same colour
                        vocabulary, deliberately different shape. -->
-                  <!-- The one place that names the Localizer explicitly. Everywhere else the
-                       DataContext is a view model, so ObservableObject.Loc is in scope and
-                       {Binding Loc[key]} compiles; inside this template the DataContext is a
-                       ProviderDescriptor, which has no Loc and should not grow one. Source +
-                       x:DataType keeps it a compiled binding rather than falling back to
-                       reflection. -->
+                  <!-- The one place that has to reach outside its own DataContext. Everywhere else
+                       the DataContext is a view model, so ObservableObject.Loc is in scope and
+                       {Binding Loc[key]} compiles; inside this template it is a ProviderDescriptor,
+                       which has no Loc and should not grow one. Walking up to the window's view
+                       model rather than naming Localizer.Instance directly is deliberate: a static
+                       source cannot notify, so that binding rendered once and then never followed
+                       the language picker again (docs/PLAN-I18N.md §3). -->
                   <Ellipse Grid.Column="2"
                            Width="9"
                            Height="9"
                            StrokeThickness="2"
                            Fill="Transparent"
                            VerticalAlignment="Center"
-                           ToolTip.Tip="{Binding [header.session.tooltip], Source={x:Static loc:Localizer.Instance}, x:DataType=loc:Localizer}">
+                           ToolTip.Tip="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Loc[header.session.tooltip]}">
                     <Ellipse.Styles>
                       <Style Selector="Ellipse.auth">
                         <Setter Property="Stroke" Value="#28A745" />

@@ -124,6 +124,41 @@ public class NoHardcodedStringsTests
     }
 
     /// <summary>
+    /// A localization binding has to be able to tell the markup it changed. Binding one to a
+    /// static source cannot: <c>{x:Static loc:Localizer.Instance}</c> has no PropertyChanged the
+    /// binding will honour, so the text renders once and then stays in whatever language was
+    /// current at load. That is the bug this whole gate family exists to prevent, and it shipped
+    /// once already (docs/PLAN-I18N.md §3).
+    ///
+    /// Reach the string table through a view model — <c>{Binding Loc[key]}</c>, or
+    /// <c>$parent[Window]</c> when the DataContext is a model type.
+    /// </summary>
+    [Fact]
+    public void NoLocalizationBindingUsesAStaticSource()
+    {
+        var offenders = new List<string>();
+
+        foreach (var file in AxamlFiles())
+        {
+            var lines = File.ReadAllLines(file);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].Contains("x:Static", StringComparison.Ordinal)
+                    && lines[i].Contains("Localizer", StringComparison.Ordinal))
+                {
+                    offenders.Add($"{Path.GetFileName(file)}:{i + 1}  {lines[i].Trim()}");
+                }
+            }
+        }
+
+        Assert.True(
+            offenders.Count == 0,
+            "A binding onto Localizer.Instance as a static source cannot be notified, so its text\n" +
+            "freezes at whatever language was current when the view loaded. Bind through a view\n" +
+            "model's Loc instead.\n\n  " + string.Join("\n  ", offenders));
+    }
+
+    /// <summary>
     /// The counterpart to the markup gate, for code. Every user-facing sentence in <c>src/</c> now
     /// lives in the locale files; a Spanish sentence anywhere else means someone wrote copy at a
     /// call site instead of adding a key — which is how the interface ended up single-language in

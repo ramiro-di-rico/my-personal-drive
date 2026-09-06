@@ -542,7 +542,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // Every derived label on this view model reads through Loc at get time, so a language
         // change only has to tell the bindings to re-read (docs/PLAN-I18N.md §3). The view model
         // outlives the window, so there is nothing to unsubscribe from.
-        Loc.LanguageChanged += (_, _) => OnLanguageChanged();
+        Localizer.Instance.LanguageChanged += (_, _) => OnLanguageChanged();
     }
 
     /// <summary>
@@ -738,7 +738,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 return;
             }
 
-            Loc.SetLanguage(value.Code);
+            Localizer.Instance.SetLanguage(value.Code);
             _settings.Update(s => s.Language = value.Code);
         }
     }

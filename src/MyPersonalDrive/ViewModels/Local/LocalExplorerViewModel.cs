@@ -52,7 +52,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         // Long-lived, like the window itself, so subscribing without unsubscribing is not a leak.
         // Deliberately not done in ObservableObject: a row view model is recreated on every
         // listing, and the singleton would accumulate a handler per row (docs/PLAN-I18N.md §3).
-        Loc.LanguageChanged += (_, _) =>
+        Localizer.Instance.LanguageChanged += (_, _) =>
         {
             _statusMessage = _statusText.IsEmpty ? null : _statusText.Render();
             OnAllPropertiesChanged();

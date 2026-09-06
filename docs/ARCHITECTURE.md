@@ -1,7 +1,7 @@
 # MyPersonalDrive — Technical Reference
 
 > Reference document describing the current state of the application (branch
-> `feature/i18n`, commit `871ccd6`).
+> `feature/i18n`, commit `7c1f6d3`).
 > Meant to give full context to any future chat/session without having to re-read all the code.
 
 ---
@@ -70,11 +70,13 @@ src/MyPersonalDrive/
     RemoteHashAlgorithm.cs         # None|Sha1|Sha256|QuickXor
     UploadConflictStrategy.cs      # enum None|KeepBoth|Replace|Skip
   Services/
-    Localization/                  # the interface's string table (see §7.4)
+    Localization/                  # the interface's string table (see §7.6)
       Language.cs / LanguageCatalog.cs   # the languages this build ships; degrade-to-English
       StringKeys.cs                # every key, as a constant; a test pins it against en.json
       Localizer.cs                 # the singleton: T/F/Plural, Culture, SetLanguage
+      LocalizedStrings.cs          # the façade the markup binds through; replaced, never mutated
       LocalizedText.cs             # a key plus its arguments, rendered on read
+      ILocalizedError.cs           # an exception's English Message plus its translated Detail
       Locales/en.json, es.json     # embedded resources, globbed
     Providers/
       ICloudDriveProvider.cs       # the facade every consumer talks to (see §5); exposes Paths
@@ -601,9 +603,12 @@ third.
   `TrimMode=partial` is hostile to. One flat embedded JSON per language, loaded through
   `AppJsonContext`.
 - **Markup** binds `{Binding Loc[some.key]}` — `ObservableObject.Loc` makes every view model a
-  binding source, so these stay *compiled* bindings. The one template typed against a model rather
-  than a view model (`ProviderDescriptor`, in the header) names the singleton explicitly with
-  `Source={x:Static loc:Localizer.Instance}` plus `x:DataType`.
+  binding source, so these stay *compiled* bindings. `Loc` returns `Localizer.Strings`, an
+  immutable façade that `SetLanguage` **replaces**: a compiled binding re-reads an indexer only
+  when the object it sits on is a different one, so notifying on the singleton left the interface
+  frozen at load-time language (PLAN-I18N.md §3.1). The one template typed against a model rather
+  than a view model (`ProviderDescriptor`, in the header) walks up to the window's view model —
+  never a static source, which cannot notify.
 - **A message that stays on screen stores its key, not its text** — `LocalizedText`, held by every
   status line (`MainWindowViewModel`, `LocalExplorerViewModel`, `SyncPanelViewModel`,
   `SyncPairViewModel`). Rendering at read time is what makes them follow the picker.

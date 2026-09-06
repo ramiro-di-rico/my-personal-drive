@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Globalization;
-using System.Runtime.CompilerServices;
 
 namespace MyPersonalDrive.Services.Localization;
 
@@ -34,6 +33,7 @@ public sealed class Localizer : INotifyPropertyChanged
             ? _fallback
             : LocaleCatalogLoader.Load(Current.Code);
         Culture = ResolveCulture(Current.Code);
+        Strings = new LocalizedStrings(this);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -55,11 +55,11 @@ public sealed class Localizer : INotifyPropertyChanged
     public CultureInfo Culture { get; private set; }
 
     /// <summary>
-    /// The indexer the markup binds to: <c>{Binding Loc[settings.general.title]}</c>. Named
-    /// <c>Item</c> explicitly so the change notification below matches what the binding listens for.
+    /// What the markup binds through: <c>{Binding Loc[settings.general.title]}</c>. A *new*
+    /// instance every time the language changes — see <see cref="LocalizedStrings"/> for why that
+    /// matters, and docs/PLAN-I18N.md §3 for the experiment that found out.
     /// </summary>
-    [IndexerName("Item")]
-    public string this[string key] => T(key);
+    public LocalizedStrings Strings { get; private set; }
 
     /// <summary>
     /// Looks up a key. Falls back to English, then — in a debug build — to a loud
@@ -130,14 +130,19 @@ public sealed class Localizer : INotifyPropertyChanged
             : LocaleCatalogLoader.Load(language.Code);
         Culture = ResolveCulture(language.Code);
 
+        // A fresh façade, not a mutated one: a binding whose path runs through it only re-reads
+        // when the object it came from is a different one (see LocalizedStrings).
+        Strings = new LocalizedStrings(this);
+
         CultureInfo.DefaultThreadCurrentCulture = Culture;
         CultureInfo.DefaultThreadCurrentUICulture = Culture;
         CultureInfo.CurrentCulture = Culture;
         CultureInfo.CurrentUICulture = Culture;
 
-        // Order matters: the markup's bindings re-read on Item[], and ViewModels re-raise their own
-        // derived labels on LanguageChanged. Both must see the new strings already in place.
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
+        // Order matters: view models re-raise their own properties on LanguageChanged, and one of
+        // those properties is the Strings façade the markup binds through. Everything must already
+        // be in place before either fires.
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Strings)));
         LanguageChanged?.Invoke(this, EventArgs.Empty);
     }
 

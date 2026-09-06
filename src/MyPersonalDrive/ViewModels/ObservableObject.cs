@@ -11,10 +11,14 @@ public abstract class ObservableObject : INotifyPropertyChanged
     /// <summary>
     /// The interface string table, exposed here so that every ViewModel is a valid binding source
     /// for it: the markup writes <c>{Binding Loc[settings.general.title]}</c>, which compiled
-    /// bindings resolve statically against <see cref="Localizer"/>'s indexer — no reflection, and
-    /// no per-file <c>Source=</c> plumbing (docs/PLAN-I18N.md §3).
+    /// bindings resolve statically against the indexer — no reflection, and no per-file
+    /// <c>Source=</c> plumbing (docs/PLAN-I18N.md §3).
+    ///
+    /// Returns <see cref="Localizer.Strings"/> rather than the localizer itself, and that is load
+    /// bearing: the façade is a *different object* after a language change, which is what makes a
+    /// compiled binding re-read the key. See <see cref="LocalizedStrings"/>.
     /// </summary>
-    public Localizer Loc => Localizer.Instance;
+    public LocalizedStrings Loc => Localizer.Instance.Strings;
 
     /// <summary>
     /// Every property is stale. Used when the interface language changes: a derived label reads

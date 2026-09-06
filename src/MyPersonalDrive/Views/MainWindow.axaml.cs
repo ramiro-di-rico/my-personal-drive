@@ -53,15 +53,19 @@ public partial class MainWindow : Window
             tiles.AddHandler(InputElement.PointerMovedEvent, OnCloudRowPointerMoved, RoutingStrategies.Tunnel);
         }
 
-        // Double click opens, in all three modes and in both panes. Tunnel for the same reason the
-        // pointer handlers tunnel: the row and tile roots are Buttons, which handle the gesture on
-        // the way back up.
+        // Double click opens, in all three modes and in both panes. Bubble, and only Bubble:
+        // DoubleTappedEvent is registered with RoutingStrategies.Bubble alone, so a handler added
+        // for Tunnel is attached to a phase the event never routes and is simply never called —
+        // which is exactly what shipped, leaving the context menu's "Open" as the only way in.
+        // (The pointer handlers above genuinely do tunnel: PointerPressedEvent routes both.)
+        // handledEventsToo, because the row and tile roots are Buttons and the gesture reaches them
+        // on the way up.
         foreach (var listing in new Control[] { ListModeListing, IconsModeListing, GalleryModeListing })
         {
-            listing.AddHandler(InputElement.DoubleTappedEvent, OnCloudRowDoubleTapped, RoutingStrategies.Tunnel);
+            listing.AddHandler(InputElement.DoubleTappedEvent, OnCloudRowDoubleTapped, RoutingStrategies.Bubble, handledEventsToo: true);
         }
 
-        LocalListing.AddHandler(InputElement.DoubleTappedEvent, OnLocalRowDoubleTapped, RoutingStrategies.Tunnel);
+        LocalListing.AddHandler(InputElement.DoubleTappedEvent, OnLocalRowDoubleTapped, RoutingStrategies.Bubble, handledEventsToo: true);
 
         // Everything else on the keyboard (docs/PLAN-UX-ROUND-3.md X5). Bubble at the window, not
         // KeyBindings and not a per-control handler: a focused TextBox marks Ctrl+A, Delete and F2

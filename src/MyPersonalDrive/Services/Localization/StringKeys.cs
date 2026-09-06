@@ -504,7 +504,6 @@ public static class StringKeys
         public const string GoogleDriveTitle = "settings.googledrive.title";
         public const string LanguageLabel = "settings.language.label";
         public const string LanguageTooltip = "settings.language.tooltip";
-        public const string NextcloudConnect = "settings.nextcloud.connect";
         public const string NextcloudHint = "settings.nextcloud.hint";
         public const string NextcloudTitle = "settings.nextcloud.title";
         public const string OneDriveClientIdHint = "settings.onedrive.clientid.hint";
@@ -523,7 +522,6 @@ public static class StringKeys
         public const string ProtonUpdateLabel = "settings.proton.update.label";
         public const string ProviderSignedInTooltip = "settings.provider.signedin.tooltip";
         public const string RefreshTooltip = "settings.refresh.tooltip";
-        public const string S3Connect = "settings.s3.connect";
         public const string S3Hint = "settings.s3.hint";
         public const string S3Title = "settings.s3.title";
         public const string SignInTooltip = "settings.signin.tooltip";

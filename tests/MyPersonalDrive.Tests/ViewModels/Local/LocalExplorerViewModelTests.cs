@@ -414,6 +414,43 @@ public class LocalExplorerViewModelTests : IDisposable
         Assert.Contains(shownFields!, f => f.Label == "Size");
     }
 
+    /// <summary>
+    /// docs/PLAN-UX-ROUND-3.md X3, the local pane's half. An empty directory rendered as a blank
+    /// rectangle with no wording anywhere — this pane has no metrics panel to carry it, so there
+    /// was nothing at all.
+    /// </summary>
+    [Fact]
+    public async Task AnEmptyFolder_SaysSo()
+    {
+        var sut = Build(_root);
+
+        await sut.NavigateAsync(_root);
+
+        Assert.True(sut.IsListingEmpty);
+        Assert.False(sut.IsListingFilteredToNothing);
+        Assert.Equal("This folder is empty", sut.ListingEmptyTitle);
+    }
+
+    [Fact]
+    public async Task ASearchThatMatchesNothing_ReadsAsAFilter_NotAsAnEmptyFolder()
+    {
+        File.WriteAllText(Path.Combine(_root, "note.txt"), "hi");
+        var sut = Build(_root);
+        await sut.NavigateAsync(_root);
+
+        sut.SearchText = "zzz";
+
+        Assert.True(sut.IsListingFilteredToNothing);
+        Assert.Equal("Nothing matches", sut.ListingEmptyTitle);
+        Assert.Contains("1", sut.ListingEmptyDetail);
+    }
+
+    [Fact]
+    public void BeforeTheFirstLoad_ThereIsNoEmptyState()
+    {
+        Assert.False(Build(_root).IsListingEmpty);
+    }
+
     /// <summary>Points <see cref="LocalFileSystemService.GetHomeDirectory"/> at a temp folder rather than the real OS home, so tests stay hermetic.</summary>
     private sealed class FakeHomeLocalFileSystemService(string home) : LocalFileSystemService
     {

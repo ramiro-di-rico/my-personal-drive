@@ -76,6 +76,11 @@ public static class StringKeys
     {
         public const string BackTooltip = "explorer.back.tooltip";
         public const string DownloadSelected = "explorer.download.selected";
+        public const string EmptyClearFilters = "explorer.empty.clearfilters";
+        public const string EmptyFilteredDetail = "explorer.empty.filtered.detail";
+        public const string EmptyFilteredTitle = "explorer.empty.filtered.title";
+        public const string EmptyFolderDetail = "explorer.empty.folder.detail";
+        public const string EmptyFolderTitle = "explorer.empty.folder.title";
         public const string FilterSummary = "explorer.filter.summary";
         public const string HeaderSubtitle = "explorer.header.subtitle";
         public const string HeaderTitle = "explorer.header.title";
@@ -146,6 +151,8 @@ public static class StringKeys
         public const string ConfirmDeleteMany = "local.confirm.deletemany";
         public const string ConfirmDeleteOne = "local.confirm.deleteone";
         public const string DeleteSelected = "local.delete.selected";
+        public const string EmptyFilteredDetail = "local.empty.filtered.detail";
+        public const string EmptyFolderDetail = "local.empty.folder.detail";
         public const string FreeSpace = "local.freespace";
         public const string HiddenTooltip = "local.hidden.tooltip";
         public const string HomeTooltip = "local.home.tooltip";
@@ -170,6 +177,7 @@ public static class StringKeys
         public const string ActivitySaveFailed = "status.activity.savefailed";
         public const string ActivitySaved = "status.activity.saved";
         public const string ActivityUnavailable = "status.activity.unavailable";
+        public const string BannerDismissTooltip = "status.banner.dismiss.tooltip";
         public const string AuthOpening = "status.auth.opening";
         public const string AuthSignedOut = "status.auth.signedout";
         public const string AuthSigningOut = "status.auth.signingout";

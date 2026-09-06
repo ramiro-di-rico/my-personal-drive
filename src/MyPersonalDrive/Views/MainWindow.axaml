@@ -114,7 +114,7 @@
       <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
     </Style>
   </Window.Styles>
-  <Grid RowDefinitions="Auto,Auto,*">
+  <Grid RowDefinitions="Auto,Auto,Auto,*">
     <!-- Top Header Bar with Telemetry, Quota & Theme Switcher -->
     <Border Grid.Row="0" Padding="16,12" Background="{DynamicResource PanelBackgroundBrush}" BorderBrush="{DynamicResource CardBackgroundBrush}" BorderThickness="0,0,0,1">
       <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
@@ -379,8 +379,55 @@
       </Button>
     </StackPanel>
 
+    <!-- The alert strip (docs/PLAN-UX-ROUND-3.md X1). Belongs to the window, not to a view and not
+         to the status panel: U1 put the recovery button inside that panel, which is a preference
+         the user can switch off and which only exists in the explorer view — so a failed load was
+         silent for anyone who had hidden it, and every failure raised while the user was in
+         Configuración or Sincronización was silent for everyone. Only warnings land here; ordinary
+         progress keeps the panel's own card, which is what IsInformationalStatus splits off. -->
+    <Border Grid.Row="2"
+            Margin="16,12,16,0"
+            Padding="12,10"
+            CornerRadius="6"
+            Background="{DynamicResource WarningCardBackgroundBrush}"
+            IsVisible="{Binding IsStatusBannerVisible}">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
+        <Path Grid.Column="0"
+              Classes="icon"
+              Data="{StaticResource IconWarning}"
+              Stroke="{DynamicResource WarningCardForegroundBrush}"
+              VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1"
+                   Text="{Binding StatusMessage}"
+                   Foreground="{DynamicResource WarningCardForegroundBrush}"
+                   TextWrapping="Wrap"
+                   VerticalAlignment="Center" />
+        <Button Grid.Column="2"
+                Classes="primary"
+                Padding="12,4"
+                FontSize="12"
+                VerticalAlignment="Center"
+                IsVisible="{Binding HasStatusAction}"
+                Content="{Binding StatusActionLabel}"
+                Command="{Binding StatusActionCommand}"
+                ToolTip.Tip="{Binding Loc[status.action.tooltip]}" />
+        <Button Grid.Column="3"
+                Padding="6"
+                VerticalAlignment="Center"
+                Command="{Binding DismissStatusBannerCommand}"
+                ToolTip.Tip="{Binding Loc[status.banner.dismiss.tooltip]}"
+                AutomationProperties.Name="{Binding Loc[status.banner.dismiss.tooltip]}">
+          <Path Classes="icon"
+                Data="{StaticResource IconClear}"
+                Width="12"
+                Height="12"
+                Stroke="{DynamicResource WarningCardForegroundBrush}" />
+        </Button>
+      </Grid>
+    </Border>
+
     <!-- Explorer view: breadcrumbs, folder browser, status panel and CLI activity log. -->
-    <Grid Grid.Row="2" RowDefinitions="*,Auto" IsVisible="{Binding IsExplorerView}">
+    <Grid Grid.Row="3" RowDefinitions="*,Auto" IsVisible="{Binding IsExplorerView}">
       <Grid x:Name="ExplorerColumnsGrid" Grid.Row="0" ColumnDefinitions="*,Auto,*,Auto">
         <Grid Grid.Column="0" Margin="16,0,16,16" RowDefinitions="Auto,Auto,Auto,Auto,*">
           <!-- This pane's own header, mirroring the local pane's (docs/PLAN-UX-ROUND-2.md §14).
@@ -845,6 +892,39 @@
           </ItemsRepeater>
           </ScrollViewer>
 
+          <!-- Empty state (docs/PLAN-UX-ROUND-3.md X3). Three situations that used to render as the
+               same blank rectangle: an empty folder, a search that matched nothing, and a kind chip
+               hiding everything. The last two are the ones with a way out, so they get the button —
+               clicking the active chip also clears it, but nobody staring at an empty pane knows
+               that. Shares this cell with the three view modes and the sign-in card; IsListingEmpty
+               already requires a session and a finished load, so it cannot collide with either. -->
+          <StackPanel IsVisible="{Binding IsListingEmpty}"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center"
+                      MaxWidth="380"
+                      Spacing="10">
+            <Path Classes="icon"
+                  Data="{StaticResource IconFolder}"
+                  Width="32"
+                  Height="32"
+                  Opacity="0.5"
+                  HorizontalAlignment="Center" />
+            <TextBlock Text="{Binding ListingEmptyTitle}"
+                       FontSize="16"
+                       FontWeight="Bold"
+                       TextAlignment="Center"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="{Binding ListingEmptyDetail}"
+                       TextWrapping="Wrap"
+                       TextAlignment="Center"
+                       Opacity="0.7" />
+            <Button Content="{Binding Loc[explorer.empty.clearfilters]}"
+                    Command="{Binding ClearFiltersCommand}"
+                    IsVisible="{Binding IsListingFilteredToNothing}"
+                    HorizontalAlignment="Center"
+                    Padding="12,6" />
+          </StackPanel>
+
           <!-- Drop-target badge (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4) — shown only
                while a local item is being dragged over this pane. Last child of the overlapping
                Grid.Row="2" (List/Icons/Gallery/auth-fallback all share this cell), so it always
@@ -1045,6 +1125,32 @@
               </ListBox.ItemTemplate>
             </ListBox>
 
+            <!-- Empty state, mirroring the cloud pane's (docs/PLAN-UX-ROUND-3.md X3). No filter
+                 button: this pane has a search box and no kind chips, so clearing the box is the
+                 whole remedy and its own control is right there above the listing. -->
+            <StackPanel Grid.Row="2"
+                        IsVisible="{Binding IsListingEmpty}"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        MaxWidth="320"
+                        Spacing="10">
+              <Path Classes="icon"
+                    Data="{StaticResource IconFolder}"
+                    Width="28"
+                    Height="28"
+                    Opacity="0.5"
+                    HorizontalAlignment="Center" />
+              <TextBlock Text="{Binding ListingEmptyTitle}"
+                         FontSize="15"
+                         FontWeight="Bold"
+                         TextAlignment="Center"
+                         HorizontalAlignment="Center" />
+              <TextBlock Text="{Binding ListingEmptyDetail}"
+                         TextWrapping="Wrap"
+                         TextAlignment="Center"
+                         Opacity="0.7" />
+            </StackPanel>
+
             <!-- Drop-target badge — mirrors CloudDropOverlay for this pane (docs/
                  INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4). -->
             <Border x:Name="LocalDropOverlay"
@@ -1111,48 +1217,17 @@
               </ItemsControl>
             </StackPanel>
 
+            <!-- Progress and results only. A warning goes to the window-level alert strip
+                 instead (docs/PLAN-UX-ROUND-3.md X1), so the same sentence is never rendered
+                 twice on one screen — and so hiding this panel cannot hide a failure. -->
             <Border Name="StatusBorder"
                     Padding="8"
                     CornerRadius="4"
-                    Classes.warning="{Binding IsWarning}"
-                    IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-              <!-- Rows, not a single horizontal strip: the message wraps, and the recovery button
-                   below it must not be pushed off the panel's width when it does (U1). -->
-              <StackPanel Spacing="6">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <Path Name="WarningIcon"
-                        Classes="icon"
-                        Data="{StaticResource IconWarning}"
-                        Stroke="{DynamicResource WarningCardForegroundBrush}"
-                        VerticalAlignment="Top"
-                        Margin="0,2,0,0"
-                        IsVisible="{Binding IsWarning}" />
-                  <TextBlock Name="StatusText"
-                             TextWrapping="Wrap"
-                             Text="{Binding StatusMessage}"
-                             VerticalAlignment="Center" />
-                </StackPanel>
-                <Button Name="StatusActionButton"
-                        Classes="primary"
-                        HorizontalAlignment="Left"
-                        Padding="10,4"
-                        FontSize="12"
-                        IsVisible="{Binding HasStatusAction}"
-                        Content="{Binding StatusActionLabel}"
-                        Command="{Binding StatusActionCommand}"
-                        ToolTip.Tip="{Binding Loc[status.action.tooltip]}" />
-              </StackPanel>
-              <Border.Styles>
-                <Style Selector="Border#StatusBorder">
-                  <Setter Property="Background" Value="Transparent" />
-                </Style>
-                <Style Selector="Border#StatusBorder.warning">
-                  <Setter Property="Background" Value="{DynamicResource WarningCardBackgroundBrush}" />
-                </Style>
-                <Style Selector="Border#StatusBorder.warning TextBlock#StatusText">
-                  <Setter Property="Foreground" Value="{DynamicResource WarningCardForegroundBrush}" />
-                </Style>
-              </Border.Styles>
+                    IsVisible="{Binding IsInformationalStatus}">
+              <TextBlock Name="StatusText"
+                         TextWrapping="Wrap"
+                         Text="{Binding StatusMessage}"
+                         VerticalAlignment="Center" />
             </Border>
 
             <TextBlock Opacity="0.7"
@@ -1516,7 +1591,7 @@
     </Grid>
 
     <!-- Settings view: CLI connection, preferences and local directory sync, in one place instead of stacked dialogs. -->
-    <ScrollViewer Grid.Row="2" IsVisible="{Binding IsSettingsView}">
+    <ScrollViewer Grid.Row="3" IsVisible="{Binding IsSettingsView}">
       <StackPanel Margin="16" Spacing="24">
         <!-- General Preferences: Theme, Bandwidth throttle, Default sync folder -->
         <StackPanel Spacing="10">
@@ -1848,7 +1923,7 @@
          inside the latter (docs/PLAN-UX-ROUND-2.md §5). The wrapper keeps the window's own
          DataContext so IsSyncView resolves against MainWindowViewModel, while the view itself
          gets the SyncPanelViewModel it is typed against. -->
-    <ContentControl Grid.Row="2" IsVisible="{Binding IsSyncView}">
+    <ContentControl Grid.Row="3" IsVisible="{Binding IsSyncView}">
       <views:SyncPanelView DataContext="{Binding SyncPanel}" />
     </ContentControl>
   </Grid>

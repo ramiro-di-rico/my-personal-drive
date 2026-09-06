@@ -87,6 +87,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private LocalizedText _statusText = LocalizedText.Of(StringKeys.Status.PickCliInitial);
     private string _statusMessage = Localizer.Instance.T(StringKeys.Status.PickCliInitial);
     private bool _isWarning;
+    private bool _statusBannerDismissed;
+    private bool _hasRenderedListing;
     private bool _isLoading;
     private bool _isAuthenticated;
     private bool _isCommandConsoleVisible = true;
@@ -504,6 +506,8 @@ public sealed class MainWindowViewModel : ObservableObject
         ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, HandleUnexpectedError);
         ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
         ClearSearchCommand = new AsyncCommand(ClearSearchAsync, () => HasSearchText, HandleUnexpectedError);
+        ClearFiltersCommand = new AsyncCommand(ClearFiltersAsync, () => HasActiveFilters, HandleUnexpectedError);
+        DismissStatusBannerCommand = new AsyncCommand(DismissStatusBannerAsync, () => IsStatusBannerVisible, HandleUnexpectedError);
         SortByNameCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Name), onError: HandleUnexpectedError);
         SortBySizeCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Size), onError: HandleUnexpectedError);
         SortByModifiedCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Modified), onError: HandleUnexpectedError);
@@ -626,6 +630,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>Empties the folder search box (docs/PLAN-UX-ROUND-2.md §9).</summary>
     public AsyncCommand ClearSearchCommand { get; }
+
+    /// <summary>Clears the search box and the kind chip together, from the empty state (docs/PLAN-UX-ROUND-3.md X3).</summary>
+    public AsyncCommand ClearFiltersCommand { get; }
+
+    /// <summary>Takes the alert strip down without resolving what it reported (docs/PLAN-UX-ROUND-3.md X1).</summary>
+    public AsyncCommand DismissStatusBannerCommand { get; }
 
     public AsyncCommand ShowSettingsCommand { get; }
 
@@ -810,6 +820,21 @@ public sealed class MainWindowViewModel : ObservableObject
     public bool HasStatusAction => _isWarning;
 
     /// <summary>
+    /// Whether the window-level alert strip is up (docs/PLAN-UX-ROUND-3.md X1). U1's recovery
+    /// button lived inside the status panel, which is an optional preference and belongs to the
+    /// explorer view — so a failure was invisible to anyone who had hidden the panel, and to
+    /// everyone while they were in Settings or Sync. Only warnings get the strip: routine progress
+    /// keeps the panel it has always used, because a banner for "Loaded 14 items" is noise.
+    /// </summary>
+    public bool IsStatusBannerVisible => _isWarning && !_statusBannerDismissed && _statusMessage.Length > 0;
+
+    /// <summary>
+    /// The other half of the split: the status panel's card now carries progress and results only,
+    /// so a warning is never rendered twice on the same screen.
+    /// </summary>
+    public bool IsInformationalStatus => !_isWarning && _statusMessage.Length > 0;
+
+    /// <summary>
     /// Which remedy, derived from the typed <see cref="DriveErrorKind"/> rather than from
     /// <see cref="StatusMessage"/>'s text (AGENTS.md: "Errors are typed").
     /// </summary>
@@ -979,6 +1004,32 @@ public sealed class MainWindowViewModel : ObservableObject
     /// the specific complaint (docs/PLAN-UX-ROUND-2.md §9).
     /// </summary>
     public bool HasSearchText => !string.IsNullOrWhiteSpace(_searchText);
+
+    /// <summary>Whether the search box, a kind chip, or both are hiding rows right now.</summary>
+    public bool HasActiveFilters => HasSearchText || _kindFilter is not null;
+
+    /// <summary>
+    /// Nothing on screen (docs/PLAN-UX-ROUND-3.md X3). Before this the pane simply went blank: an
+    /// empty folder, a search that matched nothing and a filter that hid everything all rendered as
+    /// the same empty rectangle, and the only wording for any of them lived in the metrics headline
+    /// inside the optional status panel. Gated on a finished load and a live session so it cannot
+    /// flash between "loading" and the first row arriving, or fight the sign-in card for the cell.
+    /// </summary>
+    public bool IsListingEmpty => _hasRenderedListing && IsAuthenticated && !IsLoading && RootItems.Count == 0;
+
+    /// <summary>
+    /// The folder does have contents — the filters are hiding all of them. A different situation
+    /// from an empty folder, and the only one of the two with an action.
+    /// </summary>
+    public bool IsListingFilteredToNothing => IsListingEmpty && _loadedItems.Count > 0;
+
+    public string ListingEmptyTitle => Loc.T(IsListingFilteredToNothing
+        ? StringKeys.Explorer.EmptyFilteredTitle
+        : StringKeys.Explorer.EmptyFolderTitle);
+
+    public string ListingEmptyDetail => IsListingFilteredToNothing
+        ? Loc.F(StringKeys.Explorer.EmptyFilteredDetail, _loadedItems.Count.ToString("n0", Loc.Culture))
+        : Loc.T(StringKeys.Explorer.EmptyFolderDetail);
 
     /// <summary>
     /// How many rows survived the search, phrased the way the kind chips already phrase their own
@@ -1197,6 +1248,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _isLoading, value))
             {
                 RaiseCommandStates();
+                RaiseEmptyStateChanged();
                 UpdateConnectionTelemetry();
             }
         }
@@ -1211,6 +1263,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 PersistSettings();
                 RaiseCommandStates();
+                RaiseEmptyStateChanged();
                 UpdateConnectionTelemetry();
                 RaiseProviderAuthStates();
             }
@@ -1238,9 +1291,46 @@ public sealed class MainWindowViewModel : ObservableObject
         _statusText = text;
         if (SetProperty(ref _statusMessage, text.Render(), nameof(StatusMessage)))
         {
+            // A new message is a new thing to say, so a dismissal of the previous one does not
+            // carry over to it (docs/PLAN-UX-ROUND-3.md X1).
+            _statusBannerDismissed = false;
             IsWarning = false;
+            RaiseStatusSurfaceChanged();
             UpdateConnectionTelemetry();
         }
+    }
+
+    /// <summary>
+    /// The two surfaces a status message can land on. Both are derived from
+    /// <see cref="_isWarning"/> and <see cref="_statusMessage"/>, neither of which
+    /// <see cref="SetProperty"/> can see on their behalf.
+    /// </summary>
+    /// <summary>
+    /// The empty-state block's four derived properties. Their inputs are a collection's count and
+    /// two flags in three different setters, none of which <see cref="SetProperty"/> can connect.
+    /// </summary>
+    private void RaiseEmptyStateChanged()
+    {
+        OnPropertyChanged(nameof(IsListingEmpty));
+        OnPropertyChanged(nameof(IsListingFilteredToNothing));
+        OnPropertyChanged(nameof(HasActiveFilters));
+        OnPropertyChanged(nameof(ListingEmptyTitle));
+        OnPropertyChanged(nameof(ListingEmptyDetail));
+        ClearFiltersCommand.RaiseCanExecuteChanged();
+    }
+
+    private void RaiseStatusSurfaceChanged()
+    {
+        OnPropertyChanged(nameof(IsStatusBannerVisible));
+        OnPropertyChanged(nameof(IsInformationalStatus));
+        DismissStatusBannerCommand.RaiseCanExecuteChanged();
+    }
+
+    private async Task DismissStatusBannerAsync()
+    {
+        _statusBannerDismissed = true;
+        RaiseStatusSurfaceChanged();
+        await Task.CompletedTask;
     }
 
     private void SetStatus(string key, params object?[] args) => SetStatus(LocalizedText.Of(key, args));
@@ -1269,6 +1359,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _isWarning, value))
             {
+                RaiseStatusSurfaceChanged();
                 UpdateConnectionTelemetry();
             }
         }
@@ -3311,6 +3402,10 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectAllRowsCommand.RaiseCanExecuteChanged();
         RaiseSelectionSummaryChanged();
         OnPropertyChanged(nameof(SearchResultText));
+        // Only after a listing has actually been rendered once: before that, "no rows" means "no
+        // load has happened yet", and the empty state would flash on the way to the first paint.
+        _hasRenderedListing = true;
+        RaiseEmptyStateChanged();
 
         // Computed here rather than at each call site so the cached paint and the CLI result both
         // update it, and so the numbers can never disagree with the rows actually on screen.
@@ -3738,6 +3833,24 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task ClearSearchAsync()
     {
         SearchText = string.Empty;
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Both filters at once, from the empty state itself (docs/PLAN-UX-ROUND-3.md X3). The kind
+    /// chip clears by clicking the active chip, which is only discoverable to someone who already
+    /// knows it — and someone staring at an empty pane does not.
+    /// </summary>
+    private async Task ClearFiltersAsync()
+    {
+        _kindFilter = null;
+        // Straight through the field: SearchText's setter renders, and rendering twice for one
+        // gesture would rebuild the whole listing for nothing.
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        OnPropertyChanged(nameof(HasSearchText));
+        ClearSearchCommand.RaiseCanExecuteChanged();
+        RenderItems();
         await Task.CompletedTask;
     }
 

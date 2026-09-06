@@ -576,7 +576,17 @@ public partial class MainWindow : Window
         }
 
         var targetPath = ResolveCloudDropTargetPath(e, viewModel);
-        await viewModel.HandleLocalFilesDroppedAsync(localPaths, targetPath);
+
+        // async void: an exception escaping here ends the process, and an upload can fail for a
+        // dozen ordinary reasons (docs/PLAN-UX-ROUND-4.md Z1).
+        try
+        {
+            await viewModel.HandleLocalFilesDroppedAsync(localPaths, targetPath);
+        }
+        catch (Exception ex)
+        {
+            viewModel.ReportHandlerFailure(ex);
+        }
     }
 
     /// <summary>"the current folder" for the folder already open, otherwise that folder's own name.</summary>
@@ -737,7 +747,16 @@ public partial class MainWindow : Window
         }
 
         var targetPath = ResolveLocalDropTargetPath(e, viewModel);
-        await viewModel.HandleCloudItemsDroppedAsync(items, targetPath);
+
+        // See OnCloudListingDrop: async void, so nothing else would catch this.
+        try
+        {
+            await viewModel.HandleCloudItemsDroppedAsync(items, targetPath);
+        }
+        catch (Exception ex)
+        {
+            viewModel.ReportHandlerFailure(ex);
+        }
     }
 
     /// <summary>The local folder row under the drop point, if any — otherwise the currently browsed local folder.</summary>
@@ -762,18 +781,27 @@ public partial class MainWindow : Window
             return;
         }
 
-        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        // async void: the picker goes through the desktop portal, which can fail, and the assignment
+        // below writes settings.json (docs/PLAN-UX-ROUND-4.md Z1).
+        try
         {
-            Title = Loc.T(StringKeys.Picker.CliPathTitle),
-            AllowMultiple = false
-        });
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = Loc.T(StringKeys.Picker.CliPathTitle),
+                AllowMultiple = false
+            });
 
-        if (files.Count == 0)
-        {
-            return;
+            if (files.Count == 0)
+            {
+                return;
+            }
+
+            viewModel.CliPath = files[0].Path.LocalPath;
         }
-
-        viewModel.CliPath = files[0].Path.LocalPath;
+        catch (Exception ex)
+        {
+            viewModel.ReportHandlerFailure(ex);
+        }
     }
 
     private async void BrowseDefaultSyncFolder(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -783,18 +811,26 @@ public partial class MainWindow : Window
             return;
         }
 
-        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        // See BrowseCliPath.
+        try
         {
-            Title = Loc.T(StringKeys.Picker.DefaultSyncFolderTitle),
-            AllowMultiple = false
-        });
+            var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = Loc.T(StringKeys.Picker.DefaultSyncFolderTitle),
+                AllowMultiple = false
+            });
 
-        if (folders.Count == 0)
-        {
-            return;
+            if (folders.Count == 0)
+            {
+                return;
+            }
+
+            viewModel.DefaultSyncFolder = folders[0].Path.LocalPath;
         }
-
-        viewModel.DefaultSyncFolder = folders[0].Path.LocalPath;
+        catch (Exception ex)
+        {
+            viewModel.ReportHandlerFailure(ex);
+        }
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)

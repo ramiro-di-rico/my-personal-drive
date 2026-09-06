@@ -293,23 +293,6 @@ public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
             : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
         var effectiveToken = linkedCts?.Token ?? cancellationToken;
 
-        using var cancellationRegistration = effectiveToken.Register(() =>
-        {
-            if (!process.HasExited)
-            {
-                try
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-                catch (InvalidOperationException)
-                {
-                }
-                catch (PlatformNotSupportedException)
-                {
-                }
-            }
-        });
-
         CommandStarted?.Invoke(this, new CliCommandStartedEventArgs(commandText));
 
         if (!process.Start())
@@ -318,6 +301,29 @@ public sealed class ProtonDriveCliExecutor : IProtonDriveCliExecutor
                 "The Proton Drive CLI could not be started.",
                 LocalizedText.Of(StringKeys.Error.CliCannotStart));
         }
+
+        // Registered after Start, with HasExited inside the try, and both halves matter
+        // (docs/PLAN-UX-ROUND-4.md Z3). Process.HasExited throws InvalidOperationException when no
+        // process has been started yet, and it was outside the try — so a token already cancelled
+        // when this line ran would raise that exception synchronously out of Register, and a token
+        // cancelled a moment later would raise it out of whatever thread called Cancel(), which is
+        // the UI thread on every navigation. Registering after the process exists removes both.
+        using var cancellationRegistration = effectiveToken.Register(() =>
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (PlatformNotSupportedException)
+            {
+            }
+        });
 
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();

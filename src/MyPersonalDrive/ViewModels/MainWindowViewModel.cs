@@ -1847,6 +1847,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var path = CurrentPath;
         _deepScanCts?.Cancel();
+        // Disposed, not just dropped: a replaced CancellationTokenSource keeps its registrations
+        // and its timer alive until finalization, and this one is replaced per scan
+        // (docs/PLAN-UX-ROUND-4.md Z2). BeginPreview already got this right.
+        _deepScanCts?.Dispose();
         _deepScanCts = new CancellationTokenSource();
         var token = _deepScanCts.Token;
 
@@ -3287,6 +3291,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task LoadFolderAsync(string path, bool clearSelection, bool forceFreshRemoteView = false)
     {
         _cts?.Cancel();
+        _cts?.Dispose();
         _cts = new CancellationTokenSource();
         var token = _cts.Token;
 
@@ -4339,6 +4344,14 @@ public sealed class MainWindowViewModel : ObservableObject
     /// expected InvalidOperationException the CLI layer throws. Without this, AsyncCommand's
     /// async void Execute would let the exception terminate the process.
     /// </summary>
+    /// <summary>
+    /// The same sink <see cref="AsyncCommand"/> uses, for the view's own <c>async void</c> event
+    /// handlers. They are not commands, so nothing routes their exceptions anywhere: an exception
+    /// escaping one of them terminates the process (AGENTS.md's own non-negotiable, and
+    /// docs/PLAN-UX-ROUND-4.md Z1 for the four that had no guard at all).
+    /// </summary>
+    internal void ReportHandlerFailure(Exception ex) => HandleUnexpectedError(ex);
+
     private void HandleUnexpectedError(Exception ex)
     {
         Dispatcher.UIThread.Post(() =>

@@ -118,6 +118,13 @@ public partial class MainWindow : Window
 
     private void OnConsoleResizeFinished(object? sender, PointerReleasedEventArgs e)
     {
+        // The height is persisted here rather than on every move: one write per drag, not one per
+        // pointer event (docs/PLAN-UX-ROUND-4.md Y6).
+        if (_consoleResizeLastPoint is not null && DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.CommitCommandConsoleHeight();
+        }
+
         _consoleResizeLastPoint = null;
         e.Pointer.Capture(null);
     }

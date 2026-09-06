@@ -1354,6 +1354,35 @@ public sealed class MainWindowViewModel : ObservableObject
         UpdateConnectionTelemetry();
         OnAllPropertiesChanged();
 
+        // Six string properties were stored once and stayed in the language they were written in —
+        // measured, not guessed (docs/PLAN-UX-ROUND-4.md Y7). Four of them are functions of current
+        // state and can simply be recomputed here. The other two, CliVersion and CliUpdateStatus,
+        // carry the result of a past operation and need a LocalizedText each; that is a change to
+        // the self-update flow rather than to this method, and it is tracked rather than smuggled
+        // in here.
+        CommandConsoleToggleLabel = Loc.T(IsCommandConsoleVisible ? StringKeys.Console.ToggleHide : StringKeys.Console.ToggleShow);
+
+        if (_activeOperationCount == 0)
+        {
+            ActiveCommand = Loc.T(StringKeys.Console.Idle);
+        }
+
+        if (!IsViewerVisible)
+        {
+            ViewerTitle = Loc.T(StringKeys.Viewer.Title);
+        }
+
+        // The console shows a placeholder when the buffer is empty and the buffer's own lines
+        // otherwise; only the first is translatable.
+        if (_commandLog.Lines.Count == 0)
+        {
+            CommandLogText = Loc.T(StringKeys.Console.NoCommandRunning);
+        }
+        else
+        {
+            RefreshCommandLogText();
+        }
+
         // Every child that is its own binding source has to be told separately: the notification
         // above reaches bindings whose source is this view model, and a chip's LabelWithCount and
         // a row's tooltips are bound against the chip and the row. Switching to Spanish used to
@@ -1677,8 +1706,6 @@ public sealed class MainWindowViewModel : ObservableObject
                 {
                     CommandConsoleMaxHeight = clamped + ConsoleChromeHeight;
                 }
-
-                _settings.Update(s => s.CommandConsoleHeight = clamped);
             }
         }
     }
@@ -1688,6 +1715,16 @@ public sealed class MainWindowViewModel : ObservableObject
     /// subtracted — the view passes a raw pointer delta and this owns the direction and the limits.
     /// </summary>
     public void ResizeCommandConsole(double verticalDelta) => CommandConsoleHeight -= verticalDelta;
+
+    /// <summary>
+    /// Writes the dragged height, once, when the drag ends. Not from the setter:
+    /// <see cref="AppSettingsService.Update"/> reads settings.json and writes it back, and the
+    /// setter runs on every pointer move — a single drag across the console would have been a
+    /// hundred read-modify-write cycles on the user's config file
+    /// (docs/PLAN-UX-ROUND-4.md Y6).
+    /// </summary>
+    public void CommitCommandConsoleHeight()
+        => _settings.Update(s => s.CommandConsoleHeight = _commandConsoleHeight);
 
     public double CommandConsoleMaxHeight
     {
@@ -4189,7 +4226,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 // Finished can clear ActiveCommand out from under the other's still-running
                 // Started. A single "what's active" label can't represent two concurrent
                 // operations correctly — a real per-session indicator is Phase B's job.
-                Dispatcher.UIThread.Post(() => ActiveCommand = "Idle");
+                Dispatcher.UIThread.Post(() => ActiveCommand = Loc.T(StringKeys.Console.Idle));
                 // Clamped rather than trusting Started/Finished to always balance: a session added
                 // mid-flight (AddBrowsableAccount) only starts observing from that point on, so its
                 // first-ever event could be a Finished with no matching Started counted yet.

@@ -85,14 +85,37 @@ public class MainWindowConsoleHeightTests : IDisposable
     }
 
     [Fact]
-    public void TheHeightSurvivesARestart()
+    public void TheHeightSurvivesARestart_OnceTheDragEnds()
     {
         var viewModel = Build();
         viewModel.ResizeCommandConsole(-30);
         var expected = viewModel.CommandConsoleHeight;
 
+        viewModel.CommitCommandConsoleHeight();
+
         Assert.Equal(expected, new AppSettingsService().Load().CommandConsoleHeightOrDefault());
         Assert.Equal(expected, Build().CommandConsoleHeight);
+    }
+
+    /// <summary>
+    /// AppSettingsService.Update reads settings.json and writes it back, and the drag calls the
+    /// setter on every pointer move. Persisting there made one drag a hundred read-modify-write
+    /// cycles on the user's config file (docs/PLAN-UX-ROUND-4.md Y6).
+    /// </summary>
+    [Fact]
+    public void DraggingAlone_DoesNotTouchTheConfigFile()
+    {
+        var viewModel = Build();
+        viewModel.CommitCommandConsoleHeight();
+        var settingsPath = Directory.EnumerateFiles(_tempAppData, "settings.json", SearchOption.AllDirectories).Single();
+        var writtenAt = File.GetLastWriteTimeUtc(settingsPath);
+
+        for (var step = 0; step < 20; step++)
+        {
+            viewModel.ResizeCommandConsole(-2);
+        }
+
+        Assert.Equal(writtenAt, File.GetLastWriteTimeUtc(settingsPath));
     }
 
     /// <summary>

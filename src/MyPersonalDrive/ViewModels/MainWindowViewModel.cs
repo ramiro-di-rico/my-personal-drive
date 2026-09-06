@@ -136,6 +136,16 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _filterSummary = string.Empty;
     private bool _sortDescending;
     private static string UnknownCliVersion => Localizer.Instance.T(StringKeys.Common.Unknown);
+
+    /// <summary>
+    /// The unrendered forms behind <see cref="CliVersion"/> and <see cref="CliUpdateStatus"/>. Both
+    /// carry the result of a past operation and used to be stored as rendered prose, so both stayed
+    /// in whichever language was current when the check ran (docs/PLAN-UX-ROUND-4.md Y7). Same shape
+    /// as the status line's own <c>_statusText</c>.
+    /// </summary>
+    private LocalizedText _cliVersionText = LocalizedText.Of(StringKeys.Common.Unknown);
+
+    private LocalizedText _cliUpdateStatusText = LocalizedText.Of(StringKeys.CliUpdate.Unchecked);
     private string _cliVersion = UnknownCliVersion;
     private bool _isCheckingCliVersion;
     private readonly ICliReleaseFeed? _releaseFeed;
@@ -674,6 +684,21 @@ public sealed class MainWindowViewModel : ObservableObject
     /// What `proton-drive --version` last reported, or why it could not be read. Shown as-is in the
     /// settings view; the CLI owns the wording, this view model does not reformat it.
     /// </summary>
+    private void SetCliVersion(LocalizedText text)
+    {
+        _cliVersionText = text;
+        CliVersion = text.Render();
+    }
+
+    private void SetCliUpdateStatus(LocalizedText text)
+    {
+        _cliUpdateStatusText = text;
+        CliUpdateStatus = text.Render();
+    }
+
+    /// <summary>Whether the installed version is still the "not checked yet" placeholder. Compared on the key, not on the rendered prose — that comparison silently stopped matching after a language change.</summary>
+    private bool CliVersionIsUnknown => _cliVersionText.Key == StringKeys.Common.Unknown;
+
     public string CliVersion
     {
         get => _cliVersion;
@@ -1188,10 +1213,10 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 // A different executable is a different version; what was read no longer applies,
                 // and neither does an update offer that was computed against the old one.
-                CliVersion = UnknownCliVersion;
+                SetCliVersion(LocalizedText.Of(StringKeys.Common.Unknown));
                 _availableRelease = null;
                 IsCliUpdateAvailable = false;
-                CliUpdateStatus = Loc.T(StringKeys.CliUpdate.Unchecked);
+                SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.Unchecked));
                 PersistSettings();
                 RaiseCommandStates();
             }
@@ -1377,6 +1402,8 @@ public sealed class MainWindowViewModel : ObservableObject
         // carry the result of a past operation and need a LocalizedText each; that is a change to
         // the self-update flow rather than to this method, and it is tracked rather than smuggled
         // in here.
+        CliVersion = _cliVersionText.Render();
+        CliUpdateStatus = _cliUpdateStatusText.Render();
         CommandConsoleToggleLabel = Loc.T(IsCommandConsoleVisible ? StringKeys.Console.ToggleHide : StringKeys.Console.ToggleShow);
 
         if (_activeOperationCount == 0)
@@ -3999,7 +4026,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         // Read it on the way in, so the settings view is never showing a stale or empty version,
         // but only once per configured path — the CLI costs a whole process launch (~3.5s cold).
-        if (CliVersion == UnknownCliVersion && !string.IsNullOrWhiteSpace(CliPath))
+        if (CliVersionIsUnknown && !string.IsNullOrWhiteSpace(CliPath))
         {
             await CheckCliVersionAsync();
         }
@@ -4018,19 +4045,19 @@ public sealed class MainWindowViewModel : ObservableObject
             var version = _provider.Diagnostics is not null
                 ? await _provider.Diagnostics.GetVersionAsync()
                 : null;
-            CliVersion = string.IsNullOrWhiteSpace(version)
-                ? Loc.T(StringKeys.CliVersion.NoVersionReported)
-                : version;
+            SetCliVersion(string.IsNullOrWhiteSpace(version)
+                ? LocalizedText.Of(StringKeys.CliVersion.NoVersionReported)
+                : LocalizedText.Verbatim(version));
         }
         catch (InvalidOperationException ex)
         {
             // Includes DriveException. The CLI's own text is the most useful thing on screen here:
             // if `--version` is not the flag this build understands, the user sees exactly that.
-            CliVersion = Loc.F(StringKeys.CliVersion.Unavailable, ex.DescribeForUser().Render());
+            SetCliVersion(LocalizedText.Of(StringKeys.CliVersion.Unavailable, ex.DescribeForUser().Render()));
         }
         catch (FileNotFoundException ex)
         {
-            CliVersion = Loc.F(StringKeys.CliVersion.Unavailable, ex.DescribeForUser().Render());
+            SetCliVersion(LocalizedText.Of(StringKeys.CliVersion.Unavailable, ex.DescribeForUser().Render()));
         }
         finally
         {
@@ -4048,7 +4075,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (_releaseFeed is null)
         {
-            CliUpdateStatus = Loc.T(StringKeys.CliUpdate.Unavailable);
+            SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.Unavailable));
             return;
         }
 
@@ -4057,7 +4084,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             // The comparison needs a version to compare against, and the user may never have
             // opened the settings view this session.
-            if (CliVersion == UnknownCliVersion && !string.IsNullOrWhiteSpace(CliPath))
+            if (CliVersionIsUnknown && !string.IsNullOrWhiteSpace(CliPath))
             {
                 await CheckCliVersionAsync();
             }
@@ -4067,7 +4094,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 _availableRelease = null;
                 IsCliUpdateAvailable = false;
-                CliUpdateStatus = Loc.T(StringKeys.CliUpdate.NoBuildForPlatform);
+                SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.NoBuildForPlatform));
                 return;
             }
 
@@ -4076,13 +4103,13 @@ public sealed class MainWindowViewModel : ObservableObject
                 case CliUpdateAvailability.UpdateAvailable:
                     _availableRelease = release;
                     IsCliUpdateAvailable = true;
-                    CliUpdateStatus = Loc.F(StringKeys.CliUpdate.Available, release.Version, release.ReleaseDate);
+                    SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.Available, release.Version, release.ReleaseDate));
                     break;
 
                 case CliUpdateAvailability.UpToDate:
                     _availableRelease = null;
                     IsCliUpdateAvailable = false;
-                    CliUpdateStatus = Loc.F(StringKeys.CliUpdate.UpToDate, release.Version);
+                    SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.UpToDate, release.Version));
                     break;
 
                 default:
@@ -4091,7 +4118,7 @@ public sealed class MainWindowViewModel : ObservableObject
                     // than not updating.
                     _availableRelease = null;
                     IsCliUpdateAvailable = false;
-                    CliUpdateStatus = Loc.F(StringKeys.CliUpdate.InstalledVersionUnknown, release.Version);
+                    SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.InstalledVersionUnknown, release.Version));
                     break;
             }
         }
@@ -4099,7 +4126,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             _availableRelease = null;
             IsCliUpdateAvailable = false;
-            CliUpdateStatus = Loc.F(StringKeys.CliUpdate.ManifestUnreachable, ex.Message);
+            SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.ManifestUnreachable, ex.Message));
         }
         finally
         {
@@ -4124,35 +4151,35 @@ public sealed class MainWindowViewModel : ObservableObject
         // mid-operation, which is not a state worth reasoning about.
         if (_isSyncInProgress())
         {
-            CliUpdateStatus = Loc.T(StringKeys.CliUpdate.SyncInProgress);
+            SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.SyncInProgress));
             return;
         }
 
         IsCliUpdateBusy = true;
         try
         {
-            CliUpdateStatus = Loc.F(StringKeys.CliUpdate.Downloading, release.Version);
+            SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.Downloading, release.Version));
             await _updateInstaller.InstallAsync(
                 release,
                 CliPath,
                 onProgress: bytes => Dispatcher.UIThread.Post(
-                    () => CliUpdateStatus = Loc.F(StringKeys.CliUpdate.DownloadingWithSize, release.Version, bytes / (1024 * 1024))));
+                    () => SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.DownloadingWithSize, release.Version, bytes / (1024 * 1024)))));
 
             _availableRelease = null;
             IsCliUpdateAvailable = false;
-            CliVersion = UnknownCliVersion;
+            SetCliVersion(LocalizedText.Of(StringKeys.Common.Unknown));
             await CheckCliVersionAsync();
-            CliUpdateStatus = Loc.F(StringKeys.CliUpdate.Done, release.Version);
+            SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.Done, release.Version));
         }
         catch (CliUpdateException ex)
         {
             // Includes the checksum mismatch, which leaves the old binary in place by design.
-            CliUpdateStatus = ex.Message;
+            SetCliUpdateStatus(LocalizedText.Verbatim(ex.Message));
             IsWarning = true;
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or TaskCanceledException)
         {
-            CliUpdateStatus = Loc.F(StringKeys.CliUpdate.Failed, ex.DescribeForUser().Render());
+            SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.Failed, ex.DescribeForUser().Render()));
             IsWarning = true;
         }
         finally

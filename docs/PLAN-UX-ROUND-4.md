@@ -53,9 +53,9 @@
       the viewer's zoom slider called it per intermediate value. Both commit once per gesture now —
       see [§6](#6-y6--continuous-controls-rewrote-settingsjson-on-every-tick).
 - [x] **Y7 — Six labels never followed the language picker.** Measured, not read: build the window
-      in English and switch it, build another in Spanish, compare every string property. Four fixed;
-      `CliVersion` and `CliUpdateStatus` need a `LocalizedText` each and are allowlisted with a
-      reason — see [§7](#7-y7--six-labels-never-followed-the-language-picker).
+      in English and switch it, build another in Spanish, compare every string property. All six
+      fixed, the gate's allowlist is empty, and two comparisons against rendered prose went with
+      them — see [§7](#7-y7--six-labels-never-followed-the-language-picker).
 - [ ] **Y8 — The properties dialog's buttons sit where the layout put them, not where they belong.**
       Cosmetic, from screenshot 8 — see [§8](#8-y8--the-properties-dialogs-buttons).
 - [x] **Z1–Z3 — a process-kill path, two leaked cancellation sources and a race in the CLI
@@ -293,15 +293,15 @@ gate is `LanguageSwitchStalenessTests`, which reflects over every string propert
 two view models — no list to keep current, and it cannot be satisfied by a property that happens to
 read correctly.
 
-**Not done.** `CliVersion` and `CliUpdateStatus` carry the result of a past operation, so each needs
-a `LocalizedText` field re-rendered on a language change, the way `StatusMessage` already works.
-That is fifteen assignment sites inside the CLI self-update flow. They are in the gate's allowlist,
-named, with this section as the reason.
+**Done, including the two that were allowlisted.** `CliVersion` and `CliUpdateStatus` each have a
+`LocalizedText` behind them now — `_cliVersionText`, `_cliUpdateStatusText` — set through
+`SetCliVersion` / `SetCliUpdateStatus` at all twenty assignment sites and re-rendered on a language
+change, the way `StatusMessage` already worked. The gate's allowlist is empty.
 
-Related, same fix: `:3963` and `:4021` compare `CliVersion == UnknownCliVersion` — a stored display
-string against a freshly rendered one. If the language changed in between, the comparison silently
-stops matching and the version check re-runs (or does not) for the wrong reason. Control flow should
-not depend on rendered prose.
+The comparisons went with them. `CliVersion == UnknownCliVersion` compared a stored display string
+against a freshly rendered one, so a language change between the two silently stopped it matching
+and the version check ran (or did not) for the wrong reason. It is `CliVersionIsUnknown` now, which
+compares the key. Control flow should not depend on rendered prose.
 
 ## 8. Y8 — The properties dialog's buttons
 

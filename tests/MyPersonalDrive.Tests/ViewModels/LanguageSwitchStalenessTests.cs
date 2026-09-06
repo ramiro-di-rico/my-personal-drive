@@ -35,17 +35,12 @@ public class LanguageSwitchStalenessTests : IDisposable
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"mypersonaldrive-stale-{Guid.NewGuid():N}.db");
 
     /// <summary>
-    /// Known stale, tracked as docs/PLAN-UX-ROUND-4.md Y7 rather than fixed here: both carry the
-    /// result of a past operation, so each needs a <see cref="LocalizedText"/> of its own, and
-    /// threading those through the CLI self-update flow is a change to that flow — not something to
-    /// smuggle into the commit that added this test. Remove an entry when it is fixed; do not add
-    /// one without a tracked reason.
+    /// Empty, and worth keeping empty. It held CliVersion and CliUpdateStatus while their fix — a
+    /// LocalizedText each, threaded through the CLI self-update flow — was tracked as
+    /// docs/PLAN-UX-ROUND-4.md Y7. Do not add an entry without a tracked reason: an allowlist is
+    /// how a gate stops being one.
     /// </summary>
-    private static readonly HashSet<string> KnownStale = new(StringComparer.Ordinal)
-    {
-        nameof(MainWindowViewModel.CliVersion),
-        nameof(MainWindowViewModel.CliUpdateStatus),
-    };
+    private static readonly HashSet<string> KnownStale = new(StringComparer.Ordinal);
 
     public LanguageSwitchStalenessTests()
     {

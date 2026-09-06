@@ -84,12 +84,22 @@
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
       <Setter Property="Padding" Value="0" />
+      <!-- Rows fill the pane. Without this the list scrolls horizontally, which means its panel
+           measures every row against infinite width and each row ends up as wide as its own
+           content: a dead strip to the right of the listing, a hover highlight that stops in the
+           middle of the row, and a local pane whose Size and Modified columns land at a different
+           x on every line instead of lining up. The two tile modes never had this because their
+           own ScrollViewers disable it explicitly. Names are trimmed with an ellipsis, so nothing
+           needs to scroll sideways. -->
+      <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
     </Style>
     <Style Selector="ListBox.driveListing ListBoxItem">
       <Setter Property="Padding" Value="0" />
       <Setter Property="Margin" Value="0" />
       <Setter Property="MinHeight" Value="0" />
       <Setter Property="Background" Value="Transparent" />
+      <!-- And the row's own content fills the item it sits in, rather than hugging its text. -->
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
     </Style>
     <Style Selector="ListBox.driveListing ListBoxItem:selected /template/ ContentPresenter">
       <Setter Property="Background" Value="Transparent" />

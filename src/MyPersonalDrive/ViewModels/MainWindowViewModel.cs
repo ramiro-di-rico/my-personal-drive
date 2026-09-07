@@ -69,16 +69,6 @@ public sealed class MainWindowViewModel : ObservableObject
     // Doubled from CommandLogBuffer's own default (200): with two provider sessions able to be
     // active at once (P7), one interleaved buffer now serves two sources, and a burst from one
     // must not push the other's entire recent history out.
-    private readonly CommandLogBuffer _commandLog = new(maxLines: CommandLogBuffer.MaxLines * 2);
-
-    /// <summary>
-    /// Guards <see cref="_pendingCommandLines"/>, which the CLI executor's events fill from whatever
-    /// thread the process I/O happened on — and now from up to eight of them at once, since read-only
-    /// commands run concurrently.
-    /// </summary>
-    private readonly object _commandLogGate = new();
-    private readonly List<string> _pendingCommandLines = new();
-    private bool _commandLogFlushScheduled;
     private string _cliPath;
     private string _oneDriveClientId;
     private string _googleDriveClientId;
@@ -88,19 +78,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _hasRenderedListing;
     private bool _isLoading;
     private bool _isAuthenticated;
-    private bool _isCommandConsoleVisible = true;
-    private int _activeOperationCount;
-    private string? _lastLogLine;
-    private bool _showOnlyWarningsAndErrors;
-    private string _logSearchText = string.Empty;
-    private double _commandConsoleMaxHeight = 180;
-    private double _commandConsoleHeight = AppSettings.DefaultCommandConsoleHeight;
-    private double _commandConsoleOpacity = 1;
-    private bool _commandConsoleHitTestVisible = true;
-    private string _activeCommand = Localizer.Instance.T(StringKeys.Console.Idle);
-    private string _commandLogText = Localizer.Instance.T(StringKeys.Console.NoCommandRunning);
-    private string _commandConsoleToggleLabel = Localizer.Instance.T(StringKeys.Console.ToggleHide);
-    private string _commandConsoleToggleGlyph = "▼";
     private string _selectedName = Localizer.Instance.T(StringKeys.Common.None);
     private string _selectedKind = Localizer.Instance.T(StringKeys.Common.None);
     private string _selectedPath = Localizer.Instance.T(StringKeys.Common.None);
@@ -406,6 +383,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _imagePreviewLoader = imagePreviewLoader;
         _pdfPreviewLoader = pdfPreviewLoader;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        Console = new ActivityConsoleViewModel(settings, _status, HandleUnexpectedError);
         CliUpdate = new CliUpdateViewModel(
             () => _provider,
             releaseFeed,
@@ -461,26 +439,11 @@ public sealed class MainWindowViewModel : ObservableObject
         _defaultSyncFolder = appSettings.DefaultSyncFolder;
         _isStatusPanelVisible = appSettings.ShowStatusPanel;
         _isLocalExplorerPanelVisible = appSettings.ShowLocalExplorerPanel;
-        _isCommandConsoleVisible = appSettings.ShowCommandConsole;
-        _commandConsoleHeight = appSettings.CommandConsoleHeightOrDefault();
-        _commandConsoleMaxHeight = _commandConsoleHeight + ConsoleChromeHeight;
-        if (!_isCommandConsoleVisible)
-        {
-            // Mirrors IsCommandConsoleVisible's setter directly rather than going through it: this
-            // runs before AsyncCommand fields exist, and that setter's RaiseCommandStates() would
-            // null-ref against them. No PropertyChanged subscriber exists yet either, so there's
-            // nothing SetProperty would have notified at this point regardless.
-            _commandConsoleMaxHeight = 0;
-            _commandConsoleOpacity = 0;
-            _commandConsoleHitTestVisible = false;
-            _commandConsoleToggleLabel = Loc.T(StringKeys.Console.ToggleShow);
-            _commandConsoleToggleGlyph = "▲";
-        }
         // The browsed provider's own activity is tagged like any other session's, so interleaved
         // lines from ObserveAdditionalProviderActivity (P7, both providers active at once) read
         // consistently regardless of which one happens to be on screen.
-        _provider.Activity += (_, activity) => OnActivity(_provider.DisplayName, activity);
-        _provider.ListingParseWarning += (_, message) => OnListingParseWarning(_provider.DisplayName, message);
+        _provider.Activity += (_, activity) => Console.OnActivity(_provider.DisplayName, activity);
+        _provider.ListingParseWarning += (_, message) => Console.OnListingParseWarning(_provider.DisplayName, message);
 
         RootItems = new ObservableCollection<DriveNodeViewModel>();
         // Selecting a "largest item" row must behave exactly like clicking that row in the listing,
@@ -497,11 +460,7 @@ public sealed class MainWindowViewModel : ObservableObject
         BackCommand = new AsyncCommand(GoBackAsync, CanGoBack, HandleUnexpectedError);
         UploadCommand = new AsyncCommand(UploadAsync, CanUpload, HandleUnexpectedError);
         CreateFolderCommand = new AsyncCommand(CreateFolderAsync, CanCreateFolder, HandleUnexpectedError);
-        ToggleCommandConsoleCommand = new AsyncCommand(ToggleCommandConsoleAsync, onError: HandleUnexpectedError);
         ToggleLocalExplorerPanelCommand = new AsyncCommand(ToggleLocalExplorerPanelAsync, onError: HandleUnexpectedError);
-        ToggleLogFilterCommand = new AsyncCommand(ToggleLogFilterAsync, onError: HandleUnexpectedError);
-        DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity, HandleUnexpectedError);
-        ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, HandleUnexpectedError);
         ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
         ClearSearchCommand = new AsyncCommand(ClearSearchAsync, () => HasSearchText, HandleUnexpectedError);
         ClearFiltersCommand = new AsyncCommand(ClearFiltersAsync, () => HasActiveFilters, HandleUnexpectedError);
@@ -580,6 +539,12 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public CliUpdateViewModel CliUpdate { get; }
 
+    /// <summary>
+    /// The CLI activity console (docs/PLAN-UX-ROUND-4.md Z5 step 2). Consumes provider activity and
+    /// produces text; it never touches a provider itself.
+    /// </summary>
+    public ActivityConsoleViewModel Console { get; }
+
     public TransferQueueViewModel TransferQueue { get; } = new();
 
     /// <summary>
@@ -618,15 +583,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public AsyncCommand CreateFolderCommand { get; }
 
-    public AsyncCommand ToggleCommandConsoleCommand { get; }
-
     public AsyncCommand ToggleLocalExplorerPanelCommand { get; }
-
-    public AsyncCommand ToggleLogFilterCommand { get; }
-
-    public AsyncCommand DownloadActivityCommand { get; }
-
-    public AsyncCommand ClearActivityCommand { get; }
 
     public AsyncCommand ShowExplorerCommand { get; }
 
@@ -1087,8 +1044,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public Func<Task<string?>>? RequestDownloadFolderAsync { get; set; }
 
-    public Func<Task<string?>>? RequestSaveActivityAsync { get; set; }
-
     public Func<string, Task<bool>>? RequestConfirmationAsync { get; set; }
 
     public Func<string, Task>? RequestCopyToClipboardAsync { get; set; }
@@ -1269,35 +1224,18 @@ public sealed class MainWindowViewModel : ObservableObject
         UpdateConnectionTelemetry();
         OnAllPropertiesChanged();
 
-        // Six string properties were stored once and stayed in the language they were written in —
-        // measured, not guessed (docs/PLAN-UX-ROUND-4.md Y7). Four of them are functions of current
-        // state and can simply be recomputed here. The other two, CliVersion and CliUpdateStatus,
-        // carry the result of a past operation and need a LocalizedText each; that is a change to
-        // the self-update flow rather than to this method, and it is tracked rather than smuggled
-        // in here.
+        // Every child that owns localized state re-derives it. Six string properties were stored
+        // once and stayed in the language they were written in until this existed — measured, not
+        // guessed (docs/PLAN-UX-ROUND-4.md Y7).
         CliUpdate.OnLanguageChanged();
         Metrics.OnLanguageChanged();
-        CommandConsoleToggleLabel = Loc.T(IsCommandConsoleVisible ? StringKeys.Console.ToggleHide : StringKeys.Console.ToggleShow);
+        Console.OnLanguageChanged();
 
-        if (_activeOperationCount == 0)
-        {
-            ActiveCommand = Loc.T(StringKeys.Console.Idle);
-        }
-
+        // The viewer is still this class's (Z5 step 3 moves it); its title is a placeholder while
+        // nothing is open, and a placeholder is a label.
         if (!IsViewerVisible)
         {
             ViewerTitle = Loc.T(StringKeys.Viewer.Title);
-        }
-
-        // The console shows a placeholder when the buffer is empty and the buffer's own lines
-        // otherwise; only the first is translatable.
-        if (_commandLog.Lines.Count == 0)
-        {
-            CommandLogText = Loc.T(StringKeys.Console.NoCommandRunning);
-        }
-        else
-        {
-            RefreshCommandLogText();
         }
 
         // Every child that is its own binding source has to be told separately: the notification
@@ -1332,78 +1270,15 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    public string ActiveCommand
-    {
-        get => _activeCommand;
-        private set => SetProperty(ref _activeCommand, value);
-    }
-
-    public string CommandLogText
-    {
-        get => _commandLogText;
-        private set => SetProperty(ref _commandLogText, value);
-    }
-
-    /// <summary>
-    /// How many CLI/Graph operations are currently mid-flight, across every active provider
-    /// session — a real count derived from Started/Finished pairs in <see cref="OnActivity"/>,
-    /// unlike <see cref="ActiveCommand"/> (a single label that Task 4's own comment on
-    /// <see cref="OnActivity"/> notes can't represent two concurrent operations correctly). Shown
-    /// in the floating status line while the console is collapsed.
-    /// </summary>
-    public int ActiveOperationCount
-    {
-        get => _activeOperationCount;
-        private set
-        {
-            if (SetProperty(ref _activeOperationCount, value))
-            {
-                OnPropertyChanged(nameof(ActiveOperationsText));
-            }
-        }
-    }
-
     /// <summary>
     /// The floating status line's count. Was a <c>StringFormat</c> in the markup reading
     /// "{0} operación(es) activa(s)" — a Spanish-specific plural hack that no other language can
     /// reproduce, and which a XAML format string has no way to express. Plural selection belongs
     /// here (docs/PLAN-I18N.md §5).
     /// </summary>
-    public string ActiveOperationsText => Loc.Plural(StringKeys.Console.ActiveOperations, ActiveOperationCount);
-
     /// <summary>The most recent line added to the log, regardless of the search/warnings filter below — always the real last event, not whatever the filter happens to be hiding.</summary>
-    public string? LastLogLine
-    {
-        get => _lastLogLine;
-        private set => SetProperty(ref _lastLogLine, value);
-    }
-
     /// <summary>Task 4's "Filter: Toggle error/warning-only log views" — matches lines carrying this app's own <c>[warn]</c>/<c>[err]</c>/<c>[fail]</c> markers (see <see cref="OnActivity"/>/<see cref="HandleUnexpectedError"/>).</summary>
-    public bool ShowOnlyWarningsAndErrors
-    {
-        get => _showOnlyWarningsAndErrors;
-        set
-        {
-            if (SetProperty(ref _showOnlyWarningsAndErrors, value))
-            {
-                RefreshCommandLogText();
-            }
-        }
-    }
-
     /// <summary>Task 4's log search input — a live, case-insensitive substring filter over the buffered lines.</summary>
-    public string LogSearchText
-    {
-        get => _logSearchText;
-        set
-        {
-            if (SetProperty(ref _logSearchText, value))
-            {
-                RefreshCommandLogText();
-            }
-        }
-    }
-
     public string SelectedName
     {
         get => _selectedName;
@@ -1585,100 +1460,9 @@ public sealed class MainWindowViewModel : ObservableObject
         ? string.Empty
         : Loc.Plural(StringKeys.Explorer.SelectionCount, SelectedCount);
 
-    public bool IsCommandConsoleVisible
-    {
-        get => _isCommandConsoleVisible;
-        private set
-        {
-            if (SetProperty(ref _isCommandConsoleVisible, value))
-            {
-                CommandConsoleMaxHeight = value ? _commandConsoleHeight + ConsoleChromeHeight : 0;
-                CommandConsoleOpacity = value ? 1 : 0;
-                CommandConsoleHitTestVisible = value;
-                CommandConsoleToggleLabel = Loc.T(value ? StringKeys.Console.ToggleHide : StringKeys.Console.ToggleShow);
-                CommandConsoleToggleGlyph = value ? "▼" : "▲";
-                _settings.Update(s => s.ShowCommandConsole = value);
-                RaiseCommandStates();
-            }
-        }
-    }
-
-    /// <summary>
-    /// What the console's own padding and border add on top of the scrolling body, so the collapse
-    /// animation's MaxHeight and the dragged body height stay in step.
-    /// </summary>
-    private const double ConsoleChromeHeight = 40;
-
-    /// <summary>
-    /// The console body's height, dragged by the handle above it (docs/PLAN-UX-ROUND-3.md X7).
-    /// Round 1's Task 4 asked for this and only the collapse toggle shipped; the body has been a
-    /// hard-coded 140px ever since. Persisted, so the size the user leaves it at is next launch's.
-    /// </summary>
-    public double CommandConsoleHeight
-    {
-        get => _commandConsoleHeight;
-        private set
-        {
-            var clamped = Math.Clamp(value, AppSettings.MinCommandConsoleHeight, AppSettings.MaxCommandConsoleHeight);
-            if (SetProperty(ref _commandConsoleHeight, clamped))
-            {
-                if (IsCommandConsoleVisible)
-                {
-                    CommandConsoleMaxHeight = clamped + ConsoleChromeHeight;
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Applies one drag step. Dragging the handle up makes the console taller, so the delta is
-    /// subtracted — the view passes a raw pointer delta and this owns the direction and the limits.
-    /// </summary>
-    public void ResizeCommandConsole(double verticalDelta) => CommandConsoleHeight -= verticalDelta;
-
-    /// <summary>
-    /// Writes the dragged height, once, when the drag ends. Not from the setter:
-    /// <see cref="AppSettingsService.Update"/> reads settings.json and writes it back, and the
-    /// setter runs on every pointer move — a single drag across the console would have been a
-    /// hundred read-modify-write cycles on the user's config file
-    /// (docs/PLAN-UX-ROUND-4.md Y6).
-    /// </summary>
-    public void CommitCommandConsoleHeight()
-        => _settings.Update(s => s.CommandConsoleHeight = _commandConsoleHeight);
-
     /// <summary>Writes the zoom once, when the gesture that changed it ends. See <see cref="ViewerZoom"/>.</summary>
     public void CommitViewerZoom()
         => _settings.Update(s => s.ViewerZoom = _viewerZoom);
-
-    public double CommandConsoleMaxHeight
-    {
-        get => _commandConsoleMaxHeight;
-        private set => SetProperty(ref _commandConsoleMaxHeight, value);
-    }
-
-    public double CommandConsoleOpacity
-    {
-        get => _commandConsoleOpacity;
-        private set => SetProperty(ref _commandConsoleOpacity, value);
-    }
-
-    public bool CommandConsoleHitTestVisible
-    {
-        get => _commandConsoleHitTestVisible;
-        private set => SetProperty(ref _commandConsoleHitTestVisible, value);
-    }
-
-    public string CommandConsoleToggleLabel
-    {
-        get => _commandConsoleToggleLabel;
-        private set => SetProperty(ref _commandConsoleToggleLabel, value);
-    }
-
-    public string CommandConsoleToggleGlyph
-    {
-        get => _commandConsoleToggleGlyph;
-        private set => SetProperty(ref _commandConsoleToggleGlyph, value);
-    }
 
     /// <summary>
     /// Whether the right-hand Status/Metrics sidebar is shown. Persisted: the value the user last
@@ -1725,7 +1509,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            QueueCommandLine($"[warn] Sync startup recovery failed: {ex.Message}");
+            Console.Append($"[warn] Sync startup recovery failed: {ex.Message}");
         }
 
         await LocalExplorer.InitializeAsync();
@@ -1865,10 +1649,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool CanUpload() => !IsLoading && IsAuthenticated;
 
     private bool CanCreateFolder() => !IsLoading && IsAuthenticated;
-
-    private bool CanDownloadActivity() => _commandLog.Count > 0;
-
-    private bool CanClearActivity() => _commandLog.Count > 0;
 
     private async Task AuthenticateAsync()
     {
@@ -3759,8 +3539,6 @@ public sealed class MainWindowViewModel : ObservableObject
         BackCommand.RaiseCanExecuteChanged();
         UploadCommand.RaiseCanExecuteChanged();
         CreateFolderCommand.RaiseCanExecuteChanged();
-        DownloadActivityCommand.RaiseCanExecuteChanged();
-        ClearActivityCommand.RaiseCanExecuteChanged();
         CliUpdate.RaiseCommandStates();
         ViewSelectedFileCommand.RaiseCanExecuteChanged();
         SwitchToProtonCommand.RaiseCanExecuteChanged();
@@ -3770,21 +3548,9 @@ public sealed class MainWindowViewModel : ObservableObject
         SwitchToS3Command.RaiseCanExecuteChanged();
     }
 
-    private async Task ToggleCommandConsoleAsync()
-    {
-        IsCommandConsoleVisible = !IsCommandConsoleVisible;
-        await Task.CompletedTask;
-    }
-
     private async Task ToggleLocalExplorerPanelAsync()
     {
         IsLocalExplorerPanelVisible = !IsLocalExplorerPanelVisible;
-        await Task.CompletedTask;
-    }
-
-    private async Task ToggleLogFilterAsync()
-    {
-        ShowOnlyWarningsAndErrors = !ShowOnlyWarningsAndErrors;
         await Task.CompletedTask;
     }
 
@@ -3904,52 +3670,6 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Compares the installed CLI against Proton's published Stable release. This is the app's only
-    /// outbound network call; everything else goes through the CLI process.
-    /// </summary>
-    private async Task DownloadActivityAsync()
-    {
-        var picker = RequestSaveActivityAsync;
-        if (picker is null)
-        {
-            SetStatus(StringKeys.Status.ActivityUnavailable);
-            return;
-        }
-
-        var path = await picker();
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return;
-        }
-
-        try
-        {
-            await File.WriteAllTextAsync(path, CommandLogText);
-            SetStatus(StringKeys.Status.ActivitySaved, path);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            SetStatus(StringKeys.Status.ActivitySaveFailed, path, ex.Message);
-            IsWarning = true;
-        }
-    }
-
-    private async Task ClearActivityAsync()
-    {
-        lock (_commandLogGate)
-        {
-            _pendingCommandLines.Clear();
-        }
-
-        _commandLog.Clear();
-        CommandLogText = Loc.T(StringKeys.Console.NoCommandRunning);
-        ActiveCommand = Loc.T(StringKeys.Console.Idle);
-        LastLogLine = null;
-        RaiseCommandStates();
-        await Task.CompletedTask;
-    }
-
-    /// <summary>
     /// Lets the console show activity from a provider session other than the one this view model
     /// browses — the composition root calls this once per additional active session (P7: Proton
     /// and OneDrive can both be configured and syncing at once, even though only one is on screen
@@ -3958,137 +3678,12 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public void ObserveAdditionalProviderActivity(string accountLabel, ICloudDriveProvider provider)
     {
-        provider.Activity += (_, activity) => OnActivity(accountLabel, activity);
-        provider.ListingParseWarning += (_, message) => OnListingParseWarning(accountLabel, message);
-    }
-
-    private void OnActivity(string accountLabel, ProviderActivity activity)
-    {
-        switch (activity.Kind)
-        {
-            case ActivityKind.Started:
-                Dispatcher.UIThread.Post(() => ActiveCommand = $"[{accountLabel}] {activity.Label}");
-                Dispatcher.UIThread.Post(() => ActiveOperationCount++);
-                QueueCommandLine($"[{accountLabel}] > {activity.Label}");
-                break;
-
-            case ActivityKind.Output:
-                QueueCommandLine($"[{accountLabel}] " + (activity.IsError ? $"[err] {activity.Text}" : activity.Text ?? string.Empty));
-                break;
-
-            case ActivityKind.Finished:
-                QueueCommandLine($"[{accountLabel}] " + (activity.IsError ? $"[fail] exit {activity.ExitCode}" : $"[done] exit {activity.ExitCode}"));
-                // Unconditional, same as before P7: with two sessions active, one session's
-                // Finished can clear ActiveCommand out from under the other's still-running
-                // Started. A single "what's active" label can't represent two concurrent
-                // operations correctly — a real per-session indicator is Phase B's job.
-                Dispatcher.UIThread.Post(() => ActiveCommand = Loc.T(StringKeys.Console.Idle));
-                // Clamped rather than trusting Started/Finished to always balance: a session added
-                // mid-flight (AddBrowsableAccount) only starts observing from that point on, so its
-                // first-ever event could be a Finished with no matching Started counted yet.
-                Dispatcher.UIThread.Post(() => ActiveOperationCount = Math.Max(0, ActiveOperationCount - 1));
-                break;
-        }
+        provider.Activity += (_, activity) => Console.OnActivity(accountLabel, activity);
+        provider.ListingParseWarning += (_, message) => Console.OnListingParseWarning(accountLabel, message);
     }
 
     private void OnListingParseWarning(string accountLabel, string message)
-        => QueueCommandLine($"[{accountLabel}] [warn] {message}");
-
-    /// <summary>
-    /// Buffers a console line and makes sure exactly one flush is pending.
-    ///
-    /// The old version posted to the UI thread per line and rebuilt the whole console text there,
-    /// which re-shaped ~300 KB of text through HarfBuzz on every single line (see
-    /// <see cref="CommandLogBuffer"/> for the captured stack). Now the lines accumulate and one
-    /// flush drains them, at <see cref="DispatcherPriority.Background"/> so it runs *after* input and
-    /// layout — a burst of CLI output can no longer outrun the user's clicks.
-    /// </summary>
-    private void QueueCommandLine(string line)
-    {
-        lock (_commandLogGate)
-        {
-            _pendingCommandLines.Add(line);
-            if (_commandLogFlushScheduled)
-            {
-                return;
-            }
-
-            _commandLogFlushScheduled = true;
-        }
-
-        Dispatcher.UIThread.Post(FlushCommandLog, DispatcherPriority.Background);
-    }
-
-    private void FlushCommandLog()
-    {
-        List<string> batch;
-        lock (_commandLogGate)
-        {
-            _commandLogFlushScheduled = false;
-            if (_pendingCommandLines.Count == 0)
-            {
-                return;
-            }
-
-            batch = [.. _pendingCommandLines];
-            _pendingCommandLines.Clear();
-        }
-
-        var countBefore = _commandLog.Count;
-        _commandLog.AddRange(batch);
-        LastLogLine = batch[^1];
-        RefreshCommandLogText();
-
-        // Only the two activity commands depend on the line count, and only on the empty/non-empty
-        // transition. Re-raising all thirteen on every line was pure waste on the UI thread.
-        if (countBefore == 0 && _commandLog.Count > 0)
-        {
-            DownloadActivityCommand.RaiseCanExecuteChanged();
-            ClearActivityCommand.RaiseCanExecuteChanged();
-        }
-    }
-
-    /// <summary>
-    /// Re-renders <see cref="CommandLogText"/> from the buffer plus whatever the warnings-only
-    /// filter and search box currently ask for — called both when new lines arrive and when either
-    /// filter input changes, so the two stay in sync without keeping a second copy of the text.
-    /// </summary>
-    private void RefreshCommandLogText()
-    {
-        IEnumerable<string> lines = _commandLog.Lines;
-
-        if (_showOnlyWarningsAndErrors)
-        {
-            lines = lines.Where(line => line.Contains("[warn]", StringComparison.Ordinal)
-                || line.Contains("[err]", StringComparison.Ordinal)
-                || line.Contains("[fail]", StringComparison.Ordinal));
-        }
-
-        if (!string.IsNullOrWhiteSpace(_logSearchText))
-        {
-            lines = lines.Where(line => line.Contains(_logSearchText, StringComparison.OrdinalIgnoreCase));
-        }
-
-        CommandLogText = string.Join(Environment.NewLine, lines);
-    }
-
-    /// <summary>
-    /// Adds lines straight to the buffer and re-renders, bypassing QueueCommandLine/FlushCommandLog's
-    /// <c>Dispatcher.UIThread.Post</c>. Internal rather than private for the same reason as
-    /// <see cref="DisplayItems"/>: that Post never completes without a running Avalonia dispatcher,
-    /// so a test that went through the real activity pipeline to get lines into the log would hang.
-    /// </summary>
-    internal void AppendCommandLogLinesForTests(IEnumerable<string> lines)
-    {
-        var list = lines as IReadOnlyList<string> ?? lines.ToList();
-        _commandLog.AddRange(list);
-        if (list.Count > 0)
-        {
-            LastLogLine = list[^1];
-        }
-
-        RefreshCommandLogText();
-    }
+        => Console.Append($"[{accountLabel}] [warn] {message}");
 
     /// <summary>
     /// Catch-all for exceptions that escape a command's Func&lt;Task&gt; and are not the
@@ -4110,7 +3705,7 @@ public sealed class MainWindowViewModel : ObservableObject
             CrashLog.Write(ex);
             SetStatus(StringKeys.Status.UnexpectedError, ex.Message);
             IsWarning = true;
-            QueueCommandLine($"[err] Unexpected error: {ex}");
+            Console.Append($"[err] Unexpected error: {ex}");
             IsLoading = false;
         });
     }

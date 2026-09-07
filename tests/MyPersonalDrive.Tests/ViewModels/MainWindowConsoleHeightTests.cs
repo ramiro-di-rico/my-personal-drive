@@ -64,12 +64,12 @@ public class MainWindowConsoleHeightTests : IDisposable
     public void DraggingTheHandleUp_MakesTheConsoleTaller()
     {
         var viewModel = Build();
-        var before = viewModel.CommandConsoleHeight;
+        var before = viewModel.Console.CommandConsoleHeight;
 
         // Screen coordinates grow downwards, so a negative delta is an upward drag.
-        viewModel.ResizeCommandConsole(-40);
+        viewModel.Console.ResizeCommandConsole(-40);
 
-        Assert.Equal(before + 40, viewModel.CommandConsoleHeight);
+        Assert.Equal(before + 40, viewModel.Console.CommandConsoleHeight);
     }
 
     [Fact]
@@ -77,24 +77,24 @@ public class MainWindowConsoleHeightTests : IDisposable
     {
         var viewModel = Build();
 
-        viewModel.ResizeCommandConsole(-10_000);
-        Assert.Equal(AppSettings.MaxCommandConsoleHeight, viewModel.CommandConsoleHeight);
+        viewModel.Console.ResizeCommandConsole(-10_000);
+        Assert.Equal(AppSettings.MaxCommandConsoleHeight, viewModel.Console.CommandConsoleHeight);
 
-        viewModel.ResizeCommandConsole(10_000);
-        Assert.Equal(AppSettings.MinCommandConsoleHeight, viewModel.CommandConsoleHeight);
+        viewModel.Console.ResizeCommandConsole(10_000);
+        Assert.Equal(AppSettings.MinCommandConsoleHeight, viewModel.Console.CommandConsoleHeight);
     }
 
     [Fact]
     public void TheHeightSurvivesARestart_OnceTheDragEnds()
     {
         var viewModel = Build();
-        viewModel.ResizeCommandConsole(-30);
-        var expected = viewModel.CommandConsoleHeight;
+        viewModel.Console.ResizeCommandConsole(-30);
+        var expected = viewModel.Console.CommandConsoleHeight;
 
-        viewModel.CommitCommandConsoleHeight();
+        viewModel.Console.CommitCommandConsoleHeight();
 
         Assert.Equal(expected, new AppSettingsService().Load().CommandConsoleHeightOrDefault());
-        Assert.Equal(expected, Build().CommandConsoleHeight);
+        Assert.Equal(expected, Build().Console.CommandConsoleHeight);
     }
 
     /// <summary>
@@ -106,13 +106,13 @@ public class MainWindowConsoleHeightTests : IDisposable
     public void DraggingAlone_DoesNotTouchTheConfigFile()
     {
         var viewModel = Build();
-        viewModel.CommitCommandConsoleHeight();
+        viewModel.Console.CommitCommandConsoleHeight();
         var settingsPath = Directory.EnumerateFiles(_tempAppData, "settings.json", SearchOption.AllDirectories).Single();
         var writtenAt = File.GetLastWriteTimeUtc(settingsPath);
 
         for (var step = 0; step < 20; step++)
         {
-            viewModel.ResizeCommandConsole(-2);
+            viewModel.Console.ResizeCommandConsole(-2);
         }
 
         Assert.Equal(writtenAt, File.GetLastWriteTimeUtc(settingsPath));
@@ -171,7 +171,7 @@ public class MainWindowConsoleHeightTests : IDisposable
         settings.Save(new AppSettings { CommandConsoleHeight = 5_000 });
 
         Assert.Equal(AppSettings.MaxCommandConsoleHeight, settings.Load().CommandConsoleHeightOrDefault());
-        Assert.Equal(AppSettings.MaxCommandConsoleHeight, Build().CommandConsoleHeight);
+        Assert.Equal(AppSettings.MaxCommandConsoleHeight, Build().Console.CommandConsoleHeight);
     }
 
     /// <summary>
@@ -182,13 +182,13 @@ public class MainWindowConsoleHeightTests : IDisposable
     public async Task ReopeningTheConsole_RestoresTheDraggedHeight()
     {
         var viewModel = Build();
-        viewModel.ResizeCommandConsole(-60);
-        var dragged = viewModel.CommandConsoleHeight;
+        viewModel.Console.ResizeCommandConsole(-60);
+        var dragged = viewModel.Console.CommandConsoleHeight;
 
-        await viewModel.ToggleCommandConsoleCommand.ExecuteAsync();
-        await viewModel.ToggleCommandConsoleCommand.ExecuteAsync();
+        await viewModel.Console.ToggleCommandConsoleCommand.ExecuteAsync();
+        await viewModel.Console.ToggleCommandConsoleCommand.ExecuteAsync();
 
-        Assert.Equal(dragged, viewModel.CommandConsoleHeight);
-        Assert.True(viewModel.CommandConsoleMaxHeight >= dragged);
+        Assert.Equal(dragged, viewModel.Console.CommandConsoleHeight);
+        Assert.True(viewModel.Console.CommandConsoleMaxHeight >= dragged);
     }
 }

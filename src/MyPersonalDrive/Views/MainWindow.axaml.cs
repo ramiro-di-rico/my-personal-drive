@@ -125,7 +125,7 @@ public partial class MainWindow : Window
         // One step per move rather than an absolute offset from the press: the view model clamps,
         // so an absolute delta would keep accumulating past the limit and the handle would then
         // need that distance dragged back before the console moved again.
-        viewModel.ResizeCommandConsole(current.Y - last.Y);
+        viewModel.Console.ResizeCommandConsole(current.Y - last.Y);
         _consoleResizeLastPoint = current;
         e.Handled = true;
     }
@@ -136,7 +136,7 @@ public partial class MainWindow : Window
         // pointer event (docs/PLAN-UX-ROUND-4.md Y6).
         if (_consoleResizeLastPoint is not null && DataContext is MainWindowViewModel viewModel)
         {
-            viewModel.CommitCommandConsoleHeight();
+            viewModel.Console.CommitCommandConsoleHeight();
         }
 
         _consoleResizeLastPoint = null;
@@ -860,7 +860,7 @@ public partial class MainWindow : Window
         viewModel.RequestCopyNameAsync = PromptForCopyNameAsync;
         viewModel.RequestCreateFolderAsync = PromptForNewFolderNameAsync;
         viewModel.RequestDownloadFolderAsync = PickDownloadFolderAsync;
-        viewModel.RequestSaveActivityAsync = PickSaveActivityAsync;
+        viewModel.Console.RequestSaveActivityAsync = PickSaveActivityAsync;
         viewModel.RequestConfirmationAsync = question => Dialogs.ConfirmDialog.ShowAsync(this, question);
         viewModel.RequestCopyToClipboardAsync = CopyToClipboardAsync;
         viewModel.RequestShowPropertiesAsync = (title, fields) => Dialogs.PropertiesDialog.ShowAsync(this, title, fields);

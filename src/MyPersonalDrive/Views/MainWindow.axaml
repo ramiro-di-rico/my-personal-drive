@@ -17,8 +17,8 @@
   <Window.KeyBindings>
     <KeyBinding Gesture="Ctrl+OemComma" Command="{Binding ToggleSettingsCommand}" />
     <KeyBinding Gesture="Cmd+OemComma" Command="{Binding ToggleSettingsCommand}" />
-    <KeyBinding Gesture="Ctrl+OemTilde" Command="{Binding ToggleCommandConsoleCommand}" />
-    <KeyBinding Gesture="Cmd+OemTilde" Command="{Binding ToggleCommandConsoleCommand}" />
+    <KeyBinding Gesture="Ctrl+OemTilde" Command="{Binding Console.ToggleCommandConsoleCommand}" />
+    <KeyBinding Gesture="Cmd+OemTilde" Command="{Binding Console.ToggleCommandConsoleCommand}" />
   </Window.KeyBindings>
   <Window.Styles>
     <!--
@@ -1464,7 +1464,7 @@
                   Margin="0,0,0,2"
                   Background="{DynamicResource CardBackgroundBrush}"
                   Cursor="SizeNorthSouth"
-                  IsVisible="{Binding IsCommandConsoleVisible}"
+                  IsVisible="{Binding Console.IsCommandConsoleVisible}"
                   ToolTip.Tip="{Binding Loc[console.resize.tooltip]}"
                   AutomationProperties.Name="{Binding Loc[console.resize.tooltip]}" />
 
@@ -1481,33 +1481,33 @@
               </Style>
             </Grid.Styles>
             <TextBlock FontSize="16" FontWeight="Bold" Text="{Binding Loc[console.title]}" />
-            <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding ActiveCommand}" />
+            <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding Console.ActiveCommand}" />
             <TextBox Grid.Column="2"
                       Width="160"
                       PlaceholderText="{Binding Loc[console.search.placeholder]}"
                       AutomationProperties.Name="{Binding Loc[console.search.placeholder]}"
-                      Text="{Binding LogSearchText, Mode=TwoWay}" />
+                      Text="{Binding Console.LogSearchText, Mode=TwoWay}" />
             <Button Grid.Column="3"
                     Classes="viewMode"
-                    Classes.active="{Binding ShowOnlyWarningsAndErrors}"
-                    Command="{Binding ToggleLogFilterCommand}"
+                    Classes.active="{Binding Console.ShowOnlyWarningsAndErrors}"
+                    Command="{Binding Console.ToggleLogFilterCommand}"
                     ToolTip.Tip="{Binding Loc[console.warningsonly.tooltip]}"
                     AutomationProperties.Name="{Binding Loc[console.warningsonly.tooltip]}">
               <Path Classes="icon" Data="{StaticResource IconWarning}" />
             </Button>
             <Button Grid.Column="4"
-                    Command="{Binding ToggleCommandConsoleCommand}"
-                    ToolTip.Tip="{Binding CommandConsoleToggleLabel}">
-              <TextBlock Text="{Binding CommandConsoleToggleGlyph}" />
+                    Command="{Binding Console.ToggleCommandConsoleCommand}"
+                    ToolTip.Tip="{Binding Console.CommandConsoleToggleLabel}">
+              <TextBlock Text="{Binding Console.CommandConsoleToggleGlyph}" />
             </Button>
             <Button Grid.Column="5"
-                    Command="{Binding DownloadActivityCommand}"
+                    Command="{Binding Console.DownloadActivityCommand}"
                     ToolTip.Tip="{Binding Loc[console.download.tooltip]}"
                     AutomationProperties.Name="{Binding Loc[console.download.tooltip]}">
               <Path Classes="icon" Data="{StaticResource IconSave}" />
             </Button>
             <Button Grid.Column="6"
-                    Command="{Binding ClearActivityCommand}"
+                    Command="{Binding Console.ClearActivityCommand}"
                     ToolTip.Tip="{Binding Loc[console.clear.tooltip]}"
                     AutomationProperties.Name="{Binding Loc[console.clear.tooltip]}">
               <Path Classes="icon" Data="{StaticResource IconClear}" />
@@ -1521,11 +1521,11 @@
                CLI output shapes" warns against. -->
           <StackPanel Orientation="Horizontal"
                       Spacing="8"
-                      IsVisible="{Binding !IsCommandConsoleVisible}">
+                      IsVisible="{Binding !Console.IsCommandConsoleVisible}">
             <TextBlock VerticalAlignment="Center"
                        FontSize="12"
                        Opacity="0.8"
-                       Text="{Binding ActiveOperationsText}" />
+                       Text="{Binding Console.ActiveOperationsText}" />
             <TextBlock VerticalAlignment="Center"
                        FontSize="12"
                        Opacity="0.5"
@@ -1534,13 +1534,13 @@
                        FontSize="12"
                        Opacity="0.7"
                        TextTrimming="CharacterEllipsis"
-                       Text="{Binding LastLogLine}"
-                       IsVisible="{Binding LastLogLine, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                       Text="{Binding Console.LastLogLine}"
+                       IsVisible="{Binding Console.LastLogLine, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           </StackPanel>
 
-          <Border MaxHeight="{Binding CommandConsoleMaxHeight}"
-                  Opacity="{Binding CommandConsoleOpacity}"
-                  IsHitTestVisible="{Binding CommandConsoleHitTestVisible}"
+          <Border MaxHeight="{Binding Console.CommandConsoleMaxHeight}"
+                  Opacity="{Binding Console.CommandConsoleOpacity}"
+                  IsHitTestVisible="{Binding Console.CommandConsoleHitTestVisible}"
                   ClipToBounds="True">
             <Border.Transitions>
               <Transitions>
@@ -1553,8 +1553,8 @@
                  on every update: a captured stack during a 30-second UI hang was TextBlock.Measure
                  -> TextLayout.CreateTextLines -> HarfBuzzTextShaper.ShapeText. Long lines are also
                  easier to read unwrapped in a console, and CommandLogBuffer now caps their length. -->
-            <ScrollViewer Height="{Binding CommandConsoleHeight}" HorizontalScrollBarVisibility="Auto">
-              <TextBlock TextWrapping="NoWrap" Text="{Binding CommandLogText}" />
+            <ScrollViewer Height="{Binding Console.CommandConsoleHeight}" HorizontalScrollBarVisibility="Auto">
+              <TextBlock TextWrapping="NoWrap" Text="{Binding Console.CommandLogText}" />
             </ScrollViewer>
           </Border>
         </StackPanel>

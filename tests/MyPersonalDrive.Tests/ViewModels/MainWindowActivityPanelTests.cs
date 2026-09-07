@@ -56,31 +56,31 @@ public class MainWindowActivityPanelTests : IDisposable
     public async Task ConsoleVisibility_TogglesAndPersists_AndRestoresOnNextLaunch()
     {
         var sut = Build();
-        Assert.True(sut.IsCommandConsoleVisible);
-        Assert.Equal(180, sut.CommandConsoleMaxHeight);
+        Assert.True(sut.Console.IsCommandConsoleVisible);
+        Assert.Equal(180, sut.Console.CommandConsoleMaxHeight);
 
-        await sut.ToggleCommandConsoleCommand.ExecuteAsync();
+        await sut.Console.ToggleCommandConsoleCommand.ExecuteAsync();
 
-        Assert.False(sut.IsCommandConsoleVisible);
-        Assert.Equal(0, sut.CommandConsoleMaxHeight);
-        Assert.Equal("Show the CLI activity", sut.CommandConsoleToggleLabel);
+        Assert.False(sut.Console.IsCommandConsoleVisible);
+        Assert.Equal(0, sut.Console.CommandConsoleMaxHeight);
+        Assert.Equal("Show the CLI activity", sut.Console.CommandConsoleToggleLabel);
         Assert.False(new AppSettingsService().Load().ShowCommandConsole);
 
         // A fresh instance starts collapsed too — including the visual state that mirrors it,
         // not just the flag — since the persisted value is also next launch's default.
         var relaunched = Build();
-        Assert.False(relaunched.IsCommandConsoleVisible);
-        Assert.Equal(0, relaunched.CommandConsoleMaxHeight);
-        Assert.Equal(0, relaunched.CommandConsoleOpacity);
-        Assert.False(relaunched.CommandConsoleHitTestVisible);
-        Assert.Equal("Show the CLI activity", relaunched.CommandConsoleToggleLabel);
+        Assert.False(relaunched.Console.IsCommandConsoleVisible);
+        Assert.Equal(0, relaunched.Console.CommandConsoleMaxHeight);
+        Assert.Equal(0, relaunched.Console.CommandConsoleOpacity);
+        Assert.False(relaunched.Console.CommandConsoleHitTestVisible);
+        Assert.Equal("Show the CLI activity", relaunched.Console.CommandConsoleToggleLabel);
     }
 
     [Fact]
     public void LogFilter_ShowsOnlyWarningLinesAndErrorLines_WhenToggled()
     {
         var sut = Build();
-        sut.AppendCommandLogLinesForTests(
+        sut.Console.AppendCommandLogLinesForTests(
         [
             "[Proton Drive] > filesystem list --json /my-files",
             "[Proton Drive] [warn] falling back to text parser",
@@ -88,62 +88,62 @@ public class MainWindowActivityPanelTests : IDisposable
             "[Proton Drive] [done] exit 0",
         ]);
 
-        sut.ShowOnlyWarningsAndErrors = true;
+        sut.Console.ShowOnlyWarningsAndErrors = true;
 
-        Assert.Contains("[warn] falling back to text parser", sut.CommandLogText);
-        Assert.Contains("[err] connection refused", sut.CommandLogText);
-        Assert.DoesNotContain("filesystem list --json", sut.CommandLogText);
-        Assert.DoesNotContain("[done] exit 0", sut.CommandLogText);
+        Assert.Contains("[warn] falling back to text parser", sut.Console.CommandLogText);
+        Assert.Contains("[err] connection refused", sut.Console.CommandLogText);
+        Assert.DoesNotContain("filesystem list --json", sut.Console.CommandLogText);
+        Assert.DoesNotContain("[done] exit 0", sut.Console.CommandLogText);
 
-        sut.ShowOnlyWarningsAndErrors = false;
-        Assert.Contains("[done] exit 0", sut.CommandLogText);
+        sut.Console.ShowOnlyWarningsAndErrors = false;
+        Assert.Contains("[done] exit 0", sut.Console.CommandLogText);
     }
 
     [Fact]
     public void LogSearch_FiltersLinesByCaseInsensitiveSubstring()
     {
         var sut = Build();
-        sut.AppendCommandLogLinesForTests(
+        sut.Console.AppendCommandLogLinesForTests(
         [
             "[Proton Drive] > filesystem list --json /my-files/Photos",
             "[OneDrive] > GET /root/delta",
         ]);
 
-        sut.LogSearchText = "photos";
+        sut.Console.LogSearchText = "photos";
 
-        Assert.Contains("/my-files/Photos", sut.CommandLogText);
-        Assert.DoesNotContain("/root/delta", sut.CommandLogText);
+        Assert.Contains("/my-files/Photos", sut.Console.CommandLogText);
+        Assert.DoesNotContain("/root/delta", sut.Console.CommandLogText);
     }
 
     [Fact]
     public void SearchAndWarningsFilter_CombineAsAnAnd()
     {
         var sut = Build();
-        sut.AppendCommandLogLinesForTests(
+        sut.Console.AppendCommandLogLinesForTests(
         [
             "[Proton Drive] [warn] Photos: falling back to text parser",
             "[Proton Drive] [warn] Documents: falling back to text parser",
             "[Proton Drive] > filesystem list --json /my-files/Photos",
         ]);
 
-        sut.ShowOnlyWarningsAndErrors = true;
-        sut.LogSearchText = "photos";
+        sut.Console.ShowOnlyWarningsAndErrors = true;
+        sut.Console.LogSearchText = "photos";
 
-        Assert.Contains("Photos: falling back", sut.CommandLogText);
-        Assert.DoesNotContain("Documents: falling back", sut.CommandLogText);
-        Assert.DoesNotContain("filesystem list --json", sut.CommandLogText); // matches search but not the warning filter
+        Assert.Contains("Photos: falling back", sut.Console.CommandLogText);
+        Assert.DoesNotContain("Documents: falling back", sut.Console.CommandLogText);
+        Assert.DoesNotContain("filesystem list --json", sut.Console.CommandLogText); // matches search but not the warning filter
     }
 
     [Fact]
     public async Task ClearActivity_ResetsLastLogLine()
     {
         var sut = Build();
-        sut.AppendCommandLogLinesForTests(["[Proton Drive] [done] exit 0"]);
-        Assert.NotNull(sut.LastLogLine);
+        sut.Console.AppendCommandLogLinesForTests(["[Proton Drive] [done] exit 0"]);
+        Assert.NotNull(sut.Console.LastLogLine);
 
-        await sut.ClearActivityCommand.ExecuteAsync();
+        await sut.Console.ClearActivityCommand.ExecuteAsync();
 
-        Assert.Null(sut.LastLogLine);
-        Assert.Equal("No CLI command is running.", sut.CommandLogText);
+        Assert.Null(sut.Console.LastLogLine);
+        Assert.Equal("No CLI command is running.", sut.Console.CommandLogText);
     }
 }

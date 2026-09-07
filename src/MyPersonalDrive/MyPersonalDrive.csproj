@@ -36,6 +36,12 @@
          3.119.2, which NuGet unifies up to the 3.119.4 already in this project instead of forcing
          a cross-major SkiaSharp split. Published 2026-04-06. -->
     <PackageReference Include="PDFtoImage" Version="5.2.1" />
+    <!-- Merges PDFs page-by-page for the merge action. PDFium (via PDFtoImage above) only
+         rasterizes, and rasterizing to merge would throw away the text layer. PdfPig's
+         Writer.PdfMerger is pure managed code with ZERO transitive dependencies on its net9.0
+         asset — which matters in a .csproj that already carries three defensive version pins.
+         Preferred over PDFsharp 6.2.4 on that basis alone. Published 2026-08-22. -->
+    <PackageReference Include="PdfPig" Version="0.1.16" />
   </ItemGroup>
   <ItemGroup>
     <!-- Globbed, not listed: adding an interface language must be a locale file plus a row in

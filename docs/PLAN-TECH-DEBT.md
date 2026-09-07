@@ -31,6 +31,12 @@
       `scripts/run-tests.sh`. Not yet covered: `DriveCacheService`, `PathMapper`-equivalent
       (doesn't exist until sync work starts).
 - [ ] **B4 (persistence/state), B5 (async lifecycle), B6 (observability)** — not started.
+- [ ] **B6.6** — the local pane's `DeleteSelectedAsync` reports its result and then refreshes,
+      and the refresh clears the message it just set. Found while adding the PDF merge action;
+      see §8.
+- [ ] **B6.7** — `KeyboardTests` fails ~8% of runs as it stands, and roughly 33% once any further
+      window-showing test joins the assembly, which closes the UI test project to new coverage.
+      Measured while adding the PDF merge action; see §8. Depends on B5.
 - [ ] **B6.3** — the sync preview/conflict dialogs name Proton Drive whichever provider is
       syncing. Found during [PLAN-I18N.md](PLAN-I18N.md) L4; see §8.
 - [x] **B6.5** — done. `ILocalizedError` lets an exception carry an English `Message` for the
@@ -619,6 +625,81 @@ crash log, since those were Spanish before and are meant to be stable and greppa
 
 `NoSourceFileCarriesASpanishSentence` is the regression guard: no source file outside
 `Locales/` may carry a Spanish sentence. Verified to fail on an injected one.
+
+---
+
+### B6.7 — `KeyboardTests` is order-dependent, and that blocks adding UI tests
+
+**Where:** `tests/MyPersonalDrive.UiTests/KeyboardTests.cs` — `TheKeyboardMapDoesWhatItClaims`
+and its `ShowWithRows` helper.
+
+**What goes wrong:** it fails intermittently with `Ctrl+A: selects every row (selected 0 of 0)` —
+the listing it seeded is empty by the time the first key is pressed. Its own class comment
+diagnoses the cause: a shown window keeps posting fire-and-forget refreshes to the shared
+dispatcher after its test ends, and the next test's pump runs them. The mitigations already in
+place (one window for the whole map, `_shown?.Close()` in the base class's `Dispose`) reduce it
+but do not remove it.
+
+**Measured**, 12 consecutive runs of the UI assembly each way, while adding the PDF merge feature:
+
+| Assembly contents | Failures |
+|---|---|
+| As it is on `main` | 1 / 12 |
+| Plus one more test that shows a window | 4 / 12 |
+
+So it is already flaky at ~8% with no changes at all, and any test that shows another window
+multiplies that. **This is the real cost: it makes the UI assembly effectively closed to new
+tests.** The merge feature's button-visibility test — the only thing that can catch a compiled
+binding pointed at the wrong view model, which passes every view-model test and renders as a blank
+space — was written, verified to pass reliably on its own, and then dropped for this reason. These
+were tried and did not fix it: seeding the fake CLI with listings, draining the dispatcher at the
+end of the test, closing the window before draining, laying the window out without `Show()` (the
+visual tree is not built at all then), and putting the new test in the existing class rather than
+a new one.
+
+**The likely fix** is to stop the leak at the source rather than pump harder: give
+`MainWindowViewModel` a way to cancel its in-flight background refresh, and have
+`WindowLayoutTests.Dispose` await it — B5.1/B5.2 already propose scoping the
+`CancellationTokenSource` and giving the five `_ = RefreshAsync()` calls a home, which is the same
+underlying problem seen from the app side rather than the test side.
+
+**Why it wasn't fixed here:** the merge feature changes no file in the UI test assembly, and the
+fix runs through `MainWindowViewModel`'s async lifecycle — B5's territory, and a regression risk
+that does not belong inside a feature diff.
+
+**Blocks:** UI-level test coverage for anything new, including the merge button. Depends on B5.
+
+**Already in place for whoever picks this up:** the two merge buttons carry `x:Name`
+(`CloudMergeButton`, `LocalMergeButton`) in `MainWindow.axaml`, added for that dropped test —
+both panes render the same `pdfmerge.action` label, so a by-label lookup finds whichever button is
+visible anywhere in the window and silently checks the wrong pane.
+
+---
+
+### B6.6 — The local pane's batch actions report a result the very next line erases
+
+**Where:** `src/MyPersonalDrive/ViewModels/Local/LocalExplorerViewModel.cs` —
+`DeleteSelectedAsync`, in its closing two statements.
+
+**What goes wrong:** it ends with `SetStatus(...)` describing what happened, then
+`await NavigateAsync(CurrentPath)` to refresh — and `NavigateAsync` sets `StatusMessage = null` on
+entry. So deleting three files reports nothing at all, and a partial failure ("2 of 3 deleted:
+…") is lost with it, which is the case the message actually matters for. The status line is the
+only place the local pane reports a batch outcome, so the user is left to infer it from the
+listing.
+
+Found while adding the PDF merge action, which hit the same trap: `MergeSelectedAsync` works
+around it by refreshing *before* setting its status. That workaround is the fix in miniature, but
+applying it to `DeleteSelectedAsync` means re-reading whether any other caller depends on
+`NavigateAsync` clearing the status — several navigations legitimately should — so the real fix is
+probably a `NavigateAsync(..., preserveStatus: false)` parameter or a `SetStatusAfterRefresh`
+helper, and that is a change to a method every path in the pane calls.
+
+**Why it wasn't fixed here:** it is in neither a file nor a method the merge feature changes, and
+touching the pane's single navigation entry point would have put an unrelated regression risk into
+a feature diff.
+
+**Blocks:** nothing. Independent of B0–B6 and of `PLAN-LOCAL-SYNC.md`.
 
 ---
 

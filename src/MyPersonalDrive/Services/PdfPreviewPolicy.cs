@@ -40,6 +40,14 @@ public static class PdfPreviewPolicy
             return false;
         }
 
-        return string.Equals(Path.GetExtension(item.Name), ".pdf", StringComparison.OrdinalIgnoreCase);
+        return IsPdfName(item.Name);
     }
+
+    /// <summary>
+    /// Whether <paramref name="name"/> is a PDF by extension. Extracted so the merge action gates
+    /// on the same rule the viewer does — "is this a PDF" answered in one place, for the same
+    /// reason <see cref="CanPreview"/> is shared between the row's eye button and the loader.
+    /// </summary>
+    public static bool IsPdfName(string name) =>
+        string.Equals(Path.GetExtension(name), ".pdf", StringComparison.OrdinalIgnoreCase);
 }

@@ -18,6 +18,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
     private readonly LocalFileSystemService _service;
     private readonly AppSettingsService _settings;
     private readonly Action<Exception>? _onError;
+    private readonly IPdfMergeService _pdfMerge;
     private string _currentPath;
     private bool _showHiddenFiles;
     private string _freeSpaceText = string.Empty;
@@ -31,9 +32,16 @@ public sealed class LocalExplorerViewModel : ObservableObject
     /// <summary>Everything the current folder holds, before filtering — mirrors <c>MainWindowViewModel._loadedItems</c>, and for the same reason: <see cref="Items"/> is a filtered view of this, never the source of truth for what's actually in the folder.</summary>
     private IReadOnlyList<DriveItem> _loadedItems = [];
 
-    public LocalExplorerViewModel(LocalFileSystemService service, AppSettingsService settings, Action<Exception>? onError = null)
+    public LocalExplorerViewModel(
+        LocalFileSystemService service,
+        AppSettingsService settings,
+        Action<Exception>? onError = null,
+        IPdfMergeService? pdfMerge = null)
     {
         _service = service;
+        // Optional with a real default, like MainWindowViewModel's preview loaders: tests hand in
+        // a fake, the app gets the PdfPig-backed one without a container.
+        _pdfMerge = pdfMerge ?? new PdfMergeService();
         _settings = settings;
         _onError = onError;
         HomePath = service.GetHomeDirectory();
@@ -48,6 +56,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         ToggleHiddenFilesCommand = new AsyncCommand(ToggleHiddenFilesAsync, () => !IsLoading, onError);
         SelectAllCommand = new AsyncCommand(SelectAllAsync, () => Items.Count > 0, onError);
         DeleteSelectedCommand = new AsyncCommand(DeleteSelectedAsync, () => SelectedCount > 0, onError);
+        MergeSelectedCommand = new AsyncCommand(MergeSelectedAsync, () => SelectedMergeableCount >= 2, onError);
         ClearSearchCommand = new AsyncCommand(ClearSearchAsync, () => HasSearchText, onError);
 
         // Long-lived, like the window itself, so subscribing without unsubscribing is not a leak.
@@ -160,11 +169,24 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
     public AsyncCommand DeleteSelectedCommand { get; }
 
+    /// <summary>Joins the selected PDFs and images into one PDF in the current folder.</summary>
+    public AsyncCommand MergeSelectedCommand { get; }
+
     /// <summary>Empties this pane's search box (docs/PLAN-UX-ROUND-2.md §9).</summary>
     public AsyncCommand ClearSearchCommand { get; }
 
     /// <summary>How many rows are currently selected — docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2.</summary>
     public int SelectedCount => Items.Count(i => i.IsSelected);
+
+    /// <summary>How many of the selected rows can go into a merge — PDFs and images alike (<see cref="PdfMergePolicy"/>). What gates <see cref="MergeSelectedCommand"/>. Folders and other kinds in the selection are simply not counted, the way the batch download already skips folders rather than refusing the whole action.</summary>
+    public int SelectedMergeableCount => SelectedMergeables.Count;
+
+    /// <summary>Whether the merge action is worth offering at all.</summary>
+    public bool CanMergeSelected => SelectedMergeableCount >= 2;
+
+    /// <summary>The selected mergeable files in listing order — the order the merge dialog opens with.</summary>
+    private IReadOnlyList<LocalNodeViewModel> SelectedMergeables =>
+        [.. Items.Where(i => i.IsSelected && !i.Item.IsFolder && PdfMergePolicy.CanMerge(i.Item.Name))];
 
     public bool HasMultipleSelected => SelectedCount > 1;
 
@@ -177,6 +199,9 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
     /// <summary>A yes/no confirmation, used before permanently deleting a local item.</summary>
     public Func<string, Task<bool>>? RequestConfirmationAsync { get; set; }
+
+    /// <summary>Set by the code-behind to <c>Views.Dialogs.PdfMergeDialog</c>; takes the selected file names in listing order and returns the page order and output name, or null if cancelled.</summary>
+    public Func<IReadOnlyList<string>, string, Task<PdfMergeRequest?>>? RequestPdfMergeAsync { get; set; }
 
     /// <summary>Prompts for a new name given the current one; null/unchanged means cancelled.</summary>
     public Func<string, Task<string?>>? RequestRenameAsync { get; set; }
@@ -445,9 +470,73 @@ public sealed class LocalExplorerViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedCount));
         OnPropertyChanged(nameof(HasMultipleSelected));
         OnPropertyChanged(nameof(SelectionSummaryText));
+        OnPropertyChanged(nameof(SelectedMergeableCount));
+        OnPropertyChanged(nameof(CanMergeSelected));
         SelectAllCommand.RaiseCanExecuteChanged();
         DeleteSelectedCommand.RaiseCanExecuteChanged();
+        MergeSelectedCommand.RaiseCanExecuteChanged();
     }
+
+    /// <summary>
+    /// Joins the selected PDFs and images into one new PDF in the current folder. Locally there is
+    /// nothing to download: the files are already on disk, so this is the dialog, the merge, and a
+    /// refresh.
+    /// </summary>
+    private async Task MergeSelectedAsync()
+    {
+        var selected = SelectedMergeables;
+        if (selected.Count < 2)
+        {
+            SetStatus(StringKeys.PdfMerge.StatusSelectTwoFiles);
+            return;
+        }
+
+        var prompt = RequestPdfMergeAsync;
+        if (prompt is null)
+        {
+            return;
+        }
+
+        var request = await prompt([.. selected.Select(s => s.Item.Name)], DefaultMergeName(selected[0].Item.Name));
+        if (request is null)
+        {
+            SetStatus(StringKeys.PdfMerge.StatusCancelled);
+            return;
+        }
+
+        var sources = request.SourceOrder.Select(i => selected[i].Item.Path).ToList();
+        var outputPath = Path.Combine(CurrentPath, request.OutputName);
+
+        try
+        {
+            IsLoading = true;
+            SetStatus(StringKeys.PdfMerge.StatusMerging, sources.Count);
+            var pages = await _pdfMerge.MergeAsync(sources, outputPath);
+
+            // Refresh first, then report: NavigateAsync clears StatusMessage on entry, so setting
+            // the status before the refresh would show the merged file and no word about it.
+            await NavigateAsync(CurrentPath);
+            SetStatusPlural(StringKeys.PdfMerge.StatusDone, pages, request.OutputName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            // Same catch set as DeleteSelectedAsync, plus InvalidOperationException for the
+            // "not a readable PDF" case PdfMergeService reports. Anything else is a bug and
+            // belongs on the AsyncCommand's onError, not swallowed here.
+            // Not followed by a refresh: PdfMergeService writes the output in one go, so a failed
+            // merge left the folder exactly as the listing already shows it — and refreshing here
+            // would clear this very message.
+            SetStatus(StringKeys.PdfMerge.StatusFailed, ex.DescribeForUser().Render());
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    /// <summary>Pre-fills the dialog with a name derived from the first source, so the box is never empty and never proposes overwriting a source outright.</summary>
+    private static string DefaultMergeName(string firstSourceName) =>
+        $"{Path.GetFileNameWithoutExtension(firstSourceName)}-merged.pdf";
 
     /// <summary>The batch counterpart to <see cref="DeleteItemAsync"/> — one confirmation for the whole selection, then each item deleted independently so one failure doesn't abandon the rest.</summary>
     private async Task DeleteSelectedAsync()

@@ -69,6 +69,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _oneDriveClientId;
     private string _googleDriveClientId;
     private string _googleDriveClientSecret;
+    private readonly IPdfMergeService _pdfMerge;
     private string _currentPath;
     private readonly StatusSurface _status;
     private bool _hasRenderedListing;
@@ -356,8 +357,12 @@ public sealed class MainWindowViewModel : ObservableObject
         ITextFilePreviewLoader? previewLoader = null,
         IImageFilePreviewLoader? imagePreviewLoader = null,
         IPdfFilePreviewLoader? pdfPreviewLoader = null,
-        LocalFileSystemService? localFileSystem = null)
+        LocalFileSystemService? localFileSystem = null,
+        IPdfMergeService? pdfMerge = null)
     {
+        // Same shape as the preview loaders above: a real default so the app needs no container,
+        // an injection point so view-model tests never touch PdfPig or the filesystem.
+        _pdfMerge = pdfMerge ?? new PdfMergeService();
         // Optional so the many existing view-model tests don't all have to build a database and a
         // scanner to exercise unrelated behavior. When either is absent the deep-scan command
         // simply can't execute (see CanScanFolderDeeply), which is also the honest state of the
@@ -476,6 +481,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ViewSelectedFileCommand = new AsyncCommand(ViewSelectedFileAsync, CanViewSelectedFile, HandleUnexpectedError);
         SelectAllRowsCommand = new AsyncCommand(SelectAllRowsAsync, () => RootItems.Count > 0, HandleUnexpectedError);
         DownloadSelectedCommand = new AsyncCommand(DownloadSelectedAsync, () => SelectedCount > 0, HandleUnexpectedError);
+        MergeSelectedCommand = new AsyncCommand(MergeSelectedAsync, () => SelectedMergeableCount >= 2, HandleUnexpectedError);
         TrashSelectedCommand = new AsyncCommand(TrashSelectedAsync, () => SelectedCount > 0, HandleUnexpectedError);
         SetThemeDefaultCommand = new AsyncCommand(() => SetThemeAsync("Default"), onError: HandleUnexpectedError);
         SetThemeLightCommand = new AsyncCommand(() => SetThemeAsync("Light"), onError: HandleUnexpectedError);
@@ -606,6 +612,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>Downloads every selected file (folders are skipped, same restriction as the single-row <see cref="DownloadItemAsync"/>) into one picked destination.</summary>
     public AsyncCommand DownloadSelectedCommand { get; }
+
+    /// <summary>Joins the selected remote PDFs and images into one new PDF in the current folder.</summary>
+    public AsyncCommand MergeSelectedCommand { get; }
 
     /// <summary>Moves every selected row (files and folders) to trash, after one confirmation for the whole batch.</summary>
     public AsyncCommand TrashSelectedCommand { get; }
@@ -1039,6 +1048,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public Func<Task<string?>>? RequestDownloadFolderAsync { get; set; }
 
+    /// <summary>Set by the code-behind to <c>Views.Dialogs.PdfMergeDialog</c>; takes the selected PDF names in listing order plus a suggested output name, and returns the chosen page order and name, or null if cancelled.</summary>
+    public Func<IReadOnlyList<string>, string, Task<PdfMergeRequest?>>? RequestPdfMergeAsync { get; set; }
+
     public Func<string, Task<bool>>? RequestConfirmationAsync { get; set; }
 
     public Func<string, Task>? RequestCopyToClipboardAsync { get; set; }
@@ -1321,6 +1333,16 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2 — how many rows Ctrl/Shift-click or Ctrl+A currently have marked.</summary>
     public int SelectedCount => RootItems.Count(node => node.IsSelected);
+
+    /// <summary>How many selected rows can go into a merge — PDFs and images alike (<see cref="PdfMergePolicy"/>). What gates <see cref="MergeSelectedCommand"/>. Other kinds and folders in the selection are ignored rather than refused, matching how the batch download quietly skips folders.</summary>
+    public int SelectedMergeableCount => SelectedMergeables.Count;
+
+    /// <summary>Whether the merge action is worth offering.</summary>
+    public bool CanMergeSelected => SelectedMergeableCount >= 2;
+
+    /// <summary>The selected mergeable files in listing order — the order the merge dialog opens with.</summary>
+    private IReadOnlyList<DriveItem> SelectedMergeables =>
+        [.. RootItems.Where(n => n.IsSelected && n.IsFile && PdfMergePolicy.CanMerge(n.Item.Name)).Select(n => n.Item)];
 
     /// <summary>Whether the Status panel should show the multi-select summary instead of one item's details.</summary>
     public bool HasMultipleSelected => SelectedCount > 1;
@@ -2504,6 +2526,118 @@ public sealed class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectionSummaryText));
         DownloadSelectedCommand.RaiseCanExecuteChanged();
         TrashSelectedCommand.RaiseCanExecuteChanged();
+        OnPropertyChanged(nameof(SelectedMergeableCount));
+        OnPropertyChanged(nameof(CanMergeSelected));
+        MergeSelectedCommand.RaiseCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Joins the selected remote PDFs and images into one PDF and uploads it back into the current
+    /// folder.
+    /// The remote path has three steps the local pane does not: every source has to come down
+    /// first, the merge happens on those temporary copies, and the result goes back up.
+    ///
+    /// Each source lands in its own numbered subfolder rather than one shared directory: two files
+    /// selected from the same listing can share a name across providers that allow it, and the
+    /// second download would otherwise overwrite the first and silently merge a file with itself.
+    /// </summary>
+    private async Task MergeSelectedAsync()
+    {
+        var selected = SelectedMergeables;
+        if (selected.Count < 2)
+        {
+            SetStatus(StringKeys.PdfMerge.StatusSelectTwoFiles);
+            IsWarning = true;
+            return;
+        }
+
+        var prompt = RequestPdfMergeAsync;
+        if (prompt is null)
+        {
+            return;
+        }
+
+        var request = await prompt([.. selected.Select(i => i.Name)], DefaultMergeName(selected[0].Name));
+        if (request is null)
+        {
+            SetStatus(StringKeys.PdfMerge.StatusCancelled);
+            return;
+        }
+
+        var ordered = request.SourceOrder.Select(i => selected[i]).ToList();
+        var workspace = Path.Combine(Path.GetTempPath(), "MyPersonalDrive", "merge", Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            IsLoading = true;
+            Directory.CreateDirectory(workspace);
+
+            var localSources = new List<string>(ordered.Count);
+            for (var i = 0; i < ordered.Count; i++)
+            {
+                var item = ordered[i];
+                SetStatus(StringKeys.PdfMerge.StatusDownloading, item.Name);
+
+                var slot = Path.Combine(workspace, i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                Directory.CreateDirectory(slot);
+                await _provider.Operations.DownloadFileAsync(item.Path, slot);
+
+                // Same trust boundary the preview loaders draw: the folder is ours and holds
+                // exactly one file, so take what actually arrived instead of insisting the
+                // provider named it what we expected.
+                localSources.Add(
+                    Directory.EnumerateFiles(slot).FirstOrDefault()
+                    ?? throw new LocalizedIOException(
+                        $"The provider reported success but downloaded nothing for '{item.Name}'.",
+                        LocalizedText.Of(StringKeys.Error.PdfMergeSourceMissing, item.Name)));
+            }
+
+            SetStatus(StringKeys.PdfMerge.StatusMerging, localSources.Count);
+            var mergedPath = Path.Combine(workspace, request.OutputName);
+            var pages = await _pdfMerge.MergeAsync(localSources, mergedPath);
+
+            var strategy = await ResolveUploadConflictStrategyAsync([mergedPath], CurrentPath);
+            if (strategy is null)
+            {
+                SetStatus(StringKeys.PdfMerge.StatusCancelled);
+                return;
+            }
+
+            SetStatus(StringKeys.PdfMerge.StatusUploading, request.OutputName);
+            await _provider.Operations.UploadFilesAsync([mergedPath], CurrentPath, strategy.Value);
+
+            SetStatusPlural(StringKeys.PdfMerge.StatusDone, pages, request.OutputName);
+            await InvalidateDeepMetricsAsync(CurrentPath);
+            _ = RefreshAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            SetFailure(FormatDriveError(CurrentPath, ex), ex);
+        }
+        finally
+        {
+            IsLoading = false;
+            TryDeleteWorkspace(workspace);
+        }
+    }
+
+    /// <summary>Pre-fills the dialog from the first source, so the box is never empty and never proposes overwriting a source outright.</summary>
+    private static string DefaultMergeName(string firstSourceName) =>
+        $"{Path.GetFileNameWithoutExtension(firstSourceName)}-merged.pdf";
+
+    /// <summary>Best-effort cleanup of the temp copies. A leftover temp folder is not worth failing a merge that already succeeded, and not worth an error card either.</summary>
+    private static void TryDeleteWorkspace(string workspace)
+    {
+        try
+        {
+            if (Directory.Exists(workspace))
+            {
+                Directory.Delete(workspace, recursive: true);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     /// <summary>The batch counterpart to <see cref="DownloadItemAsync"/>: every selected file (folders skipped, same rule the single-row command already follows) into one picked destination.</summary>

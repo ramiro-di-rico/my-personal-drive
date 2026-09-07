@@ -51,6 +51,15 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
   without downloading them to disk — from a row action, a context menu entry, or the "Visor"
   menu button. PDF pages are rendered as images (up to the first 20 pages of a document); a zoom
   slider on the image/PDF viewer (default 50%) is remembered across restarts
+- Combine several files into one PDF, in either pane — select two or more PDFs **or images** and a
+  "Combine into PDF" button appears in the batch bar. A dialog shows them in listing order, with
+  buttons to reorder or drop one, and asks what to name the result. Each image becomes one page,
+  on a page matching its own orientation (a landscape photo gets a landscape page) and scaled to
+  fit without distortion; the accepted image formats are the same ones the viewer displays
+  (JPEG, PNG, GIF, BMP, WebP, ICO). PDF pages keep their text layer — the merge does not rasterize.
+  In the local pane the result is written beside the sources; in the cloud pane the sources are
+  downloaded to a temporary folder, combined, and the result uploaded back into the current folder
+  (any name collision asks the same question an upload does)
 - Upload files to the current folder
 - Move files and folders to trash (folders ask for confirmation first)
 - Sync a remote folder with a local folder — download-only, upload-only, or two-way, running

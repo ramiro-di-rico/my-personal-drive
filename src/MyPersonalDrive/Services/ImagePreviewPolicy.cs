@@ -45,7 +45,17 @@ public static class ImagePreviewPolicy
             return false;
         }
 
-        var extension = Path.GetExtension(item.Name);
+        return IsSupportedImageName(item.Name);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="name"/> is an image SkiaSharp can decode. Extracted for the same
+    /// reason as <see cref="PdfPreviewPolicy.IsPdfName"/>: the PDF merge turns images into pages,
+    /// and it must accept exactly the formats the rest of the app can already decode — no wider.
+    /// </summary>
+    public static bool IsSupportedImageName(string name)
+    {
+        var extension = Path.GetExtension(name);
         return extension.Length > 0 && SupportedExtensions.Contains(extension);
     }
 }

@@ -605,6 +605,12 @@
             <StackPanel Orientation="Horizontal" Spacing="10">
               <TextBlock VerticalAlignment="Center" FontWeight="Bold" Text="{Binding SelectionSummaryText}" />
               <Button Content="{Binding Loc[explorer.download.selected]}" Command="{Binding DownloadSelectedCommand}" />
+              <!-- Only shown once the selection actually holds two or more PDFs: an always-visible
+                   disabled button in a bar that only appears on multi-select is noise. -->
+              <Button x:Name="CloudMergeButton"
+                      Content="{Binding Loc[pdfmerge.action]}"
+                      Command="{Binding MergeSelectedCommand}"
+                      IsVisible="{Binding CanMergeSelected}" />
               <Button Content="{Binding Loc[menu.trash]}" Command="{Binding TrashSelectedCommand}" />
             </StackPanel>
           </Border>
@@ -1125,6 +1131,10 @@
                     IsVisible="{Binding HasMultipleSelected}">
               <StackPanel Orientation="Horizontal" Spacing="10">
                 <TextBlock VerticalAlignment="Center" FontWeight="Bold" Text="{Binding SelectionSummaryText}" />
+                <Button x:Name="LocalMergeButton"
+                        Content="{Binding Loc[pdfmerge.action]}"
+                        Command="{Binding MergeSelectedCommand}"
+                        IsVisible="{Binding CanMergeSelected}" />
                 <Button Content="{Binding Loc[local.delete.selected]}" Command="{Binding DeleteSelectedCommand}" />
               </StackPanel>
             </Border>

@@ -669,6 +669,29 @@ public static class StringKeys
     }
 
     /// <summary>The framing sentences around a provider error. The provider's own message stays verbatim inside them (docs/PLAN-I18N.md §9).</summary>
+    /// <summary>Strings for the PDF merge action and its dialog, shared by both explorers.</summary>
+    public static class PdfMerge
+    {
+        public const string Action = "pdfmerge.action";
+        public const string Confirm = "pdfmerge.confirm";
+        public const string MoveDown = "pdfmerge.movedown";
+        public const string MoveUp = "pdfmerge.moveup";
+        public const string NeedTwo = "pdfmerge.needtwo";
+        public const string OutputNameLabel = "pdfmerge.outputname";
+        public const string Prompt = "pdfmerge.prompt";
+        public const string Remove = "pdfmerge.remove";
+        public const string Summary = "pdfmerge.summary";
+        public const string Title = "pdfmerge.title";
+
+        public const string StatusCancelled = "pdfmerge.status.cancelled";
+        public const string StatusDone = "pdfmerge.status.done";
+        public const string StatusDownloading = "pdfmerge.status.downloading";
+        public const string StatusFailed = "pdfmerge.status.failed";
+        public const string StatusMerging = "pdfmerge.status.merging";
+        public const string StatusSelectTwoFiles = "pdfmerge.status.selecttwofiles";
+        public const string StatusUploading = "pdfmerge.status.uploading";
+    }
+
     public static class Error
     {
         public const string AuthBadRedirect = "error.auth.badredirect";
@@ -722,6 +745,12 @@ public static class StringKeys
         public const string OpNoUploadedFile = "error.op.nouploadedfile";
         public const string OpSegmentNotFound = "error.op.segmentnotfound";
         public const string OpUploadFailedAtByte = "error.op.uploadfailedatbyte";
+        public const string PdfMergeNeedsTwoFiles = "error.pdfmerge.needstwofiles";
+        public const string PdfMergeSourceMissing = "error.pdfmerge.sourcemissing";
+        public const string PdfMergeImageTooLarge = "error.pdfmerge.imagetoolarge";
+        public const string PdfMergeUnreadableImage = "error.pdfmerge.unreadableimage";
+        public const string PdfMergeUnreadableSource = "error.pdfmerge.unreadablesource";
+        public const string PdfMergeUnsupportedKind = "error.pdfmerge.unsupportedkind";
         public const string PreviewFolderHasNoImage = "error.preview.folderhasnoimage";
         public const string PreviewFolderHasNoPdf = "error.preview.folderhasnopdf";
         public const string PreviewFolderHasNoText = "error.preview.folderhasnotext";

@@ -43,6 +43,8 @@ the seam and the plan to add Microsoft OneDrive as a second provider.
 | UI | Avalonia.Desktop / Themes.Fluent / Fonts.Inter `12.0.4` |
 | Persistence | `Microsoft.Data.Sqlite` `10.0.10` |
 | Linux natives | `SkiaSharp.NativeAssets.Linux.NoDependencies` `3.119.4` |
+| PDF rendering | `PDFtoImage` `5.2.1` (PDFium) — rasterizes pages for the viewer |
+| PDF merging | `PdfPig` `0.1.16` — pure managed, no transitive dependencies; also builds the image pages |
 | Build | `PublishAot=true`, `TrimMode=partial`, `IsAotCompatible=true` |
 | Bindings | `AvaloniaUseCompiledBindingsByDefault=true` |
 
@@ -538,6 +540,54 @@ command, so each downloads into a private temp folder and deletes it again — a
 leaves a copy on disk. The row's `DriveNodeViewModel.CanPreview` (true when either policy accepts
 the file) drives the eye button/context-menu entry's visibility; the actual routing decision is
 made again, from the same policies, in `PreviewItemAsync`.
+
+**Combining files into a PDF.** `MergeSelectedCommand` exists on both `MainWindowViewModel` and
+`ViewModels.Local.LocalExplorerViewModel`, gated on `SelectedMergeableCount >= 2`. What can take
+part is `Services.PdfMergePolicy.CanMerge` — a PDF (`PdfPreviewPolicy.IsPdfName`) or an image
+(`ImagePreviewPolicy.IsSupportedImageName`), so the merge accepts exactly the image formats the
+viewer can already decode and no wider; a RAW file or a `.psd` is excluded for the same reason it
+has no preview. Other kinds in the selection are ignored rather than refused, the way the batch
+download already skips folders. A selection of images with no PDF in it is valid — the output is
+a PDF either way.
+
+The join itself is `Services.PdfMergeService` (behind `IPdfMergeService`), over PdfPig's
+`PdfMerger`. Deliberately **not** PDFium: the `PDFtoImage` package the viewer uses can only
+rasterize, so merging through it would replace every page with a picture of itself and discard the
+text layer. PdfPig re-writes the page objects instead. The merge is CPU-bound and synchronous, so
+it runs on `Task.Run` rather than on whichever thread the `AsyncCommand` was invoked from.
+
+Images get there by conversion, not by a second mechanism: `Services.ImageToPdfPageConverter` turns
+each one into a single-page PDF in a scratch folder, and those paths go into the same `PdfMerger`
+call as the real PDFs. Building the output page-by-page in a `PdfDocumentBuilder` also works and
+was measured to — this route was chosen because it leaves the PDF-to-PDF path, the one with the
+most to lose, byte-identical to what it was before images were supported. The scratch folder is
+only created when an image is actually present, and is deleted in a `finally`.
+
+Two things the converter decides, both deliberate. **The page follows the image**: a landscape
+photo gets a landscape A4 page rather than being letterboxed into a portrait one (a square image
+gets portrait, so the choice stays deterministic), and within it the image is scaled to fit and
+centred, never stretched. **Nothing is resampled**: a JPEG's original bytes are embedded as-is,
+since PdfPig stores them directly and re-encoding would cost quality for nothing, and every other
+format is transcoded to PNG — the only other thing PdfPig accepts — at full resolution. That keeps
+detail but means a large photo is a large page, which is why `ImageToPdfPageConverter.MaxImageBytes`
+refuses at the same 25 MB ceiling the image viewer already refuses at.
+
+The order is not implicit. Selection in this app is a per-row `IsSelected` flag, which records
+*what* was selected but not the order it was clicked — so `Views.Dialogs.PdfMergeDialog` shows the
+list and lets it be reordered or trimmed, and returns a `Models.PdfMergeRequest` holding indexes
+(not names — two selected files can share a name) plus the output name. It reaches both view models
+through a `RequestPdfMergeAsync` delegate, the same way every other dialog does.
+
+The two panes differ only in what surrounds the merge. Locally the sources are already on disk, so
+it is dialog → merge → refresh. In the cloud pane each source is downloaded first, **each into its
+own numbered subfolder** — two files selected from different folders can share a name, and one
+shared temp directory would let the second download overwrite the first and silently merge a file
+with itself — then merged, then uploaded back through the same `ResolveUploadConflictStrategyAsync`
+path a normal upload uses. The temp workspace is deleted in a `finally`, success or failure.
+
+One ordering constraint worth knowing: the local pane's `NavigateAsync` clears `StatusMessage` on
+entry, so the merge refreshes **before** setting its status, not after — otherwise the result would
+appear in the listing with nothing said about it.
 
 ### 7.3 Folder-loading flow (cache-first)
 

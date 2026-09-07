@@ -168,7 +168,7 @@ public class SyncPanelProviderFilterTests : IDisposable
         Assert.Equal(3, panel.ProviderFilters.Count);
         Assert.Null(panel.ProviderFilters[0].AccountLabel);
         Assert.Equal(3, panel.ProviderFilters[0].Count);
-        Assert.True(panel.ProviderFilters[0].IsActive); // "Todos" starts active
+        Assert.True(panel.ProviderFilters[0].IsActive); // the "All" chip starts active
         Assert.Equal("Account A", panel.ProviderFilters[1].AccountLabel);
         Assert.Equal(2, panel.ProviderFilters[1].Count);
         Assert.Equal("Account B", panel.ProviderFilters[2].AccountLabel);
@@ -259,7 +259,7 @@ public class SyncPanelProviderFilterTests : IDisposable
         await panel.InitializeAsync();
 
         // Todos + the two accounts that actually have pairs. Account C is configured but empty.
-        Assert.Equal(new[] { "Todos", "Account A", "Account B" }, panel.ProviderFilters.Select(chip => chip.Label));
+        Assert.Equal(new[] { "All", "Account A", "Account B" }, panel.ProviderFilters.Select(chip => chip.Label));
         Assert.DoesNotContain(panel.ProviderFilters, chip => chip.Count == 0);
     }
 }

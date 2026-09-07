@@ -9,6 +9,7 @@ namespace MyPersonalDrive.ViewModels;
 public sealed class DriveNodeViewModel : ObservableObject
 {
     private readonly Func<DriveItem, Task> _handleRowClickAsync;
+    private readonly Func<DriveItem, Task> _selectRowAsync;
     private readonly Func<DriveItem, Task> _downloadItemAsync;
     private readonly Func<DriveItem, Task> _trashItemAsync;
     private readonly Func<DriveItem, Task> _renameItemAsync;
@@ -18,11 +19,12 @@ public sealed class DriveNodeViewModel : ObservableObject
     private bool _isSelected;
     private string? _deepSizeText;
 
-    public DriveNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Func<DriveItem, Task> downloadItemAsync, Func<DriveItem, Task> trashItemAsync, Func<DriveItem, Task> renameItemAsync, Func<DriveItem, Task> copyItemAsync, Func<DriveItem, Task>? previewItemAsync = null, Action<Exception>? onError = null, DriveNodeSyncActions? syncActions = null)
+    public DriveNodeViewModel(DriveItem item, Func<DriveItem, Task> handleRowClickAsync, Func<DriveItem, Task> selectRowAsync, Func<DriveItem, Task> downloadItemAsync, Func<DriveItem, Task> trashItemAsync, Func<DriveItem, Task> renameItemAsync, Func<DriveItem, Task> copyItemAsync, Func<DriveItem, Task>? previewItemAsync = null, Action<Exception>? onError = null, DriveNodeSyncActions? syncActions = null)
     {
         Item = item;
         FileKind = FileKindClassifier.Classify(item.Name, item.IsFolder);
         _handleRowClickAsync = handleRowClickAsync;
+        _selectRowAsync = selectRowAsync;
         _downloadItemAsync = downloadItemAsync;
         _trashItemAsync = trashItemAsync;
         _renameItemAsync = renameItemAsync;
@@ -30,13 +32,9 @@ public sealed class DriveNodeViewModel : ObservableObject
         _previewItemAsync = previewItemAsync;
         _syncActions = syncActions;
         SyncPair = syncActions?.FindSyncPair?.Invoke(item);
-        // A Google-native Doc/Sheet/Slide has no extension (so TextPreviewPolicy's "no extension at
-        // all" fallback would otherwise offer to preview it as plain text) and no binary content to
-        // actually read — the P10 live-verification pass hit exactly this: the preview button showed
-        // up and failed instead of never appearing (docs/PLAN-CLOUD-PROVIDERS.md §8.4/G4).
-        CanPreview = !item.IsRemoteOnlyDocument
-            && (TextPreviewPolicy.CanPreview(item) || ImagePreviewPolicy.CanPreview(item) || PdfPreviewPolicy.CanPreview(item));
-        RowCommand = new AsyncCommand(HandleRowClickAsync, onError: onError);
+        CanPreview = PreviewPolicy.CanPreview(item);
+        ActivateCommand = new AsyncCommand(HandleRowClickAsync, onError: onError);
+        SelectCommand = new AsyncCommand(SelectRowAsync, onError: onError);
         DownloadCommand = new AsyncCommand(DownloadAsync, () => CanDownload, onError);
         TrashCommand = new AsyncCommand(TrashAsync, onError: onError);
         RenameCommand = new AsyncCommand(RenameAsync, onError: onError);
@@ -148,7 +146,14 @@ public sealed class DriveNodeViewModel : ObservableObject
         ? Loc.T(StringKeys.Node.DownloadGoogleDoc)
         : Loc.T(StringKeys.Node.DownloadTooltip);
 
-    public AsyncCommand RowCommand { get; }
+    /// <summary>
+    /// Opens: into the folder, or the preview for a file. Double click, Enter, or the context
+    /// menu's own entry — never a plain click any more (docs/PLAN-UX-ROUND-3.md X2).
+    /// </summary>
+    public AsyncCommand ActivateCommand { get; }
+
+    /// <summary>A plain click. Marks this row and clears the rest; opens nothing.</summary>
+    public AsyncCommand SelectCommand { get; }
 
     public AsyncCommand DownloadCommand { get; }
 
@@ -177,6 +182,11 @@ public sealed class DriveNodeViewModel : ObservableObject
     private async Task HandleRowClickAsync()
     {
         await _handleRowClickAsync(Item);
+    }
+
+    private async Task SelectRowAsync()
+    {
+        await _selectRowAsync(Item);
     }
 
     private async Task DownloadAsync()

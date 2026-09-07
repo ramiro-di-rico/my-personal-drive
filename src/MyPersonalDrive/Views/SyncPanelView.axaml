@@ -69,10 +69,10 @@
                     <Ellipse Width="7" Height="7" VerticalAlignment="Center">
                       <Ellipse.Styles>
                         <Style Selector="Ellipse.running">
-                          <Setter Property="Fill" Value="#28A745" />
+                          <Setter Property="Fill" Value="{DynamicResource StatusOkBrush}" />
                         </Style>
                         <Style Selector="Ellipse.stopped">
-                          <Setter Property="Fill" Value="#6C757D" />
+                          <Setter Property="Fill" Value="{DynamicResource StatusOfflineBrush}" />
                         </Style>
                       </Ellipse.Styles>
                       <Classes.running>
@@ -149,7 +149,7 @@
                             IsVisible="{Binding HasConflicts}"
                             Command="{Binding ResolveConflictsCommand}"
                             HorizontalAlignment="Left"
-                            Foreground="#F5C451"
+                            Foreground="{DynamicResource StatusWarningBrush}"
                             ToolTip.Tip="{Binding Loc[sync.conflicts.tooltip]}" />
                     <!-- The detail view comes first and the blind retry-all second, deliberately:
                          the row used to offer only the second, so the user was asked to retry
@@ -158,7 +158,7 @@
                             IsVisible="{Binding HasFailures}"
                             Command="{Binding ReviewFailuresCommand}"
                             HorizontalAlignment="Left"
-                            Foreground="#E06C6C"
+                            Foreground="{DynamicResource StatusErrorBrush}"
                             ToolTip.Tip="{Binding Loc[sync.failures.tooltip]}" />
                     <Button Content="{Binding Loc[sync.retryfailed]}"
                             IsVisible="{Binding HasFailures}"
@@ -168,22 +168,22 @@
                   </StackPanel>
 
                   <StackPanel Grid.Column="1" Grid.Row="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
-                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[sync.preview.tooltip]}" Command="{Binding PreviewCommand}">
+                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[sync.preview.tooltip]}" AutomationProperties.Name="{Binding Loc[sync.preview.tooltip]}" Command="{Binding PreviewCommand}">
                       <Path Classes="icon" Data="{StaticResource IconEye}" />
                     </Button>
-                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[sync.edit.tooltip]}" Command="{Binding EditCommand}">
+                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[sync.edit.tooltip]}" AutomationProperties.Name="{Binding Loc[sync.edit.tooltip]}" Command="{Binding EditCommand}">
                       <Path Classes="icon" Data="{StaticResource IconPencil}" />
                     </Button>
-                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[menu.syncnow]}" Command="{Binding SyncNowCommand}">
+                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[menu.syncnow]}" AutomationProperties.Name="{Binding Loc[menu.syncnow]}" Command="{Binding SyncNowCommand}">
                       <Path Classes="icon" Data="{StaticResource IconPlay}" />
                     </Button>
-                    <Button Classes="rowAction" ToolTip.Tip="{Binding PauseTooltip}" Command="{Binding TogglePauseCommand}">
+                    <Button Classes="rowAction" ToolTip.Tip="{Binding PauseTooltip}" AutomationProperties.Name="{Binding PauseTooltip}" Command="{Binding TogglePauseCommand}">
                       <Panel>
                         <Path Classes="icon" Data="{StaticResource IconPlay}" IsVisible="{Binding IsPaused}" />
                         <Path Classes="icon" Data="{StaticResource IconPause}" IsVisible="{Binding !IsPaused}" />
                       </Panel>
                     </Button>
-                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[sync.remove.tooltip]}" Command="{Binding RemoveCommand}">
+                    <Button Classes="rowAction" ToolTip.Tip="{Binding Loc[sync.remove.tooltip]}" AutomationProperties.Name="{Binding Loc[sync.remove.tooltip]}" Command="{Binding RemoveCommand}">
                       <Path Classes="icon" Data="{StaticResource IconTrash}" />
                     </Button>
                   </StackPanel>

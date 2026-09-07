@@ -154,7 +154,7 @@ public class MainWindowMultiSelectTests : IDisposable
         var viewModel = LoadFourRows();
         await viewModel.SelectAllRowsCommand.ExecuteAsync();
 
-        await Row(viewModel, "b.txt").RowCommand.ExecuteAsync();
+        await Row(viewModel, "b.txt").SelectCommand.ExecuteAsync();
 
         Assert.Equal(1, viewModel.SelectedCount);
         Assert.True(Row(viewModel, "b.txt").IsSelected);

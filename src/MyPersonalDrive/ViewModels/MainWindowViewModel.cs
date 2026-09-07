@@ -30,10 +30,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private FolderMetricsStore? _metricsStore;
     private FolderStatsScanner? _statsScanner;
     private CancellationTokenSource? _deepScanCts;
-    private ITextFilePreviewLoader? _previewLoader;
-    private IImageFilePreviewLoader? _imagePreviewLoader;
-    private IPdfFilePreviewLoader? _pdfPreviewLoader;
-    private CancellationTokenSource? _previewCts;
     private readonly Stack<string> _navigationHistory = new();
     private readonly TimeProvider _timeProvider;
     private readonly RemoteViewFreshnessPolicy _remoteViewFreshness = new();
@@ -69,38 +65,15 @@ public sealed class MainWindowViewModel : ObservableObject
     // Doubled from CommandLogBuffer's own default (200): with two provider sessions able to be
     // active at once (P7), one interleaved buffer now serves two sources, and a burst from one
     // must not push the other's entire recent history out.
-    private readonly CommandLogBuffer _commandLog = new(maxLines: CommandLogBuffer.MaxLines * 2);
-
-    /// <summary>
-    /// Guards <see cref="_pendingCommandLines"/>, which the CLI executor's events fill from whatever
-    /// thread the process I/O happened on — and now from up to eight of them at once, since read-only
-    /// commands run concurrently.
-    /// </summary>
-    private readonly object _commandLogGate = new();
-    private readonly List<string> _pendingCommandLines = new();
-    private bool _commandLogFlushScheduled;
     private string _cliPath;
     private string _oneDriveClientId;
     private string _googleDriveClientId;
     private string _googleDriveClientSecret;
     private string _currentPath;
-    private LocalizedText _statusText = LocalizedText.Of(StringKeys.Status.PickCliInitial);
-    private string _statusMessage = Localizer.Instance.T(StringKeys.Status.PickCliInitial);
-    private bool _isWarning;
+    private readonly StatusSurface _status;
+    private bool _hasRenderedListing;
     private bool _isLoading;
     private bool _isAuthenticated;
-    private bool _isCommandConsoleVisible = true;
-    private int _activeOperationCount;
-    private string? _lastLogLine;
-    private bool _showOnlyWarningsAndErrors;
-    private string _logSearchText = string.Empty;
-    private double _commandConsoleMaxHeight = 180;
-    private double _commandConsoleOpacity = 1;
-    private bool _commandConsoleHitTestVisible = true;
-    private string _activeCommand = Localizer.Instance.T(StringKeys.Console.Idle);
-    private string _commandLogText = Localizer.Instance.T(StringKeys.Console.NoCommandRunning);
-    private string _commandConsoleToggleLabel = Localizer.Instance.T(StringKeys.Console.ToggleHide);
-    private string _commandConsoleToggleGlyph = "▼";
     private string _selectedName = Localizer.Instance.T(StringKeys.Common.None);
     private string _selectedKind = Localizer.Instance.T(StringKeys.Common.None);
     private string _selectedPath = Localizer.Instance.T(StringKeys.Common.None);
@@ -111,14 +84,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _hasSelection;
     private DriveItem? _selectedItem;
     private MainView _activeView = MainView.Explorer;
-    private bool _isViewerVisible;
-    private bool _isViewerLoading;
-    private string _viewerTitle = Localizer.Instance.T(StringKeys.Viewer.Title);
-    private string _viewerPath = string.Empty;
-    private string _viewerText = string.Empty;
-    private string _viewerNote = string.Empty;
-    private byte[]? _viewerImageBytes;
-    private IReadOnlyList<byte[]>? _viewerPdfPages;
     private DriveViewMode _viewMode = DriveViewMode.List;
     private bool _isDeepScanRunning;
     private DriveSortKey _sortKey = DriveSortKey.Name;
@@ -132,25 +97,14 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _searchText = string.Empty;
     private string _filterSummary = string.Empty;
     private bool _sortDescending;
-    private static string UnknownCliVersion => Localizer.Instance.T(StringKeys.Common.Unknown);
-    private string _cliVersion = UnknownCliVersion;
-    private bool _isCheckingCliVersion;
-    private readonly ICliReleaseFeed? _releaseFeed;
-    private readonly CliUpdateInstaller _updateInstaller;
     private readonly Func<bool> _isSyncInProgress;
-    private CliReleaseCandidate? _availableRelease;
-    private string _cliUpdateStatus = Localizer.Instance.T(StringKeys.CliUpdate.Unchecked);
-    private bool _isCliUpdateAvailable;
-    private bool _isCliUpdateBusy;
     private string _theme = "Default";
     private int _bandwidthLimitKbps;
-    private double _viewerZoom;
     private string _defaultSyncFolder = string.Empty;
     private string _connectionStatus = Localizer.Instance.T(StringKeys.Connection.StateOnline);
     private string _connectionStatusKind = "Online";
     private string _connectionStatusDescription = Localizer.Instance.T(StringKeys.Connection.Initial);
     private long _quotaUsedBytes;
-    private long _quotaTotalBytes = 500L * 1024 * 1024 * 1024;
 
     // Tri-state, because a long defaulting to 0 cannot tell "empty account" from "the provider
     // never told us" — and the app was rendering both as "0 B / 500 GB (0% used)" above a folder
@@ -158,6 +112,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _quotaUsedIsKnown;
     private bool _quotaUsedIsPartial;
     private DriveErrorKind _lastErrorKind = DriveErrorKind.Unknown;
+
     private bool _isStatusPanelVisible;
     private bool _isLocalExplorerPanelVisible;
 
@@ -411,12 +366,26 @@ public sealed class MainWindowViewModel : ObservableObject
         _statsScanner = statsScanner;
         // Optional for the same reason: a test that never opens the viewer shouldn't have to supply
         // a loader, and when it's absent the viewer simply can't open (see CanOpenViewer).
-        _previewLoader = previewLoader;
-        _imagePreviewLoader = imagePreviewLoader;
-        _pdfPreviewLoader = pdfPreviewLoader;
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _releaseFeed = releaseFeed;
-        _updateInstaller = updateInstaller ?? new CliUpdateInstaller();
+        // Built first: the three child view models below all take it (docs/PLAN-UX-ROUND-4.md Z5).
+        _status = new StatusSurface(LocalizedText.Of(StringKeys.Status.PickCliInitial), RaiseStatusSurfaceChanged);
+        Console = new ActivityConsoleViewModel(settings, _status, HandleUnexpectedError);
+        Preview = new FilePreviewViewModel(
+            settings,
+            _status,
+            previewLoader,
+            imagePreviewLoader,
+            pdfPreviewLoader,
+            (path, ex) => SetFailure(FormatDriveError(path, ex), ex),
+            HandleUnexpectedError);
+        CliUpdate = new CliUpdateViewModel(
+            () => _provider,
+            releaseFeed,
+            updateInstaller ?? new CliUpdateInstaller(),
+            () => CliPath,
+            () => _isSyncInProgress?.Invoke() ?? false,
+            _status,
+            HandleUnexpectedError);
         // Injected rather than read off SyncPanel directly so the refusal-while-syncing path is
         // reachable in a test without driving a real sync cycle to a chosen moment.
         // Capturing the parameter, not the SyncPanel property, which is only assigned below.
@@ -459,28 +428,14 @@ public sealed class MainWindowViewModel : ObservableObject
         _sortDescending = appSettings.SortDescending;
         _theme = appSettings.ThemeOrDefault();
         _bandwidthLimitKbps = appSettings.BandwidthLimitKbps;
-        _viewerZoom = appSettings.ViewerZoomOrDefault();
         _defaultSyncFolder = appSettings.DefaultSyncFolder;
         _isStatusPanelVisible = appSettings.ShowStatusPanel;
         _isLocalExplorerPanelVisible = appSettings.ShowLocalExplorerPanel;
-        _isCommandConsoleVisible = appSettings.ShowCommandConsole;
-        if (!_isCommandConsoleVisible)
-        {
-            // Mirrors IsCommandConsoleVisible's setter directly rather than going through it: this
-            // runs before AsyncCommand fields exist, and that setter's RaiseCommandStates() would
-            // null-ref against them. No PropertyChanged subscriber exists yet either, so there's
-            // nothing SetProperty would have notified at this point regardless.
-            _commandConsoleMaxHeight = 0;
-            _commandConsoleOpacity = 0;
-            _commandConsoleHitTestVisible = false;
-            _commandConsoleToggleLabel = Loc.T(StringKeys.Console.ToggleShow);
-            _commandConsoleToggleGlyph = "▲";
-        }
         // The browsed provider's own activity is tagged like any other session's, so interleaved
         // lines from ObserveAdditionalProviderActivity (P7, both providers active at once) read
         // consistently regardless of which one happens to be on screen.
-        _provider.Activity += (_, activity) => OnActivity(_provider.DisplayName, activity);
-        _provider.ListingParseWarning += (_, message) => OnListingParseWarning(_provider.DisplayName, message);
+        _provider.Activity += (_, activity) => Console.OnActivity(_provider.DisplayName, activity);
+        _provider.ListingParseWarning += (_, message) => Console.OnListingParseWarning(_provider.DisplayName, message);
 
         RootItems = new ObservableCollection<DriveNodeViewModel>();
         // Selecting a "largest item" row must behave exactly like clicking that row in the listing,
@@ -497,13 +452,11 @@ public sealed class MainWindowViewModel : ObservableObject
         BackCommand = new AsyncCommand(GoBackAsync, CanGoBack, HandleUnexpectedError);
         UploadCommand = new AsyncCommand(UploadAsync, CanUpload, HandleUnexpectedError);
         CreateFolderCommand = new AsyncCommand(CreateFolderAsync, CanCreateFolder, HandleUnexpectedError);
-        ToggleCommandConsoleCommand = new AsyncCommand(ToggleCommandConsoleAsync, onError: HandleUnexpectedError);
         ToggleLocalExplorerPanelCommand = new AsyncCommand(ToggleLocalExplorerPanelAsync, onError: HandleUnexpectedError);
-        ToggleLogFilterCommand = new AsyncCommand(ToggleLogFilterAsync, onError: HandleUnexpectedError);
-        DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity, HandleUnexpectedError);
-        ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, HandleUnexpectedError);
         ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
         ClearSearchCommand = new AsyncCommand(ClearSearchAsync, () => HasSearchText, HandleUnexpectedError);
+        ClearFiltersCommand = new AsyncCommand(ClearFiltersAsync, () => HasActiveFilters, HandleUnexpectedError);
+        DismissStatusBannerCommand = new AsyncCommand(DismissStatusBannerAsync, () => IsStatusBannerVisible, HandleUnexpectedError);
         SortByNameCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Name), onError: HandleUnexpectedError);
         SortBySizeCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Size), onError: HandleUnexpectedError);
         SortByModifiedCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Modified), onError: HandleUnexpectedError);
@@ -515,16 +468,12 @@ public sealed class MainWindowViewModel : ObservableObject
         ShowGalleryViewCommand = new AsyncCommand(() => SetViewModeAsync(DriveViewMode.Gallery), onError: HandleUnexpectedError);
         ShowSettingsCommand = new AsyncCommand(ShowSettingsAsync, onError: HandleUnexpectedError);
         ShowSyncCommand = new AsyncCommand(ShowSyncAsync, onError: HandleUnexpectedError);
-        CheckCliVersionCommand = new AsyncCommand(CheckCliVersionAsync, CanCheckCliVersion, HandleUnexpectedError);
-        CheckForCliUpdateCommand = new AsyncCommand(CheckForCliUpdateAsync, CanCheckForCliUpdate, HandleUnexpectedError);
         SwitchToProtonCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.Proton), () => !IsLoading && !IsProtonActive, HandleUnexpectedError);
         SwitchToOneDriveCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.OneDrive), () => !IsLoading && !IsOneDriveActive, HandleUnexpectedError);
         SwitchToGoogleDriveCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.GoogleDrive), () => !IsLoading && !IsGoogleDriveActive, HandleUnexpectedError);
         SwitchToNextcloudCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.Nextcloud), () => !IsLoading && !IsNextcloudActive, HandleUnexpectedError);
         SwitchToS3Command = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.S3), () => !IsLoading && !IsS3Active, HandleUnexpectedError);
-        InstallCliUpdateCommand = new AsyncCommand(InstallCliUpdateAsync, CanInstallCliUpdate, HandleUnexpectedError);
         ViewSelectedFileCommand = new AsyncCommand(ViewSelectedFileAsync, CanViewSelectedFile, HandleUnexpectedError);
-        CloseViewerCommand = new AsyncCommand(CloseViewerAsync, onError: HandleUnexpectedError);
         SelectAllRowsCommand = new AsyncCommand(SelectAllRowsAsync, () => RootItems.Count > 0, HandleUnexpectedError);
         DownloadSelectedCommand = new AsyncCommand(DownloadSelectedAsync, () => SelectedCount > 0, HandleUnexpectedError);
         TrashSelectedCommand = new AsyncCommand(TrashSelectedAsync, () => SelectedCount > 0, HandleUnexpectedError);
@@ -537,7 +486,7 @@ public sealed class MainWindowViewModel : ObservableObject
         UpdateConnectionTelemetry();
         UpdateQuotaMetrics();
 
-        _browserSessions.Add(new BrowserAccountSession(_provider, _cacheService, _metricsStore, _statsScanner, _previewLoader, _imagePreviewLoader, _pdfPreviewLoader));
+        _browserSessions.Add(new BrowserAccountSession(_provider, _cacheService, _metricsStore, _statsScanner, previewLoader, imagePreviewLoader, pdfPreviewLoader));
 
         // Every derived label on this view model reads through Loc at get time, so a language
         // change only has to tell the bindings to re-read (docs/PLAN-I18N.md §3). The view model
@@ -573,6 +522,25 @@ public sealed class MainWindowViewModel : ObservableObject
     public Sync.SyncPanelViewModel SyncPanel { get; }
 
     public LocalExplorerViewModel LocalExplorer { get; }
+
+    /// <summary>
+    /// The CLI's installed version and its self-update (docs/PLAN-UX-ROUND-4.md Z5 step 1). Its own
+    /// view model: everything it does needs the release feed, the installer and somewhere to
+    /// report, and nothing else here needs any of those.
+    /// </summary>
+    public CliUpdateViewModel CliUpdate { get; }
+
+    /// <summary>
+    /// The CLI activity console (docs/PLAN-UX-ROUND-4.md Z5 step 2). Consumes provider activity and
+    /// produces text; it never touches a provider itself.
+    /// </summary>
+    public ActivityConsoleViewModel Console { get; }
+
+    /// <summary>
+    /// The in-app file viewer (docs/PLAN-UX-ROUND-4.md Z5 step 3): text, images and PDFs, plus the
+    /// zoom that applies to the last two.
+    /// </summary>
+    public FilePreviewViewModel Preview { get; }
 
     public TransferQueueViewModel TransferQueue { get; } = new();
 
@@ -612,20 +580,18 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public AsyncCommand CreateFolderCommand { get; }
 
-    public AsyncCommand ToggleCommandConsoleCommand { get; }
-
     public AsyncCommand ToggleLocalExplorerPanelCommand { get; }
-
-    public AsyncCommand ToggleLogFilterCommand { get; }
-
-    public AsyncCommand DownloadActivityCommand { get; }
-
-    public AsyncCommand ClearActivityCommand { get; }
 
     public AsyncCommand ShowExplorerCommand { get; }
 
     /// <summary>Empties the folder search box (docs/PLAN-UX-ROUND-2.md §9).</summary>
     public AsyncCommand ClearSearchCommand { get; }
+
+    /// <summary>Clears the search box and the kind chip together, from the empty state (docs/PLAN-UX-ROUND-3.md X3).</summary>
+    public AsyncCommand ClearFiltersCommand { get; }
+
+    /// <summary>Takes the alert strip down without resolving what it reported (docs/PLAN-UX-ROUND-3.md X1).</summary>
+    public AsyncCommand DismissStatusBannerCommand { get; }
 
     public AsyncCommand ShowSettingsCommand { get; }
 
@@ -634,8 +600,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>Opens the text viewer on the row currently selected in the listing.</summary>
     public AsyncCommand ViewSelectedFileCommand { get; }
-
-    public AsyncCommand CloseViewerCommand { get; }
 
     /// <summary>Ctrl/Cmd+A over the listing — docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2.</summary>
     public AsyncCommand SelectAllRowsCommand { get; }
@@ -646,32 +610,10 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>Moves every selected row (files and folders) to trash, after one confirmation for the whole batch.</summary>
     public AsyncCommand TrashSelectedCommand { get; }
 
-    public AsyncCommand CheckCliVersionCommand { get; }
-
     /// <summary>
     /// What `proton-drive --version` last reported, or why it could not be read. Shown as-is in the
     /// settings view; the CLI owns the wording, this view model does not reformat it.
     /// </summary>
-    public string CliVersion
-    {
-        get => _cliVersion;
-        private set => SetProperty(ref _cliVersion, value);
-    }
-
-    public bool IsCheckingCliVersion
-    {
-        get => _isCheckingCliVersion;
-        private set
-        {
-            if (SetProperty(ref _isCheckingCliVersion, value))
-            {
-                CheckCliVersionCommand.RaiseCanExecuteChanged();
-            }
-        }
-    }
-
-    public AsyncCommand CheckForCliUpdateCommand { get; }
-
     public AsyncCommand SwitchToProtonCommand { get; }
 
     public AsyncCommand SwitchToOneDriveCommand { get; }
@@ -681,8 +623,6 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand SwitchToNextcloudCommand { get; }
 
     public AsyncCommand SwitchToS3Command { get; }
-
-    public AsyncCommand InstallCliUpdateCommand { get; }
 
     public AsyncCommand SetThemeDefaultCommand { get; }
 
@@ -807,7 +747,23 @@ public sealed class MainWindowViewModel : ObservableObject
     /// Whether the standing warning has a remedy the app can offer. A warning the user cannot act
     /// on is a dead end, which is the whole point of U1 (docs/PLAN-UX-ROUND-2.md §1).
     /// </summary>
-    public bool HasStatusAction => _isWarning;
+    public bool HasStatusAction => _status.HasAction;
+
+
+    /// <summary>
+    /// Whether the window-level alert strip is up (docs/PLAN-UX-ROUND-3.md X1). U1's recovery
+    /// button lived inside the status panel, which is an optional preference and belongs to the
+    /// explorer view — so a failure was invisible to anyone who had hidden the panel, and to
+    /// everyone while they were in Settings or Sync. Only warnings get the strip: routine progress
+    /// keeps the panel it has always used, because a banner for "Loaded 14 items" is noise.
+    /// </summary>
+    public bool IsStatusBannerVisible => _status.IsBannerVisible;
+
+    /// <summary>
+    /// The other half of the split: the status panel's card now carries progress and results only,
+    /// so a warning is never rendered twice on the same screen.
+    /// </summary>
+    public bool IsInformationalStatus => _status.IsInformational;
 
     /// <summary>
     /// Which remedy, derived from the typed <see cref="DriveErrorKind"/> rather than from
@@ -821,102 +777,44 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public long QuotaUsedBytes => _quotaUsedBytes;
 
-    public long QuotaTotalBytes => _quotaTotalBytes;
-
-    public double QuotaPercent => _quotaUsedIsKnown && _quotaTotalBytes > 0
-        ? Math.Min(100.0, (double)_quotaUsedBytes / _quotaTotalBytes * 100.0)
-        : 0.0;
-
-    public double QuotaProgress => _quotaUsedIsKnown && _quotaTotalBytes > 0
-        ? Math.Clamp((double)_quotaUsedBytes / _quotaTotalBytes, 0.0, 1.0)
-        : 0.0;
-
-    /// <summary>True once we have actually seen a root listing we could sum. Drives the gauge's visibility.</summary>
+    /// <summary>
+    /// Whether there is anything to show at all. Drives the whole gauge's visibility now, not just
+    /// the bar inside it: with no usage figure there is nothing left to render, because the
+    /// denominator is gone (docs/PLAN-UX-ROUND-4.md Y2).
+    /// </summary>
     public bool IsQuotaUsageKnown => _quotaUsedIsKnown;
 
     /// <summary>
-    /// The header gauge. Three shapes, because there are three states and conflating them is the
-    /// bug: unknown renders an em dash, a lower bound renders "≥", and only an exact figure gets a
-    /// percentage. A percentage of a lower bound is noise, so it is omitted rather than qualified.
+    /// The header gauge: what was measured, and nothing else.
+    ///
+    /// It used to read "— / 500 GB" — and that 500 GB was a per-provider constant, not the
+    /// account's quota. A Proton free account is 5 GB; an S3 bucket has no quota at all, and was
+    /// being told it had 5 TB. Round 2's U3 established that the app must not conflate "unknown"
+    /// with a number, and fixed the used half of this very string while the total half went on
+    /// asserting. There is no quota API on the provider seam yet, so the honest version of this
+    /// gauge has no denominator, no percentage and no bar — all three were derived from the
+    /// constant. When a provider can report a real total, it comes from the provider.
     /// </summary>
     public string QuotaDisplay
     {
         get
         {
-            var total = ByteSize.Format(_quotaTotalBytes);
-
             if (!_quotaUsedIsKnown)
             {
-                return Loc.F(StringKeys.Quota.Unknown, total);
+                return string.Empty;
             }
 
             var used = ByteSize.Format(_quotaUsedBytes);
             return _quotaUsedIsPartial
-                ? Loc.F(StringKeys.Quota.AtLeast, used, total)
-                : Loc.F(StringKeys.Quota.Exact, used, total, QuotaPercent.ToString("F0", Loc.Culture));
+                ? Loc.F(StringKeys.Quota.UsedAtLeast, used)
+                : Loc.F(StringKeys.Quota.Used, used);
         }
     }
 
-    /// <summary>
-    /// Explains what the gauge above actually measured, including that the total is a per-provider
-    /// constant rather than anything the account reported.
-    /// </summary>
-    public string QuotaTooltip
-    {
-        get
-        {
-            var totalCaveat = Loc.T(StringKeys.Quota.Caveat);
-
-            if (!_quotaUsedIsKnown)
-            {
-                return Loc.F(StringKeys.Quota.TooltipUnknown, totalCaveat);
-            }
-
-            return _quotaUsedIsPartial
-                ? Loc.F(StringKeys.Quota.TooltipPartial, totalCaveat)
-                : Loc.F(StringKeys.Quota.TooltipExact, totalCaveat);
-        }
-    }
-
-    public string QuotaSummary => _quotaUsedIsKnown
-        ? Loc.F(StringKeys.Quota.Summary, ByteSize.Format(_quotaUsedBytes), ByteSize.Format(_quotaTotalBytes))
-        : Loc.F(StringKeys.Quota.Unknown, ByteSize.Format(_quotaTotalBytes));
-
-    /// <summary>Human-readable result of the last update check, or the progress of a running install.</summary>
-    public string CliUpdateStatus
-    {
-        get => _cliUpdateStatus;
-        private set => SetProperty(ref _cliUpdateStatus, value);
-    }
-
-    /// <summary>
-    /// True only when a newer Stable release was positively identified for this platform. An
-    /// unreadable installed version leaves this false — see <see cref="CliUpdateAvailability"/>.
-    /// </summary>
-    public bool IsCliUpdateAvailable
-    {
-        get => _isCliUpdateAvailable;
-        private set
-        {
-            if (SetProperty(ref _isCliUpdateAvailable, value))
-            {
-                InstallCliUpdateCommand.RaiseCanExecuteChanged();
-            }
-        }
-    }
-
-    public bool IsCliUpdateBusy
-    {
-        get => _isCliUpdateBusy;
-        private set
-        {
-            if (SetProperty(ref _isCliUpdateBusy, value))
-            {
-                CheckForCliUpdateCommand.RaiseCanExecuteChanged();
-                InstallCliUpdateCommand.RaiseCanExecuteChanged();
-            }
-        }
-    }
+    /// <summary>Explains what the figure above actually counted, and what is still not known.</summary>
+    public string QuotaTooltip => _quotaUsedIsPartial
+        ? Loc.T(StringKeys.Quota.TooltipPartial)
+        : Loc.T(StringKeys.Quota.TooltipExact);
 
     /// <summary>
     /// What the listing is ordered by. Clicking the active key again flips the direction, which is
@@ -979,6 +877,32 @@ public sealed class MainWindowViewModel : ObservableObject
     /// the specific complaint (docs/PLAN-UX-ROUND-2.md §9).
     /// </summary>
     public bool HasSearchText => !string.IsNullOrWhiteSpace(_searchText);
+
+    /// <summary>Whether the search box, a kind chip, or both are hiding rows right now.</summary>
+    public bool HasActiveFilters => HasSearchText || _kindFilter is not null;
+
+    /// <summary>
+    /// Nothing on screen (docs/PLAN-UX-ROUND-3.md X3). Before this the pane simply went blank: an
+    /// empty folder, a search that matched nothing and a filter that hid everything all rendered as
+    /// the same empty rectangle, and the only wording for any of them lived in the metrics headline
+    /// inside the optional status panel. Gated on a finished load and a live session so it cannot
+    /// flash between "loading" and the first row arriving, or fight the sign-in card for the cell.
+    /// </summary>
+    public bool IsListingEmpty => _hasRenderedListing && IsAuthenticated && !IsLoading && RootItems.Count == 0;
+
+    /// <summary>
+    /// The folder does have contents — the filters are hiding all of them. A different situation
+    /// from an empty folder, and the only one of the two with an action.
+    /// </summary>
+    public bool IsListingFilteredToNothing => IsListingEmpty && _loadedItems.Count > 0;
+
+    public string ListingEmptyTitle => Loc.T(IsListingFilteredToNothing
+        ? StringKeys.Explorer.EmptyFilteredTitle
+        : StringKeys.Explorer.EmptyFolderTitle);
+
+    public string ListingEmptyDetail => IsListingFilteredToNothing
+        ? Loc.F(StringKeys.Explorer.EmptyFilteredDetail, _loadedItems.Count.ToString("n0", Loc.Culture))
+        : Loc.T(StringKeys.Explorer.EmptyFolderDetail);
 
     /// <summary>
     /// How many rows survived the search, phrased the way the kind chips already phrase their own
@@ -1095,7 +1019,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         try
         {
-            await CheckForCliUpdateCommand.ExecuteAsync();
+            await CliUpdate.CheckForCliUpdateCommand.ExecuteAsync();
         }
         catch (Exception ex)
         {
@@ -1115,8 +1039,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public Func<Task<string?>>? RequestDownloadFolderAsync { get; set; }
 
-    public Func<Task<string?>>? RequestSaveActivityAsync { get; set; }
-
     public Func<string, Task<bool>>? RequestConfirmationAsync { get; set; }
 
     public Func<string, Task>? RequestCopyToClipboardAsync { get; set; }
@@ -1130,12 +1052,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _cliPath, value))
             {
-                // A different executable is a different version; what was read no longer applies,
-                // and neither does an update offer that was computed against the old one.
-                CliVersion = UnknownCliVersion;
-                _availableRelease = null;
-                IsCliUpdateAvailable = false;
-                CliUpdateStatus = Loc.T(StringKeys.CliUpdate.Unchecked);
+                CliUpdate.Reset();
                 PersistSettings();
                 RaiseCommandStates();
             }
@@ -1197,6 +1114,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _isLoading, value))
             {
                 RaiseCommandStates();
+                RaiseEmptyStateChanged();
                 UpdateConnectionTelemetry();
             }
         }
@@ -1211,6 +1129,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 PersistSettings();
                 RaiseCommandStates();
+                RaiseEmptyStateChanged();
                 UpdateConnectionTelemetry();
                 RaiseProviderAuthStates();
             }
@@ -1226,24 +1145,63 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public string StatusMessage
     {
-        get => _statusMessage;
+        get => _status.Message;
         set => SetStatus(LocalizedText.Verbatim(value));
     }
 
     /// <summary>The unrendered form, so tests can assert on a key instead of on prose.</summary>
-    internal LocalizedText StatusText => _statusText;
+    internal LocalizedText StatusText => _status.Text;
 
-    private void SetStatus(LocalizedText text)
+    private void SetStatus(LocalizedText text) => _status.Set(text);
+
+    /// <summary>
+    /// The two surfaces a status message can land on. Both are derived from
+    /// <see cref="_isWarning"/> and <see cref="_statusMessage"/>, neither of which
+    /// <see cref="SetProperty"/> can see on their behalf.
+    /// </summary>
+    /// <summary>
+    /// The empty-state block's four derived properties. Their inputs are a collection's count and
+    /// two flags in three different setters, none of which <see cref="SetProperty"/> can connect.
+    /// </summary>
+    private void RaiseEmptyStateChanged()
     {
-        _statusText = text;
-        if (SetProperty(ref _statusMessage, text.Render(), nameof(StatusMessage)))
-        {
-            IsWarning = false;
-            UpdateConnectionTelemetry();
-        }
+        OnPropertyChanged(nameof(IsListingEmpty));
+        OnPropertyChanged(nameof(IsListingFilteredToNothing));
+        OnPropertyChanged(nameof(HasActiveFilters));
+        OnPropertyChanged(nameof(ListingEmptyTitle));
+        OnPropertyChanged(nameof(ListingEmptyDetail));
+        ClearFiltersCommand.RaiseCanExecuteChanged();
+    }
+
+    /// <summary>Announces everything <see cref="StatusSurface"/> feeds, after any change to it.</summary>
+    private void RaiseStatusSurfaceChanged()
+    {
+        OnPropertyChanged(nameof(StatusMessage));
+        OnPropertyChanged(nameof(IsWarning));
+        OnPropertyChanged(nameof(IsStatusBannerVisible));
+        OnPropertyChanged(nameof(IsInformationalStatus));
+        OnPropertyChanged(nameof(HasStatusAction));
+        OnPropertyChanged(nameof(StatusActionLabel));
+        OnPropertyChanged(nameof(StatusActionCommand));
+        DismissStatusBannerCommand?.RaiseCanExecuteChanged();
+        UpdateConnectionTelemetry();
+    }
+
+    private async Task DismissStatusBannerAsync()
+    {
+        _status.Dismiss();
+        await Task.CompletedTask;
     }
 
     private void SetStatus(string key, params object?[] args) => SetStatus(LocalizedText.Of(key, args));
+
+    /// <summary>
+    /// A provider operation failed: the message, the warning, and the kind that decides which
+    /// remedy — if any — the alert strip offers. Kept as one call because the three were three
+    /// statements at twenty call sites, and the third was simply missing
+    /// (docs/PLAN-UX-ROUND-4.md Y3).
+    /// </summary>
+    private void SetFailure(LocalizedText text, Exception ex) => _status.Fail(text, ex);
 
     private void SetStatusPlural(string keyPrefix, int count, params object?[] args)
         => SetStatus(LocalizedText.Plural(keyPrefix, count, args));
@@ -1256,51 +1214,48 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     private void OnLanguageChanged()
     {
-        _statusMessage = _statusText.Render();
+        _status.Rerender();
         RefreshSelectionLabels();
         UpdateConnectionTelemetry();
         OnAllPropertiesChanged();
+
+        // Every child that owns localized state re-derives it. Six string properties were stored
+        // once and stayed in the language they were written in until this existed — measured, not
+        // guessed (docs/PLAN-UX-ROUND-4.md Y7).
+        CliUpdate.OnLanguageChanged();
+        Metrics.OnLanguageChanged();
+        Console.OnLanguageChanged();
+
+        Preview.OnLanguageChanged();
+
+        // Every child that is its own binding source has to be told separately: the notification
+        // above reaches bindings whose source is this view model, and a chip's LabelWithCount and
+        // a row's tooltips are bound against the chip and the row. Switching to Spanish used to
+        // leave "All (14) Folders (8)" over a fully translated toolbar until something re-listed
+        // the folder (docs/PLAN-UX-ROUND-3.md X8).
+        foreach (var chip in KindFilters)
+        {
+            chip.RefreshLocalizedText();
+        }
+
+        foreach (var node in RootItems)
+        {
+            node.RefreshLocalizedText();
+        }
     }
 
     public bool IsWarning
     {
-        get => _isWarning;
+        get => _status.IsWarning;
         private set
         {
-            if (SetProperty(ref _isWarning, value))
+            if (value)
             {
-                UpdateConnectionTelemetry();
+                _status.Warn();
             }
-        }
-    }
-
-    public string ActiveCommand
-    {
-        get => _activeCommand;
-        private set => SetProperty(ref _activeCommand, value);
-    }
-
-    public string CommandLogText
-    {
-        get => _commandLogText;
-        private set => SetProperty(ref _commandLogText, value);
-    }
-
-    /// <summary>
-    /// How many CLI/Graph operations are currently mid-flight, across every active provider
-    /// session — a real count derived from Started/Finished pairs in <see cref="OnActivity"/>,
-    /// unlike <see cref="ActiveCommand"/> (a single label that Task 4's own comment on
-    /// <see cref="OnActivity"/> notes can't represent two concurrent operations correctly). Shown
-    /// in the floating status line while the console is collapsed.
-    /// </summary>
-    public int ActiveOperationCount
-    {
-        get => _activeOperationCount;
-        private set
-        {
-            if (SetProperty(ref _activeOperationCount, value))
+            else
             {
-                OnPropertyChanged(nameof(ActiveOperationsText));
+                _status.ClearWarning();
             }
         }
     }
@@ -1311,41 +1266,9 @@ public sealed class MainWindowViewModel : ObservableObject
     /// reproduce, and which a XAML format string has no way to express. Plural selection belongs
     /// here (docs/PLAN-I18N.md §5).
     /// </summary>
-    public string ActiveOperationsText => Loc.Plural(StringKeys.Console.ActiveOperations, ActiveOperationCount);
-
     /// <summary>The most recent line added to the log, regardless of the search/warnings filter below — always the real last event, not whatever the filter happens to be hiding.</summary>
-    public string? LastLogLine
-    {
-        get => _lastLogLine;
-        private set => SetProperty(ref _lastLogLine, value);
-    }
-
     /// <summary>Task 4's "Filter: Toggle error/warning-only log views" — matches lines carrying this app's own <c>[warn]</c>/<c>[err]</c>/<c>[fail]</c> markers (see <see cref="OnActivity"/>/<see cref="HandleUnexpectedError"/>).</summary>
-    public bool ShowOnlyWarningsAndErrors
-    {
-        get => _showOnlyWarningsAndErrors;
-        set
-        {
-            if (SetProperty(ref _showOnlyWarningsAndErrors, value))
-            {
-                RefreshCommandLogText();
-            }
-        }
-    }
-
     /// <summary>Task 4's log search input — a live, case-insensitive substring filter over the buffered lines.</summary>
-    public string LogSearchText
-    {
-        get => _logSearchText;
-        set
-        {
-            if (SetProperty(ref _logSearchText, value))
-            {
-                RefreshCommandLogText();
-            }
-        }
-    }
-
     public string SelectedName
     {
         get => _selectedName;
@@ -1388,125 +1311,7 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _selectedShared, value);
     }
 
-    /// <summary>
-    /// Whether the in-app text viewer is open over the listing. The viewer is a panel and not a
-    /// separate window so it can't get lost behind the main one, and so closing it needs no
-    /// window plumbing in code-behind.
-    /// </summary>
-    public bool IsViewerVisible
-    {
-        get => _isViewerVisible;
-        private set => SetProperty(ref _isViewerVisible, value);
-    }
-
     /// <summary>True while the file is being downloaded for the viewer — a preview costs a real CLI download.</summary>
-    public bool IsViewerLoading
-    {
-        get => _isViewerLoading;
-        private set => SetProperty(ref _isViewerLoading, value);
-    }
-
-    /// <summary>The previewed file's name, shown as the viewer's heading.</summary>
-    public string ViewerTitle
-    {
-        get => _viewerTitle;
-        private set => SetProperty(ref _viewerTitle, value);
-    }
-
-    /// <summary>The previewed file's remote path, shown under the heading.</summary>
-    public string ViewerPath
-    {
-        get => _viewerPath;
-        private set => SetProperty(ref _viewerPath, value);
-    }
-
-    /// <summary>The text on screen. Empty while loading, and for a file that turned out to be binary.</summary>
-    public string ViewerText
-    {
-        get => _viewerText;
-        private set
-        {
-            if (SetProperty(ref _viewerText, value))
-            {
-                OnPropertyChanged(nameof(HasViewerText));
-            }
-        }
-    }
-
-    /// <summary>
-    /// The line under the viewer's toolbar: size, encoding, and — when it applies — that what's on
-    /// screen is only the beginning of the file. Never silently truncate.
-    /// </summary>
-    public string ViewerNote
-    {
-        get => _viewerNote;
-        private set => SetProperty(ref _viewerNote, value);
-    }
-
-    public bool HasViewerText => _viewerText.Length > 0;
-
-    /// <summary>
-    /// The previewed image's raw bytes, undecoded — decoding is a view concern (view models never
-    /// touch Avalonia types, AGENTS.md), so the view turns this into a <c>Bitmap</c> via
-    /// <c>Views.Converters.BytesToBitmapConverter</c>.
-    /// </summary>
-    public byte[]? ViewerImageBytes
-    {
-        get => _viewerImageBytes;
-        private set
-        {
-            if (SetProperty(ref _viewerImageBytes, value))
-            {
-                OnPropertyChanged(nameof(HasViewerImage));
-                OnPropertyChanged(nameof(HasViewerZoomableContent));
-            }
-        }
-    }
-
-    public bool HasViewerImage => _viewerImageBytes is { Length: > 0 };
-
-    /// <summary>
-    /// One PNG-encoded bitmap per rendered PDF page, undecoded for the same reason as
-    /// <see cref="ViewerImageBytes"/> — the View decodes each entry with the same
-    /// <c>BytesToBitmapConverter</c>.
-    /// </summary>
-    public IReadOnlyList<byte[]>? ViewerPdfPages
-    {
-        get => _viewerPdfPages;
-        private set
-        {
-            if (SetProperty(ref _viewerPdfPages, value))
-            {
-                OnPropertyChanged(nameof(HasViewerPdf));
-                OnPropertyChanged(nameof(HasViewerZoomableContent));
-            }
-        }
-    }
-
-    public bool HasViewerPdf => _viewerPdfPages is { Count: > 0 };
-
-    /// <summary>Whether the zoom control has anything to act on — hidden for the text viewer, which sizes by font instead.</summary>
-    public bool HasViewerZoomableContent => HasViewerImage || HasViewerPdf;
-
-    /// <summary>
-    /// The image/PDF viewer's display scale — see <see cref="AppSettings.ViewerZoom"/> for why the
-    /// default isn't 1.0. Clamped the same way on every write, not just on load, since the slider
-    /// itself is already range-limited but a value set some other way (a future keyboard shortcut,
-    /// say) shouldn't be able to hand the view something degenerate.
-    /// </summary>
-    public double ViewerZoom
-    {
-        get => _viewerZoom;
-        set
-        {
-            var clamped = Math.Clamp(value, AppSettings.MinViewerZoom, AppSettings.MaxViewerZoom);
-            if (SetProperty(ref _viewerZoom, clamped))
-            {
-                _settings.Update(s => s.ViewerZoom = clamped);
-            }
-        }
-    }
-
     /// <summary>Whether the Status panel's per-item fields (as opposed to the current-folder ones) have anything to show.</summary>
     public bool HasSelection
     {
@@ -1526,54 +1331,6 @@ public sealed class MainWindowViewModel : ObservableObject
     public string SelectionSummaryText => SelectedCount == 0
         ? string.Empty
         : Loc.Plural(StringKeys.Explorer.SelectionCount, SelectedCount);
-
-    public bool IsCommandConsoleVisible
-    {
-        get => _isCommandConsoleVisible;
-        private set
-        {
-            if (SetProperty(ref _isCommandConsoleVisible, value))
-            {
-                CommandConsoleMaxHeight = value ? 180 : 0;
-                CommandConsoleOpacity = value ? 1 : 0;
-                CommandConsoleHitTestVisible = value;
-                CommandConsoleToggleLabel = Loc.T(value ? StringKeys.Console.ToggleHide : StringKeys.Console.ToggleShow);
-                CommandConsoleToggleGlyph = value ? "▼" : "▲";
-                _settings.Update(s => s.ShowCommandConsole = value);
-                RaiseCommandStates();
-            }
-        }
-    }
-
-    public double CommandConsoleMaxHeight
-    {
-        get => _commandConsoleMaxHeight;
-        private set => SetProperty(ref _commandConsoleMaxHeight, value);
-    }
-
-    public double CommandConsoleOpacity
-    {
-        get => _commandConsoleOpacity;
-        private set => SetProperty(ref _commandConsoleOpacity, value);
-    }
-
-    public bool CommandConsoleHitTestVisible
-    {
-        get => _commandConsoleHitTestVisible;
-        private set => SetProperty(ref _commandConsoleHitTestVisible, value);
-    }
-
-    public string CommandConsoleToggleLabel
-    {
-        get => _commandConsoleToggleLabel;
-        private set => SetProperty(ref _commandConsoleToggleLabel, value);
-    }
-
-    public string CommandConsoleToggleGlyph
-    {
-        get => _commandConsoleToggleGlyph;
-        private set => SetProperty(ref _commandConsoleToggleGlyph, value);
-    }
 
     /// <summary>
     /// Whether the right-hand Status/Metrics sidebar is shown. Persisted: the value the user last
@@ -1620,7 +1377,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            QueueCommandLine($"[warn] Sync startup recovery failed: {ex.Message}");
+            Console.Append($"[warn] Sync startup recovery failed: {ex.Message}");
         }
 
         await LocalExplorer.InitializeAsync();
@@ -1666,6 +1423,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var path = CurrentPath;
         _deepScanCts?.Cancel();
+        // Disposed, not just dropped: a replaced CancellationTokenSource keeps its registrations
+        // and its timer alive until finalization, and this one is replaced per scan
+        // (docs/PLAN-UX-ROUND-4.md Z2). BeginPreview already got this right.
+        _deepScanCts?.Dispose();
         _deepScanCts = new CancellationTokenSource();
         var token = _deepScanCts.Token;
 
@@ -1706,8 +1467,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(path, ex));
-            IsWarning = true;
+            SetFailure(FormatDriveError(path, ex), ex);
         }
         catch (DbException ex)
         {
@@ -1758,10 +1518,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private bool CanCreateFolder() => !IsLoading && IsAuthenticated;
 
-    private bool CanDownloadActivity() => _commandLog.Count > 0;
-
-    private bool CanClearActivity() => _commandLog.Count > 0;
-
     private async Task AuthenticateAsync()
     {
         try
@@ -1796,7 +1552,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError("auth login", ex));
+            SetFailure(FormatDriveError("auth login", ex), ex);
         }
         finally
         {
@@ -1825,7 +1581,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError("auth logout", ex));
+            SetFailure(FormatDriveError("auth logout", ex), ex);
         }
         finally
         {
@@ -1899,9 +1655,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _cacheService = session.CacheService;
         _metricsStore = session.MetricsStore;
         _statsScanner = session.StatsScanner;
-        _previewLoader = session.PreviewLoader;
-        _imagePreviewLoader = session.ImagePreviewLoader;
-        _pdfPreviewLoader = session.PdfPreviewLoader;
+        Preview.SetLoaders(session.PreviewLoader, session.ImagePreviewLoader, session.PdfPreviewLoader);
         _rootPath = _provider.Id == ProviderId.Proton ? "/my-files" : "/";
 
         // Both of these used to be wired once at startup and never revisited — harmless before
@@ -1996,7 +1750,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             _navigationHistory.Push(previousPath);
             RaiseCommandStates();
-            SetStatus(FormatDriveError(previousPath, ex));
+            SetFailure(FormatDriveError(previousPath, ex), ex);
         }
     }
 
@@ -2029,7 +1783,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 RaiseCommandStates();
             }
 
-            SetStatus(FormatDriveError(path, ex));
+            SetFailure(FormatDriveError(path, ex), ex);
         }
     }
 
@@ -2041,7 +1795,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(CurrentPath, ex));
+            SetFailure(FormatDriveError(CurrentPath, ex), ex);
         }
     }
 
@@ -2079,7 +1833,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(CurrentPath, ex));
+            SetFailure(FormatDriveError(CurrentPath, ex), ex);
         }
         finally
         {
@@ -2275,7 +2029,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(CurrentPath, ex));
+            SetFailure(FormatDriveError(CurrentPath, ex), ex);
         }
         finally
         {
@@ -2307,7 +2061,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(item.Path, ex));
+            SetFailure(FormatDriveError(item.Path, ex), ex);
         }
         finally
         {
@@ -2315,243 +2069,8 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    /// <summary>
-    /// Opens the viewer on <paramref name="item"/> — as text or as an image, whichever
-    /// <see cref="ImagePreviewPolicy"/>/<see cref="TextPreviewPolicy"/> say it is. Images are
-    /// checked first: an image's <see cref="FileKind"/> never also qualifies as text, so the order
-    /// only matters for the refusal message when neither policy accepts the file.
-    /// </summary>
-    public async Task PreviewItemAsync(DriveItem item)
-    {
-        if (!item.IsFolder && FileKindClassifier.Classify(item.Name, isFolder: false) == FileKind.Image && ImagePreviewPolicy.CanPreview(item))
-        {
-            await PreviewImageAsync(item);
-            return;
-        }
-
-        if (PdfPreviewPolicy.CanPreview(item))
-        {
-            await PreviewPdfAsync(item);
-            return;
-        }
-
-        if (TextPreviewPolicy.CanPreview(item))
-        {
-            await PreviewTextAsync(item);
-            return;
-        }
-
-        SetStatus(
-            StringKeys.Status.ViewerUnsupported,
-            item.Name,
-            TextPreviewPolicy.MaxPreviewBytes / 1024,
-            ImagePreviewPolicy.MaxPreviewBytes / (1024 * 1024),
-            PdfPreviewPolicy.MaxPreviewBytes / (1024 * 1024));
-        IsWarning = true;
-    }
-
-    /// <summary>
-    /// The text half of <see cref="PreviewItemAsync"/>. The CLI can only download, so this pays for
-    /// a real download of the file into a temp folder that the loader deletes again.
-    /// </summary>
-    private async Task PreviewTextAsync(DriveItem item)
-    {
-        if (_previewLoader is null)
-        {
-            SetStatus(StringKeys.Status.ViewerTextUnavailable);
-            IsWarning = true;
-            return;
-        }
-
-        var cts = BeginPreview(item);
-
-        try
-        {
-            var preview = await _previewLoader.LoadAsync(item, cts.Token);
-            if (cts.IsCancellationRequested)
-            {
-                return;
-            }
-
-            if (preview.IsBinary)
-            {
-                ViewerText = string.Empty;
-                ViewerNote = Loc.F(StringKeys.Viewer.NotAText, preview.ByteCount.ToString("n0", Loc.Culture));
-                SetStatus(StringKeys.Status.ViewerNotAText, item.Name);
-                IsWarning = true;
-                return;
-            }
-
-            ViewerText = preview.Text;
-            ViewerNote = FormatViewerNote(preview);
-            SetStatus(StringKeys.Status.ViewerShowing, item.Name);
-        }
-        catch (OperationCanceledException)
-        {
-            // Superseded or closed; whoever did that already owns the panel's state.
-        }
-        catch (InvalidOperationException ex)
-        {
-            ViewerNote = Loc.T(StringKeys.Status.ViewerOpenFailed);
-            SetStatus(FormatDriveError(item.Path, ex));
-            IsWarning = true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            ViewerNote = Loc.T(StringKeys.Status.ViewerReadFailed);
-            SetStatus(StringKeys.Status.ViewerError, item.Name, ex.DescribeForUser().Render());
-            IsWarning = true;
-        }
-        finally
-        {
-            EndPreview(cts);
-        }
-    }
-
-    /// <summary>The image half of <see cref="PreviewItemAsync"/> — same download-then-show shape as the text one.</summary>
-    private async Task PreviewImageAsync(DriveItem item)
-    {
-        if (_imagePreviewLoader is null)
-        {
-            SetStatus(StringKeys.Status.ViewerImageUnavailable);
-            IsWarning = true;
-            return;
-        }
-
-        var cts = BeginPreview(item);
-
-        try
-        {
-            var preview = await _imagePreviewLoader.LoadAsync(item, cts.Token);
-            if (cts.IsCancellationRequested)
-            {
-                return;
-            }
-
-            ViewerImageBytes = preview.Bytes;
-            ViewerNote = Loc.F(StringKeys.Viewer.NoteBytes, preview.ByteCount.ToString("n0", Loc.Culture));
-            SetStatus(StringKeys.Status.ViewerShowing, item.Name);
-        }
-        catch (OperationCanceledException)
-        {
-            // Superseded or closed; whoever did that already owns the panel's state.
-        }
-        catch (InvalidOperationException ex)
-        {
-            ViewerNote = Loc.T(StringKeys.Status.ViewerOpenFailed);
-            SetStatus(FormatDriveError(item.Path, ex));
-            IsWarning = true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            ViewerNote = Loc.T(StringKeys.Status.ViewerReadFailed);
-            SetStatus(StringKeys.Status.ViewerError, item.Name, ex.DescribeForUser().Render());
-            IsWarning = true;
-        }
-        finally
-        {
-            EndPreview(cts);
-        }
-    }
-
-    /// <summary>The PDF half of <see cref="PreviewItemAsync"/> — same download-then-show shape, plus rendering the pages the loader already did.</summary>
-    private async Task PreviewPdfAsync(DriveItem item)
-    {
-        if (_pdfPreviewLoader is null)
-        {
-            SetStatus(StringKeys.Status.ViewerPdfUnavailable);
-            IsWarning = true;
-            return;
-        }
-
-        var cts = BeginPreview(item);
-
-        try
-        {
-            var preview = await _pdfPreviewLoader.LoadAsync(item, cts.Token);
-            if (cts.IsCancellationRequested)
-            {
-                return;
-            }
-
-            ViewerPdfPages = preview.Pages;
-            ViewerNote = preview.Pages.Count < preview.TotalPageCount
-                ? Loc.F(StringKeys.Viewer.NotePages, preview.Pages.Count, preview.TotalPageCount)
-                : Loc.Plural(StringKeys.Viewer.NotePageCount, preview.TotalPageCount);
-            SetStatus(StringKeys.Status.ViewerShowing, item.Name);
-        }
-        catch (OperationCanceledException)
-        {
-            // Superseded or closed; whoever did that already owns the panel's state.
-        }
-        catch (InvalidOperationException ex)
-        {
-            ViewerNote = Loc.T(StringKeys.Status.ViewerOpenFailed);
-            SetStatus(FormatDriveError(item.Path, ex));
-            IsWarning = true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            ViewerNote = Loc.T(StringKeys.Status.ViewerReadFailed);
-            SetStatus(StringKeys.Status.ViewerError, item.Name, ex.DescribeForUser().Render());
-            IsWarning = true;
-        }
-        finally
-        {
-            EndPreview(cts);
-        }
-    }
-
-    /// <summary>
-    /// Shared setup for both preview flows: supersede any in-flight download and reset the panel to
-    /// a clean loading state for <paramref name="item"/>, clearing whichever content type the
-    /// previous preview left behind.
-    /// </summary>
-    private CancellationTokenSource BeginPreview(DriveItem item)
-    {
-        _previewCts?.Cancel();
-        _previewCts?.Dispose();
-        var cts = new CancellationTokenSource();
-        _previewCts = cts;
-
-        IsViewerVisible = true;
-        IsViewerLoading = true;
-        ViewerTitle = item.Name;
-        ViewerPath = item.Path;
-        ViewerText = string.Empty;
-        ViewerImageBytes = null;
-        ViewerPdfPages = null;
-        ViewerNote = Loc.T(StringKeys.Viewer.NoteDownloading);
-        SetStatus(StringKeys.Status.ViewerOpening, item.Name);
-        return cts;
-    }
-
-    private void EndPreview(CancellationTokenSource cts)
-    {
-        if (ReferenceEquals(_previewCts, cts))
-        {
-            IsViewerLoading = false;
-            _previewCts = null;
-            cts.Dispose();
-        }
-    }
-
-    private static string FormatViewerNote(TextFilePreview preview)
-    {
-        // "más de" when the read stopped at the byte limit: ByteCount is what was read, not the
-        // file's size, and printing it as the size would be a lie of exactly one byte.
-        var localizer = Localizer.Instance;
-        var size = preview.ByteCount > TextPreviewPolicy.MaxPreviewBytes
-            ? localizer.F(StringKeys.Viewer.NoteMoreThan, TextPreviewPolicy.MaxPreviewBytes.ToString("n0", localizer.Culture))
-            : localizer.F(StringKeys.Viewer.NoteBytes, preview.ByteCount.ToString("n0", localizer.Culture));
-        var note = localizer.F(StringKeys.Viewer.NoteText, preview.LineCount.ToString("n0", localizer.Culture), size, preview.EncodingName);
-        return preview.IsTruncated
-            ? note + localizer.T(StringKeys.Viewer.NoteTruncated)
-            : note;
-    }
-
     private bool CanViewSelectedFile()
-        => _selectedNode is { CanPreview: true } && (_previewLoader is not null || _imagePreviewLoader is not null || _pdfPreviewLoader is not null);
+        => _selectedNode is { CanPreview: true } && Preview.CanShowAnything;
 
     private async Task ViewSelectedFileAsync()
     {
@@ -2562,19 +2081,7 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        await PreviewItemAsync(node.Item);
-    }
-
-    private async Task CloseViewerAsync()
-    {
-        _previewCts?.Cancel();
-        IsViewerVisible = false;
-        IsViewerLoading = false;
-        ViewerImageBytes = null;
-        ViewerPdfPages = null;
-        ViewerText = string.Empty;
-        ViewerNote = string.Empty;
-        await Task.CompletedTask;
+        await Preview.PreviewItemAsync(node.Item);
     }
 
     public async Task RenameItemAsync(DriveItem item)
@@ -2613,7 +2120,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(item.Path, ex));
+            SetFailure(FormatDriveError(item.Path, ex), ex);
         }
         finally
         {
@@ -2650,7 +2157,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(item.Path, ex));
+            SetFailure(FormatDriveError(item.Path, ex), ex);
         }
         finally
         {
@@ -2686,7 +2193,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(item.Path, ex));
+            SetFailure(FormatDriveError(item.Path, ex), ex);
         }
         finally
         {
@@ -2742,8 +2249,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(item.Path, ex));
-            IsWarning = true;
+            SetFailure(FormatDriveError(item.Path, ex), ex);
         }
         finally
         {
@@ -2798,7 +2304,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (InvalidOperationException ex)
         {
-            SetStatus(FormatDriveError(folder.Path, ex));
+            SetFailure(FormatDriveError(folder.Path, ex), ex);
         }
         finally
         {
@@ -2881,17 +2387,43 @@ public sealed class MainWindowViewModel : ObservableObject
         await show(item.Name, fields);
     }
 
+    /// <summary>
+    /// A plain click. Selection only, in every view mode (docs/PLAN-UX-ROUND-3.md X2) — opening
+    /// moved to the double click. Before this, a single click both selected and opened, which is
+    /// why the tile modes could not select at all: their only gesture already meant "navigate".
+    /// </summary>
+    private async Task SelectRowAsync(DriveItem item)
+    {
+        SelectRow(RootItems.FirstOrDefault(node => node.Item.Path == item.Path));
+        SelectItem(item);
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A double click, Enter, or the context menu's "Open": into the folder, or the preview for a
+    /// file that has one. Selects first, so activating a row a keyboard moved to also updates the
+    /// details panel.
+    /// </summary>
     private async Task HandleRowClickAsync(DriveItem item)
     {
         SelectRow(RootItems.FirstOrDefault(node => node.Item.Path == item.Path));
         SelectItem(item);
 
-        if (!item.IsFolder)
+        if (item.IsFolder)
         {
+            await NavigateIntoAsync(item.Path);
             return;
         }
 
-        await NavigateIntoAsync(item.Path);
+        // Opening a file opens it (docs/PLAN-UX-ROUND-4.md Y1). This returned here, which was
+        // invisible while a click both selected and opened — X2 made the double click the open
+        // gesture, and then double-clicking a file did nothing at all while the plan and the commit
+        // message both said it previewed. A file with no preview still just selects: there is
+        // nothing else this app can do with it.
+        if (PreviewPolicy.CanPreview(item))
+        {
+            await Preview.PreviewItemAsync(item);
+        }
     }
 
     /// <summary>
@@ -3080,6 +2612,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task LoadFolderAsync(string path, bool clearSelection, bool forceFreshRemoteView = false)
     {
         _cts?.Cancel();
+        _cts?.Dispose();
         _cts = new CancellationTokenSource();
         var token = _cts.Token;
 
@@ -3225,8 +2758,7 @@ public sealed class MainWindowViewModel : ObservableObject
             IsAuthenticated = false;
         }
 
-        SetStatus(FormatDriveError(path, ex));
-        IsWarning = true;
+        SetFailure(FormatDriveError(path, ex), ex);
     }
 
     /// <summary>
@@ -3285,7 +2817,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RootItems.Clear();
         foreach (var item in DriveItemSorter.Sort(visible, SortKey, SortDescending))
         {
-            var node = new DriveNodeViewModel(item, HandleRowClickAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, PreviewItemAsync, HandleUnexpectedError, new DriveNodeSyncActions
+            var node = new DriveNodeViewModel(item, HandleRowClickAsync, SelectRowAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, Preview.PreviewItemAsync, HandleUnexpectedError, new DriveNodeSyncActions
             {
                 FindSyncPair = i => SyncPanel.FindPairByRemotePath(i.Path),
                 SyncSelectedPathAsync = SyncSelectedRemotePathAsync,
@@ -3311,6 +2843,10 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectAllRowsCommand.RaiseCanExecuteChanged();
         RaiseSelectionSummaryChanged();
         OnPropertyChanged(nameof(SearchResultText));
+        // Only after a listing has actually been rendered once: before that, "no rows" means "no
+        // load has happened yet", and the empty state would flash on the way to the first paint.
+        _hasRenderedListing = true;
+        RaiseEmptyStateChanged();
 
         // Computed here rather than at each call site so the cached paint and the CLI result both
         // update it, and so the numbers can never disagree with the rows actually on screen.
@@ -3498,19 +3034,19 @@ public sealed class MainWindowViewModel : ObservableObject
             _connectionStatusKind = "Disconnected";
             _connectionStatusDescription = Loc.F(StringKeys.Connection.DescDisconnected, _provider.DisplayName);
         }
-        else if (_isWarning && _lastErrorKind == DriveErrorKind.RateLimited)
+        else if (_status.IsWarning && _lastErrorKind == DriveErrorKind.RateLimited)
         {
             _connectionStatus = Loc.T(StringKeys.Connection.StateRateLimited);
             _connectionStatusKind = "RateLimited";
             _connectionStatusDescription = Loc.F(StringKeys.Connection.DescRateLimited, _provider.DisplayName);
         }
-        else if (_isWarning && IsConnectionFailure(_lastErrorKind))
+        else if (_status.IsWarning && IsConnectionFailure(_lastErrorKind))
         {
             // Deliberately ahead of the Syncing branch: a sync running on top of a broken
             // connection is not the headline, the broken connection is.
             _connectionStatus = Loc.T(StringKeys.Connection.StateDegraded);
             _connectionStatusKind = "Degraded";
-            _connectionStatusDescription = Loc.F(StringKeys.Connection.DescDegraded, _provider.DisplayName, _statusMessage);
+            _connectionStatusDescription = Loc.F(StringKeys.Connection.DescDegraded, _provider.DisplayName, _status.Message);
         }
         else if ((_isSyncInProgress is not null && _isSyncInProgress()) || IsLoading || IsDeepScanRunning)
         {
@@ -3558,14 +3094,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public void UpdateQuotaMetrics()
     {
-        _quotaTotalBytes = _provider.Id switch
-        {
-            ProviderId.OneDrive => 1024L * 1024 * 1024 * 1024, // 1 TB
-            ProviderId.GoogleDrive => 15L * 1024 * 1024 * 1024, // 15 GB
-            ProviderId.Nextcloud => 100L * 1024 * 1024 * 1024, // 100 GB
-            ProviderId.S3 => 5120L * 1024 * 1024 * 1024, // 5 TB
-            _ => 500L * 1024 * 1024 * 1024 // 500 GB (Proton)
-        };
 
         // Only the root listing stands in for "account usage" here — there's no real quota API on
         // the provider seam yet, so this is an approximation. Recomputing it from whatever subfolder
@@ -3588,12 +3116,8 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(QuotaUsedBytes));
-        OnPropertyChanged(nameof(QuotaTotalBytes));
-        OnPropertyChanged(nameof(QuotaPercent));
-        OnPropertyChanged(nameof(QuotaProgress));
         OnPropertyChanged(nameof(QuotaDisplay));
         OnPropertyChanged(nameof(QuotaTooltip));
-        OnPropertyChanged(nameof(QuotaSummary));
         OnPropertyChanged(nameof(IsQuotaUsageKnown));
     }
 
@@ -3635,11 +3159,7 @@ public sealed class MainWindowViewModel : ObservableObject
         BackCommand.RaiseCanExecuteChanged();
         UploadCommand.RaiseCanExecuteChanged();
         CreateFolderCommand.RaiseCanExecuteChanged();
-        DownloadActivityCommand.RaiseCanExecuteChanged();
-        ClearActivityCommand.RaiseCanExecuteChanged();
-        CheckCliVersionCommand.RaiseCanExecuteChanged();
-        CheckForCliUpdateCommand.RaiseCanExecuteChanged();
-        InstallCliUpdateCommand.RaiseCanExecuteChanged();
+        CliUpdate.RaiseCommandStates();
         ViewSelectedFileCommand.RaiseCanExecuteChanged();
         SwitchToProtonCommand.RaiseCanExecuteChanged();
         SwitchToOneDriveCommand.RaiseCanExecuteChanged();
@@ -3648,21 +3168,9 @@ public sealed class MainWindowViewModel : ObservableObject
         SwitchToS3Command.RaiseCanExecuteChanged();
     }
 
-    private async Task ToggleCommandConsoleAsync()
-    {
-        IsCommandConsoleVisible = !IsCommandConsoleVisible;
-        await Task.CompletedTask;
-    }
-
     private async Task ToggleLocalExplorerPanelAsync()
     {
         IsLocalExplorerPanelVisible = !IsLocalExplorerPanelVisible;
-        await Task.CompletedTask;
-    }
-
-    private async Task ToggleLogFilterAsync()
-    {
-        ShowOnlyWarningsAndErrors = !ShowOnlyWarningsAndErrors;
         await Task.CompletedTask;
     }
 
@@ -3741,6 +3249,24 @@ public sealed class MainWindowViewModel : ObservableObject
         await Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Both filters at once, from the empty state itself (docs/PLAN-UX-ROUND-3.md X3). The kind
+    /// chip clears by clicking the active chip, which is only discoverable to someone who already
+    /// knows it — and someone staring at an empty pane does not.
+    /// </summary>
+    private async Task ClearFiltersAsync()
+    {
+        _kindFilter = null;
+        // Straight through the field: SearchText's setter renders, and rendering twice for one
+        // gesture would rebuild the whole listing for nothing.
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        OnPropertyChanged(nameof(HasSearchText));
+        ClearSearchCommand.RaiseCanExecuteChanged();
+        RenderItems();
+        await Task.CompletedTask;
+    }
+
     private async Task ShowExplorerAsync()
     {
         ActiveView = MainView.Explorer;
@@ -3760,208 +3286,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         // Read it on the way in, so the settings view is never showing a stale or empty version,
         // but only once per configured path — the CLI costs a whole process launch (~3.5s cold).
-        if (CliVersion == UnknownCliVersion && !string.IsNullOrWhiteSpace(CliPath))
-        {
-            await CheckCliVersionAsync();
-        }
-    }
-
-    private bool CanCheckCliVersion() => !IsCheckingCliVersion && !string.IsNullOrWhiteSpace(CliPath);
-
-    private async Task CheckCliVersionAsync()
-    {
-        IsCheckingCliVersion = true;
-        try
-        {
-            // Diagnostics is only ever null for a provider with no external binary to version
-            // (docs/PLAN-CLOUD-PROVIDERS.md §2.6); the settings UI stops offering this command for
-            // such a provider as of P5. Today's only provider (Proton) always has one.
-            var version = _provider.Diagnostics is not null
-                ? await _provider.Diagnostics.GetVersionAsync()
-                : null;
-            CliVersion = string.IsNullOrWhiteSpace(version)
-                ? Loc.T(StringKeys.CliVersion.NoVersionReported)
-                : version;
-        }
-        catch (InvalidOperationException ex)
-        {
-            // Includes DriveException. The CLI's own text is the most useful thing on screen here:
-            // if `--version` is not the flag this build understands, the user sees exactly that.
-            CliVersion = Loc.F(StringKeys.CliVersion.Unavailable, ex.DescribeForUser().Render());
-        }
-        catch (FileNotFoundException ex)
-        {
-            CliVersion = Loc.F(StringKeys.CliVersion.Unavailable, ex.DescribeForUser().Render());
-        }
-        finally
-        {
-            IsCheckingCliVersion = false;
-        }
-    }
-
-    private bool CanCheckForCliUpdate() => _releaseFeed is not null && !IsCliUpdateBusy;
-
-    /// <summary>
-    /// Compares the installed CLI against Proton's published Stable release. This is the app's only
-    /// outbound network call; everything else goes through the CLI process.
-    /// </summary>
-    private async Task CheckForCliUpdateAsync()
-    {
-        if (_releaseFeed is null)
-        {
-            CliUpdateStatus = Loc.T(StringKeys.CliUpdate.Unavailable);
-            return;
-        }
-
-        IsCliUpdateBusy = true;
-        try
-        {
-            // The comparison needs a version to compare against, and the user may never have
-            // opened the settings view this session.
-            if (CliVersion == UnknownCliVersion && !string.IsNullOrWhiteSpace(CliPath))
-            {
-                await CheckCliVersionAsync();
-            }
-
-            var release = await _releaseFeed.GetLatestStableAsync();
-            if (release is null)
-            {
-                _availableRelease = null;
-                IsCliUpdateAvailable = false;
-                CliUpdateStatus = Loc.T(StringKeys.CliUpdate.NoBuildForPlatform);
-                return;
-            }
-
-            switch (CliVersionComparer.Compare(CliVersion, release.Version))
-            {
-                case CliUpdateAvailability.UpdateAvailable:
-                    _availableRelease = release;
-                    IsCliUpdateAvailable = true;
-                    CliUpdateStatus = Loc.F(StringKeys.CliUpdate.Available, release.Version, release.ReleaseDate);
-                    break;
-
-                case CliUpdateAvailability.UpToDate:
-                    _availableRelease = null;
-                    IsCliUpdateAvailable = false;
-                    CliUpdateStatus = Loc.F(StringKeys.CliUpdate.UpToDate, release.Version);
-                    break;
-
-                default:
-                    // Refusing to offer an install here is the point: overwriting a working CLI on
-                    // the strength of a version string we couldn't read is the one outcome worse
-                    // than not updating.
-                    _availableRelease = null;
-                    IsCliUpdateAvailable = false;
-                    CliUpdateStatus = Loc.F(StringKeys.CliUpdate.InstalledVersionUnknown, release.Version);
-                    break;
-            }
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
-        {
-            _availableRelease = null;
-            IsCliUpdateAvailable = false;
-            CliUpdateStatus = Loc.F(StringKeys.CliUpdate.ManifestUnreachable, ex.Message);
-        }
-        finally
-        {
-            IsCliUpdateBusy = false;
-        }
-    }
-
-    private bool CanInstallCliUpdate()
-        => IsCliUpdateAvailable && _availableRelease is not null && !IsCliUpdateBusy && !string.IsNullOrWhiteSpace(CliPath);
-
-    private async Task InstallCliUpdateAsync()
-    {
-        var release = _availableRelease;
-        if (release is null)
-        {
-            return;
-        }
-
-        // A scan or transfer in flight is holding the CLI. The rename itself is atomic and an
-        // already-running process keeps its own inode, so this is not about corrupting the swap —
-        // it is that the next call in that same cycle would land on a different binary version
-        // mid-operation, which is not a state worth reasoning about.
-        if (_isSyncInProgress())
-        {
-            CliUpdateStatus = Loc.T(StringKeys.CliUpdate.SyncInProgress);
-            return;
-        }
-
-        IsCliUpdateBusy = true;
-        try
-        {
-            CliUpdateStatus = Loc.F(StringKeys.CliUpdate.Downloading, release.Version);
-            await _updateInstaller.InstallAsync(
-                release,
-                CliPath,
-                onProgress: bytes => Dispatcher.UIThread.Post(
-                    () => CliUpdateStatus = Loc.F(StringKeys.CliUpdate.DownloadingWithSize, release.Version, bytes / (1024 * 1024))));
-
-            _availableRelease = null;
-            IsCliUpdateAvailable = false;
-            CliVersion = UnknownCliVersion;
-            await CheckCliVersionAsync();
-            CliUpdateStatus = Loc.F(StringKeys.CliUpdate.Done, release.Version);
-        }
-        catch (CliUpdateException ex)
-        {
-            // Includes the checksum mismatch, which leaves the old binary in place by design.
-            CliUpdateStatus = ex.Message;
-            IsWarning = true;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or TaskCanceledException)
-        {
-            CliUpdateStatus = Loc.F(StringKeys.CliUpdate.Failed, ex.DescribeForUser().Render());
-            IsWarning = true;
-        }
-        finally
-        {
-            IsCliUpdateBusy = false;
-        }
-    }
-
-    private async Task DownloadActivityAsync()
-    {
-        var picker = RequestSaveActivityAsync;
-        if (picker is null)
-        {
-            SetStatus(StringKeys.Status.ActivityUnavailable);
-            return;
-        }
-
-        var path = await picker();
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return;
-        }
-
-        try
-        {
-            await File.WriteAllTextAsync(path, CommandLogText);
-            SetStatus(StringKeys.Status.ActivitySaved, path);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            SetStatus(StringKeys.Status.ActivitySaveFailed, path, ex.Message);
-            IsWarning = true;
-        }
-    }
-
-    private async Task ClearActivityAsync()
-    {
-        lock (_commandLogGate)
-        {
-            _pendingCommandLines.Clear();
-        }
-
-        _commandLog.Clear();
-        CommandLogText = Loc.T(StringKeys.Console.NoCommandRunning);
-        ActiveCommand = Loc.T(StringKeys.Console.Idle);
-        LastLogLine = null;
-        RaiseCommandStates();
-        await Task.CompletedTask;
+        await CliUpdate.EnsureVersionReadAsync();
     }
 
     /// <summary>
@@ -3973,143 +3298,26 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public void ObserveAdditionalProviderActivity(string accountLabel, ICloudDriveProvider provider)
     {
-        provider.Activity += (_, activity) => OnActivity(accountLabel, activity);
-        provider.ListingParseWarning += (_, message) => OnListingParseWarning(accountLabel, message);
-    }
-
-    private void OnActivity(string accountLabel, ProviderActivity activity)
-    {
-        switch (activity.Kind)
-        {
-            case ActivityKind.Started:
-                Dispatcher.UIThread.Post(() => ActiveCommand = $"[{accountLabel}] {activity.Label}");
-                Dispatcher.UIThread.Post(() => ActiveOperationCount++);
-                QueueCommandLine($"[{accountLabel}] > {activity.Label}");
-                break;
-
-            case ActivityKind.Output:
-                QueueCommandLine($"[{accountLabel}] " + (activity.IsError ? $"[err] {activity.Text}" : activity.Text ?? string.Empty));
-                break;
-
-            case ActivityKind.Finished:
-                QueueCommandLine($"[{accountLabel}] " + (activity.IsError ? $"[fail] exit {activity.ExitCode}" : $"[done] exit {activity.ExitCode}"));
-                // Unconditional, same as before P7: with two sessions active, one session's
-                // Finished can clear ActiveCommand out from under the other's still-running
-                // Started. A single "what's active" label can't represent two concurrent
-                // operations correctly — a real per-session indicator is Phase B's job.
-                Dispatcher.UIThread.Post(() => ActiveCommand = "Idle");
-                // Clamped rather than trusting Started/Finished to always balance: a session added
-                // mid-flight (AddBrowsableAccount) only starts observing from that point on, so its
-                // first-ever event could be a Finished with no matching Started counted yet.
-                Dispatcher.UIThread.Post(() => ActiveOperationCount = Math.Max(0, ActiveOperationCount - 1));
-                break;
-        }
+        provider.Activity += (_, activity) => Console.OnActivity(accountLabel, activity);
+        provider.ListingParseWarning += (_, message) => Console.OnListingParseWarning(accountLabel, message);
     }
 
     private void OnListingParseWarning(string accountLabel, string message)
-        => QueueCommandLine($"[{accountLabel}] [warn] {message}");
-
-    /// <summary>
-    /// Buffers a console line and makes sure exactly one flush is pending.
-    ///
-    /// The old version posted to the UI thread per line and rebuilt the whole console text there,
-    /// which re-shaped ~300 KB of text through HarfBuzz on every single line (see
-    /// <see cref="CommandLogBuffer"/> for the captured stack). Now the lines accumulate and one
-    /// flush drains them, at <see cref="DispatcherPriority.Background"/> so it runs *after* input and
-    /// layout — a burst of CLI output can no longer outrun the user's clicks.
-    /// </summary>
-    private void QueueCommandLine(string line)
-    {
-        lock (_commandLogGate)
-        {
-            _pendingCommandLines.Add(line);
-            if (_commandLogFlushScheduled)
-            {
-                return;
-            }
-
-            _commandLogFlushScheduled = true;
-        }
-
-        Dispatcher.UIThread.Post(FlushCommandLog, DispatcherPriority.Background);
-    }
-
-    private void FlushCommandLog()
-    {
-        List<string> batch;
-        lock (_commandLogGate)
-        {
-            _commandLogFlushScheduled = false;
-            if (_pendingCommandLines.Count == 0)
-            {
-                return;
-            }
-
-            batch = [.. _pendingCommandLines];
-            _pendingCommandLines.Clear();
-        }
-
-        var countBefore = _commandLog.Count;
-        _commandLog.AddRange(batch);
-        LastLogLine = batch[^1];
-        RefreshCommandLogText();
-
-        // Only the two activity commands depend on the line count, and only on the empty/non-empty
-        // transition. Re-raising all thirteen on every line was pure waste on the UI thread.
-        if (countBefore == 0 && _commandLog.Count > 0)
-        {
-            DownloadActivityCommand.RaiseCanExecuteChanged();
-            ClearActivityCommand.RaiseCanExecuteChanged();
-        }
-    }
-
-    /// <summary>
-    /// Re-renders <see cref="CommandLogText"/> from the buffer plus whatever the warnings-only
-    /// filter and search box currently ask for — called both when new lines arrive and when either
-    /// filter input changes, so the two stay in sync without keeping a second copy of the text.
-    /// </summary>
-    private void RefreshCommandLogText()
-    {
-        IEnumerable<string> lines = _commandLog.Lines;
-
-        if (_showOnlyWarningsAndErrors)
-        {
-            lines = lines.Where(line => line.Contains("[warn]", StringComparison.Ordinal)
-                || line.Contains("[err]", StringComparison.Ordinal)
-                || line.Contains("[fail]", StringComparison.Ordinal));
-        }
-
-        if (!string.IsNullOrWhiteSpace(_logSearchText))
-        {
-            lines = lines.Where(line => line.Contains(_logSearchText, StringComparison.OrdinalIgnoreCase));
-        }
-
-        CommandLogText = string.Join(Environment.NewLine, lines);
-    }
-
-    /// <summary>
-    /// Adds lines straight to the buffer and re-renders, bypassing QueueCommandLine/FlushCommandLog's
-    /// <c>Dispatcher.UIThread.Post</c>. Internal rather than private for the same reason as
-    /// <see cref="DisplayItems"/>: that Post never completes without a running Avalonia dispatcher,
-    /// so a test that went through the real activity pipeline to get lines into the log would hang.
-    /// </summary>
-    internal void AppendCommandLogLinesForTests(IEnumerable<string> lines)
-    {
-        var list = lines as IReadOnlyList<string> ?? lines.ToList();
-        _commandLog.AddRange(list);
-        if (list.Count > 0)
-        {
-            LastLogLine = list[^1];
-        }
-
-        RefreshCommandLogText();
-    }
+        => Console.Append($"[{accountLabel}] [warn] {message}");
 
     /// <summary>
     /// Catch-all for exceptions that escape a command's Func&lt;Task&gt; and are not the
     /// expected InvalidOperationException the CLI layer throws. Without this, AsyncCommand's
     /// async void Execute would let the exception terminate the process.
     /// </summary>
+    /// <summary>
+    /// The same sink <see cref="AsyncCommand"/> uses, for the view's own <c>async void</c> event
+    /// handlers. They are not commands, so nothing routes their exceptions anywhere: an exception
+    /// escaping one of them terminates the process (AGENTS.md's own non-negotiable, and
+    /// docs/PLAN-UX-ROUND-4.md Z1 for the four that had no guard at all).
+    /// </summary>
+    internal void ReportHandlerFailure(Exception ex) => HandleUnexpectedError(ex);
+
     private void HandleUnexpectedError(Exception ex)
     {
         Dispatcher.UIThread.Post(() =>
@@ -4117,7 +3325,7 @@ public sealed class MainWindowViewModel : ObservableObject
             CrashLog.Write(ex);
             SetStatus(StringKeys.Status.UnexpectedError, ex.Message);
             IsWarning = true;
-            QueueCommandLine($"[err] Unexpected error: {ex}");
+            Console.Append($"[err] Unexpected error: {ex}");
             IsLoading = false;
         });
     }

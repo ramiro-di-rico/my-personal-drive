@@ -7,7 +7,7 @@ namespace MyPersonalDrive.ViewModels.Sync;
 /// same shape as <c>ViewModels.KindFilterViewModel</c>, the folder browser's own "filter by type"
 /// chips, reused here rather than inventing a second pattern for the same idea.
 ///
-/// <see cref="AccountLabel"/> null is the "Todos" chip: filtering is a view state, and the way out
+/// <see cref="AccountLabel"/> null is the "All" chip: filtering is a view state, and the way out
 /// of it has to be as visible as the way in.
 /// </summary>
 public sealed class ProviderFilterViewModel : ObservableObject
@@ -18,7 +18,6 @@ public sealed class ProviderFilterViewModel : ObservableObject
     {
         AccountLabel = accountLabel;
         Count = count;
-        Label = accountLabel ?? "Todos";
         ApplyCommand = new AsyncCommand(() => apply(accountLabel), onError: onError);
     }
 
@@ -26,7 +25,8 @@ public sealed class ProviderFilterViewModel : ObservableObject
 
     public int Count { get; }
 
-    public string Label { get; }
+    /// <summary>Read at get time — see <see cref="ViewModels.KindFilterViewModel.Label"/>.</summary>
+    public string Label => AccountLabel ?? Localizer.Instance.T(StringKeys.Common.All);
 
     public string LabelWithCount => Loc.F(StringKeys.Sync.FilterLabel, Label, Count.ToString("n0", Loc.Culture));
 

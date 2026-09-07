@@ -15,6 +15,7 @@ public static class StringKeys
     public static class Common
     {
         public const string Account = "common.account";
+        public const string All = "common.all";
         public const string Add = "common.add";
         public const string Apply = "common.apply";
         public const string Browse = "common.browse";
@@ -76,6 +77,11 @@ public static class StringKeys
     {
         public const string BackTooltip = "explorer.back.tooltip";
         public const string DownloadSelected = "explorer.download.selected";
+        public const string EmptyClearFilters = "explorer.empty.clearfilters";
+        public const string EmptyFilteredDetail = "explorer.empty.filtered.detail";
+        public const string EmptyFilteredTitle = "explorer.empty.filtered.title";
+        public const string EmptyFolderDetail = "explorer.empty.folder.detail";
+        public const string EmptyFolderTitle = "explorer.empty.folder.title";
         public const string FilterSummary = "explorer.filter.summary";
         public const string HeaderSubtitle = "explorer.header.subtitle";
         public const string HeaderTitle = "explorer.header.title";
@@ -141,11 +147,14 @@ public static class StringKeys
     /// <summary>What only the local pane has: home, hidden files, free space, local deletes.</summary>
     public static class Local
     {
+        public const string BreadcrumbLabel = "local.breadcrumb.label";
         public const string ConfirmDeleteFolder = "local.confirm.deletefolder";
         /// <summary>Plural prefix.</summary>
         public const string ConfirmDeleteMany = "local.confirm.deletemany";
         public const string ConfirmDeleteOne = "local.confirm.deleteone";
         public const string DeleteSelected = "local.delete.selected";
+        public const string EmptyFilteredDetail = "local.empty.filtered.detail";
+        public const string EmptyFolderDetail = "local.empty.folder.detail";
         public const string FreeSpace = "local.freespace";
         public const string HiddenTooltip = "local.hidden.tooltip";
         public const string HomeTooltip = "local.home.tooltip";
@@ -170,6 +179,7 @@ public static class StringKeys
         public const string ActivitySaveFailed = "status.activity.savefailed";
         public const string ActivitySaved = "status.activity.saved";
         public const string ActivityUnavailable = "status.activity.unavailable";
+        public const string BannerDismissTooltip = "status.banner.dismiss.tooltip";
         public const string AuthOpening = "status.auth.opening";
         public const string AuthSignedOut = "status.auth.signedout";
         public const string AuthSigningOut = "status.auth.signingout";
@@ -279,14 +289,10 @@ public static class StringKeys
     /// <summary>The header quota gauge and its tooltip (docs/PLAN-UX-ROUND-2.md §3).</summary>
     public static class Quota
     {
-        public const string AtLeast = "quota.atleast";
-        public const string Caveat = "quota.caveat";
-        public const string Exact = "quota.exact";
-        public const string Summary = "quota.summary";
         public const string TooltipExact = "quota.tooltip.exact";
+        public const string Used = "quota.used";
+        public const string UsedAtLeast = "quota.used.atleast";
         public const string TooltipPartial = "quota.tooltip.partial";
-        public const string TooltipUnknown = "quota.tooltip.unknown";
-        public const string Unknown = "quota.unknown";
     }
 
     /// <summary>The folder-metrics panel in the status sidebar.</summary>
@@ -312,6 +318,7 @@ public static class StringKeys
         public const string NoData = "metrics.nodata";
         public const string Oldest = "metrics.oldest";
         public const string ProgressQueued = "metrics.progress.queued";
+        public const string ProgressScanning = "metrics.progress.scanning";
         /// <summary>Plural prefix.</summary>
         public const string ProgressScanned = "metrics.progress.scanned";
         public const string Scan = "metrics.scan";
@@ -354,6 +361,7 @@ public static class StringKeys
         public const string DownloadTooltip = "console.download.tooltip";
         public const string Idle = "console.idle";
         public const string NoCommandRunning = "console.nocommand";
+        public const string ResizeTooltip = "console.resize.tooltip";
         public const string SearchPlaceholder = "console.search.placeholder";
         public const string Title = "console.title";
         public const string ToggleHide = "console.toggle.hide";
@@ -494,7 +502,6 @@ public static class StringKeys
         public const string GoogleDriveTitle = "settings.googledrive.title";
         public const string LanguageLabel = "settings.language.label";
         public const string LanguageTooltip = "settings.language.tooltip";
-        public const string NextcloudConnect = "settings.nextcloud.connect";
         public const string NextcloudHint = "settings.nextcloud.hint";
         public const string NextcloudTitle = "settings.nextcloud.title";
         public const string OneDriveClientIdHint = "settings.onedrive.clientid.hint";
@@ -513,7 +520,6 @@ public static class StringKeys
         public const string ProtonUpdateLabel = "settings.proton.update.label";
         public const string ProviderSignedInTooltip = "settings.provider.signedin.tooltip";
         public const string RefreshTooltip = "settings.refresh.tooltip";
-        public const string S3Connect = "settings.s3.connect";
         public const string S3Hint = "settings.s3.hint";
         public const string S3Title = "settings.s3.title";
         public const string SignInTooltip = "settings.signin.tooltip";
@@ -584,6 +590,7 @@ public static class StringKeys
         public const string PairEditTitle = "dialog.pair.edit.title";
         public const string PairLocalFolderLabel = "dialog.pair.localfolder.label";
         public const string PairLocalFolderPlaceholder = "dialog.pair.localfolder.placeholder";
+        public const string PairRemoteFolderPlaceholder = "dialog.pair.remotefolder.placeholder";
         public const string PairMirrorDeletes = "dialog.pair.mirrordeletes";
         public const string PairPolicyAsk = "dialog.pair.policy.ask";
         public const string PairPolicyKeepBoth = "dialog.pair.policy.keepboth";

@@ -184,9 +184,7 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         var sut = Build(isAuthenticated: true);
         Assert.False(sut.HasStatusAction);
 
-        sut.StatusMessage = "Failed to load /my-files: Invalid access token";
-        SetErrorKind(sut, DriveErrorKind.NotAuthenticated);
-        SetWarning(sut);
+        Fail(sut, DriveErrorKind.NotAuthenticated, "Invalid access token");
 
         Assert.True(sut.HasStatusAction);
         Assert.Equal("Reconnect", sut.StatusActionLabel);
@@ -198,9 +196,7 @@ public class MainWindowHeaderTelemetryTests : IDisposable
     {
         var sut = Build(isAuthenticated: true);
 
-        sut.StatusMessage = "Failed to load /my-files: connection reset";
-        SetErrorKind(sut, DriveErrorKind.Network);
-        SetWarning(sut);
+        Fail(sut, DriveErrorKind.Network, "connection reset");
 
         Assert.True(sut.HasStatusAction);
         Assert.Equal("Retry", sut.StatusActionLabel);
@@ -222,11 +218,13 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         sut.DisplayItems(items);
 
         Assert.Equal(1024 * 1024 * 300, sut.QuotaUsedBytes); // 300 MB
-        Assert.Equal(500L * 1024 * 1024 * 1024, sut.QuotaTotalBytes); // 500 GB
-        Assert.True(sut.QuotaPercent > 0.0);
         Assert.True(sut.IsQuotaUsageKnown);
         Assert.Contains("300", sut.QuotaDisplay);
-        Assert.Contains("500", sut.QuotaDisplay);
+        // No denominator and no percentage: both came from a per-provider constant rather than from
+        // the account (docs/PLAN-UX-ROUND-4.md Y2).
+        Assert.DoesNotContain("500", sut.QuotaDisplay);
+        Assert.DoesNotContain("/", sut.QuotaDisplay);
+        Assert.DoesNotContain("%", sut.QuotaDisplay);
 
         // A folder is present, so the sum covers the root's own files only — a lower bound, and
         // labelled as one rather than dressed up with a percentage (U3).
@@ -247,10 +245,9 @@ public class MainWindowHeaderTelemetryTests : IDisposable
             new DriveItem("/my-files/Plan.gsheet", "Plan.gsheet", false, null)
         });
 
+        // Nothing measured, so the gauge has nothing to say and hides entirely.
         Assert.False(sut.IsQuotaUsageKnown);
-        Assert.Equal(0.0, sut.QuotaPercent);
-        Assert.StartsWith("—", sut.QuotaDisplay);
-        Assert.DoesNotContain("0 B", sut.QuotaDisplay);
+        Assert.Equal(string.Empty, sut.QuotaDisplay);
     }
 
     // ...but a genuinely empty root is a real zero, and must not be hidden behind the em dash.
@@ -261,16 +258,30 @@ public class MainWindowHeaderTelemetryTests : IDisposable
 
         sut.DisplayItems(new List<DriveItem>());
 
+        // An empty root is a real zero, and still says so — that is U3's distinction, kept.
         Assert.True(sut.IsQuotaUsageKnown);
         Assert.Equal(0, sut.QuotaUsedBytes);
         Assert.Contains("0 B", sut.QuotaDisplay);
-        Assert.Contains("%", sut.QuotaDisplay);
     }
 
     private static void SetErrorKind(MainWindowViewModel sut, DriveErrorKind kind)
         => typeof(MainWindowViewModel)
             .GetField("_lastErrorKind", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .SetValue(sut, kind);
+
+    /// <summary>
+    /// Drives a real provider failure through the view model's own error path, which is what
+    /// decides whether the alert strip offers a remedy (docs/PLAN-UX-ROUND-4.md Y3). Separate from
+    /// <see cref="SetErrorKind"/>, which only feeds the connection telemetry.
+    /// </summary>
+    private static void Fail(MainWindowViewModel sut, DriveErrorKind kind, string message)
+    {
+        var ex = new DriveException("filesystem list", 1, string.Empty, string.Empty, message, kind);
+        var format = typeof(MainWindowViewModel).GetMethod("FormatDriveError", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        typeof(MainWindowViewModel)
+            .GetMethod("SetFailure", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .Invoke(sut, [format.Invoke(sut, ["/my-files", ex])!, ex]);
+    }
 
     private static void SetWarning(MainWindowViewModel sut)
     {
@@ -479,11 +490,14 @@ public class MainWindowHeaderTelemetryTests : IDisposable
     public void ViewerZoom_DefaultsToFiftyPercent_AndPersistsChanges()
     {
         var sut = Build();
-        Assert.Equal(0.5, sut.ViewerZoom);
+        Assert.Equal(0.5, sut.Preview.ViewerZoom);
 
-        sut.ViewerZoom = 1.0;
+        sut.Preview.ViewerZoom = 1.0;
+        // Persisted when the gesture ends, not on every intermediate value of a drag
+        // (docs/PLAN-UX-ROUND-4.md Y6).
+        sut.Preview.CommitViewerZoom();
 
-        Assert.Equal(1.0, sut.ViewerZoom);
+        Assert.Equal(1.0, sut.Preview.ViewerZoom);
         Assert.Equal(1.0, new AppSettingsService().Load().ViewerZoom);
     }
 
@@ -494,9 +508,10 @@ public class MainWindowHeaderTelemetryTests : IDisposable
     {
         var sut = Build();
 
-        sut.ViewerZoom = attempted;
+        sut.Preview.ViewerZoom = attempted;
+        sut.Preview.CommitViewerZoom();
 
-        Assert.Equal(expected, sut.ViewerZoom);
+        Assert.Equal(expected, sut.Preview.ViewerZoom);
         Assert.Equal(expected, new AppSettingsService().Load().ViewerZoom);
     }
 

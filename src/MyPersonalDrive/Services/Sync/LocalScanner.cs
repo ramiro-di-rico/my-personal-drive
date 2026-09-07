@@ -15,6 +15,11 @@ public interface ILocalScanner
 /// </summary>
 public sealed class LocalScanner : ILocalScanner
 {
+    private readonly TimeProvider _timeProvider;
+
+    /// <param name="timeProvider">The scan stamps what it finds; tests substitute a fake clock (docs/PLAN-UX-ROUND-4.md Z4).</param>
+    public LocalScanner(TimeProvider? timeProvider = null) => _timeProvider = timeProvider ?? TimeProvider.System;
+
     /// <summary>
     /// Files modified more recently than this are skipped for this scan cycle — likely still
     /// being written by another process. They'll be picked up once they've settled.
@@ -24,7 +29,7 @@ public sealed class LocalScanner : ILocalScanner
     public Task<IReadOnlyDictionary<string, NodeFingerprint>> ScanAsync(string rootPath, ExclusionMatcher exclusions, CancellationToken cancellationToken = default)
         => Task.Run(() => Scan(rootPath, exclusions, cancellationToken), cancellationToken);
 
-    private static IReadOnlyDictionary<string, NodeFingerprint> Scan(string rootPath, ExclusionMatcher exclusions, CancellationToken cancellationToken)
+    private IReadOnlyDictionary<string, NodeFingerprint> Scan(string rootPath, ExclusionMatcher exclusions, CancellationToken cancellationToken)
     {
         var result = new Dictionary<string, NodeFingerprint>();
         if (!Directory.Exists(rootPath))
@@ -34,7 +39,7 @@ public sealed class LocalScanner : ILocalScanner
 
         var pendingDirectories = new Stack<string>();
         pendingDirectories.Push(rootPath);
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
 
         while (pendingDirectories.Count > 0)
         {

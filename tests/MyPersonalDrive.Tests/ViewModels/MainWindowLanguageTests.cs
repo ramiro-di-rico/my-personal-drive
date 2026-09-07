@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Localization;
 using MyPersonalDrive.Services.Providers.Proton;
@@ -57,6 +58,53 @@ public class MainWindowLanguageTests : IDisposable
             new DriveCacheService(Path.Combine(_tempAppData, "cache.db")),
             settings,
             panel);
+    }
+
+    /// <summary>
+    /// The chips, the rows and the sync pairs are their own binding sources, so the window's
+    /// OnAllPropertiesChanged never reached them. Switching to Spanish left "All (14) Folders (8)"
+    /// sitting over a fully translated toolbar until something re-listed the folder — visible in a
+    /// screenshot, invisible to every test, because the tests all asserted on the window view
+    /// model, which was the one object that did update (docs/PLAN-UX-ROUND-3.md X8).
+    /// </summary>
+    [Fact]
+    public void TheTypeFilterChips_FollowTheLanguage()
+    {
+        var vm = Build(new AppSettingsService());
+        vm.SelectedLanguage = LanguageCatalog.ResolveOrDefault("en");
+        vm.DisplayItems([
+            new DriveItem("/my-files/a.jpg", "a.jpg", IsFolder: false, Size: 10),
+            new DriveItem("/my-files/notes.txt", "notes.txt", IsFolder: false, Size: 10),
+        ]);
+        var all = vm.KindFilters.Single(chip => chip.Kind is null);
+        Assert.Equal("All", all.Label);
+
+        vm.SelectedLanguage = LanguageCatalog.ResolveOrDefault("es");
+
+        // Not re-listed, not rebuilt — the same chip object has to answer differently now.
+        Assert.Equal("Todos", all.Label);
+    }
+
+    [Fact]
+    public void ALanguageChange_TellsTheChipsAndRowsToReRead()
+    {
+        var vm = Build(new AppSettingsService());
+        vm.SelectedLanguage = LanguageCatalog.ResolveOrDefault("en");
+        vm.DisplayItems([
+            new DriveItem("/my-files/a.jpg", "a.jpg", IsFolder: false, Size: 10),
+            new DriveItem("/my-files/notes.txt", "notes.txt", IsFolder: false, Size: 10),
+        ]);
+
+        var chipNotified = false;
+        var rowNotified = false;
+        vm.KindFilters.Single(chip => chip.Kind is null).PropertyChanged += (_, _) => chipNotified = true;
+        vm.RootItems[0].PropertyChanged += (_, _) => rowNotified = true;
+
+        vm.SelectedLanguage = LanguageCatalog.ResolveOrDefault("es");
+
+        // A label that reads correctly is worthless if nothing tells the binding to read it again.
+        Assert.True(chipNotified);
+        Assert.True(rowNotified);
     }
 
     [Fact]

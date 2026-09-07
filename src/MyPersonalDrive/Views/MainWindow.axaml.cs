@@ -40,6 +40,174 @@ public partial class MainWindow : Window
         LocalListing.AddHandler(InputElement.PointerMovedEvent, OnLocalRowPointerMoved, RoutingStrategies.Tunnel);
         ListModeListing.AddHandler(InputElement.PointerPressedEvent, OnCloudRowPointerPressed, RoutingStrategies.Tunnel);
         ListModeListing.AddHandler(InputElement.PointerMovedEvent, OnCloudRowPointerMoved, RoutingStrategies.Tunnel);
+
+        // The tile modes get exactly the same gestures as list mode (docs/PLAN-UX-ROUND-3.md X2).
+        // They had none: an ItemsRepeater has no selection or keyboard model of its own, and the
+        // three handlers above were attached to the ListBox by name, so switching view mode
+        // silently dropped multi-select, drag-and-drop and any way to select a tile without
+        // opening it. Nothing about them is list-specific — they resolve the row by walking up
+        // from the hit element to whatever is bound to a node.
+        foreach (var tiles in new Control[] { IconsModeListing, GalleryModeListing })
+        {
+            tiles.AddHandler(InputElement.PointerPressedEvent, OnCloudRowPointerPressed, RoutingStrategies.Tunnel);
+            tiles.AddHandler(InputElement.PointerMovedEvent, OnCloudRowPointerMoved, RoutingStrategies.Tunnel);
+        }
+
+        // Double click opens, in all three modes and in both panes. Bubble, and only Bubble:
+        // DoubleTappedEvent is registered with RoutingStrategies.Bubble alone, so a handler added
+        // for Tunnel is attached to a phase the event never routes and is simply never called —
+        // which is exactly what shipped, leaving the context menu's "Open" as the only way in.
+        // (The pointer handlers above genuinely do tunnel: PointerPressedEvent routes both.)
+        // handledEventsToo, because the row and tile roots are Buttons and the gesture reaches them
+        // on the way up.
+        foreach (var listing in new Control[] { ListModeListing, IconsModeListing, GalleryModeListing })
+        {
+            listing.AddHandler(InputElement.DoubleTappedEvent, OnCloudRowDoubleTapped, RoutingStrategies.Bubble, handledEventsToo: true);
+        }
+
+        LocalListing.AddHandler(InputElement.DoubleTappedEvent, OnLocalRowDoubleTapped, RoutingStrategies.Bubble, handledEventsToo: true);
+
+        // Everything else on the keyboard (docs/PLAN-UX-ROUND-3.md X5). Bubble at the window, not
+        // KeyBindings and not a per-control handler: a focused TextBox marks Ctrl+A, Delete and F2
+        // as handled while it is doing its own editing, so a bubble-phase handler is guarded
+        // against stealing them for free — which is exactly the concern that kept Ctrl+A scoped to
+        // one ListBox before, and the reason the tile modes never got it (an ItemsRepeater takes no
+        // focus, so it has no KeyDown of its own to hang anything on).
+        KeyDown += OnWindowKeyDown;
+
+        // One write per gesture, not one per tick — same reasoning as the console handle below
+        // (docs/PLAN-UX-ROUND-4.md Y6). PointerCaptureLost is the slider's end-of-drag; LostFocus
+        // covers the arrow keys, which change the value without a pointer ever being involved.
+        ViewerZoomSlider.PointerCaptureLost += (_, _) => CommitZoom();
+        ViewerZoomSlider.LostFocus += (_, _) => CommitZoom();
+
+        // The console's own resize handle (docs/PLAN-UX-ROUND-3.md X7).
+        ConsoleResizeHandle.PointerPressed += OnConsoleResizeStarted;
+        ConsoleResizeHandle.PointerMoved += OnConsoleResizeMoved;
+        ConsoleResizeHandle.PointerReleased += OnConsoleResizeFinished;
+    }
+
+    private void CommitZoom()
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.Preview.CommitViewerZoom();
+        }
+    }
+
+    private Point? _consoleResizeLastPoint;
+
+    /// <summary>
+    /// Dragging the handle changes the console body's height. Pointer capture rather than a
+    /// window-level handler: without it the drag stops the moment the pointer leaves the 6px strip,
+    /// which is immediately.
+    /// </summary>
+    private void OnConsoleResizeStarted(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        _consoleResizeLastPoint = e.GetPosition(this);
+        e.Pointer.Capture(ConsoleResizeHandle);
+        e.Handled = true;
+    }
+
+    private void OnConsoleResizeMoved(object? sender, PointerEventArgs e)
+    {
+        if (_consoleResizeLastPoint is not { } last || DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var current = e.GetPosition(this);
+        // One step per move rather than an absolute offset from the press: the view model clamps,
+        // so an absolute delta would keep accumulating past the limit and the handle would then
+        // need that distance dragged back before the console moved again.
+        viewModel.Console.ResizeCommandConsole(current.Y - last.Y);
+        _consoleResizeLastPoint = current;
+        e.Handled = true;
+    }
+
+    private void OnConsoleResizeFinished(object? sender, PointerReleasedEventArgs e)
+    {
+        // The height is persisted here rather than on every move: one write per drag, not one per
+        // pointer event (docs/PLAN-UX-ROUND-4.md Y6).
+        if (_consoleResizeLastPoint is not null && DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.Console.CommitCommandConsoleHeight();
+        }
+
+        _consoleResizeLastPoint = null;
+        e.Pointer.Capture(null);
+    }
+
+    /// <summary>
+    /// The node a pointer event landed on, whichever container materialized it — a ListBoxItem in
+    /// list mode, a tile Border in the other two. DataContext is inherited, so walking up from the
+    /// hit element (usually a TextBlock or a Path) finds the node without knowing the container
+    /// type at all.
+    /// </summary>
+    private static T? NodeUnder<T>(object? source) where T : class
+    {
+        var visual = source as Visual;
+        while (visual is not null)
+        {
+            if (visual is StyledElement { DataContext: T node })
+            {
+                return node;
+            }
+
+            visual = visual.GetVisualParent();
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The row or tile itself: the outermost element still bound to <paramref name="node"/>. The
+    /// innermost one is whatever was hit, which is no use for a highlight class — that has to go on
+    /// the container the .dropTarget styles select.
+    /// </summary>
+    private static Control? ContainerFor(object? source, object node)
+    {
+        Control? outermost = null;
+        var visual = source as Visual;
+        while (visual is not null)
+        {
+            if (visual is Control control && ReferenceEquals(control.DataContext, node))
+            {
+                outermost = control;
+            }
+            else if (outermost is not null)
+            {
+                break;
+            }
+
+            visual = visual.GetVisualParent();
+        }
+
+        return outermost;
+    }
+
+    /// <summary>Double click on a row or tile: open the folder, or preview the file (X2).</summary>
+    private void OnCloudRowDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (NodeUnder<DriveNodeViewModel>(e.Source) is { } node)
+        {
+            node.ActivateCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    private void OnLocalRowDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (NodeUnder<LocalNodeViewModel>(e.Source) is { } node)
+        {
+            node.ActivateCommand.Execute(null);
+            e.Handled = true;
+        }
     }
 
     /// <summary>
@@ -53,15 +221,9 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnListingKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
     {
-        // Ctrl/Cmd+A (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) — scoped to this ListBox's own
-        // KeyDown rather than a window-level KeyBinding, so it never steals the same gesture from a
-        // focused TextBox (the search box, the CLI log filter) selecting its own text instead.
-        if (e.Key == Avalonia.Input.Key.A && e.KeyModifiers.HasFlag(KeyModifiers.Control) && DataContext is MainWindowViewModel viewModel)
-        {
-            viewModel.SelectAllRowsCommand.Execute(null);
-            e.Handled = true;
-            return;
-        }
+        // Ctrl/Cmd+A moved to OnWindowKeyDown, so that it also reaches the two tile modes
+        // (docs/PLAN-UX-ROUND-3.md X5). This handler keeps what genuinely needs the list: which
+        // row the ListBox has focused.
 
         if (e.Key is not (Avalonia.Input.Key.Enter or Avalonia.Input.Key.Space))
         {
@@ -76,17 +238,134 @@ public partial class MainWindow : Window
         e.Handled = true;
         // Fire and forget through the command, so the AsyncCommand's own error routing applies
         // rather than this handler becoming an `async void` that can take the process down.
-        node.RowCommand.Execute(null);
+        node.ActivateCommand.Execute(null);
     }
 
-    /// <summary>The local pane's counterpart to <see cref="OnListingKeyDown"/>'s Ctrl/Cmd+A handling — the local pane has no Enter/Space activation to also cover, since its rows aren't focusable buttons the way the cloud pane's are.</summary>
-    private void OnLocalListingKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
+    /// <summary>
+    /// Everything the keyboard can reach that is not a row activation (docs/PLAN-UX-ROUND-3.md X5).
+    /// Before this the entire inventory was Ctrl+, / Ctrl+~ / Ctrl+A / Enter — no F5, no F2, no
+    /// Delete, no way back up a folder, no way to the search box, and Escape did not close the
+    /// viewer.
+    ///
+    /// Bubble phase, so a control that is genuinely using the key has already marked it handled: a
+    /// TextBox consumes Ctrl+A, Delete and F2 while it is being edited, which is the guard that
+    /// keeps these from firing mid-typing. Anything that must work even inside a text box (F5,
+    /// Escape) is keyed off gestures a TextBox does not claim.
+    /// </summary>
+    private void OnWindowKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
     {
-        if (e.Key == Avalonia.Input.Key.A && e.KeyModifiers.HasFlag(KeyModifiers.Control) && DataContext is MainWindowViewModel { LocalExplorer: { } explorer })
+        if (e.Handled || DataContext is not MainWindowViewModel viewModel)
         {
-            explorer.SelectAllCommand.Execute(null);
-            e.Handled = true;
+            return;
         }
+
+        var control = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
+
+        switch (e.Key)
+        {
+            // Closes the viewer panel and nothing else: unguarded, Escape would also be the way out
+            // of a dialog, and those are separate windows with their own IsCancel buttons.
+            case Avalonia.Input.Key.Escape when viewModel.Preview.IsViewerVisible:
+                Run(viewModel.Preview.CloseViewerCommand);
+                break;
+
+            case Avalonia.Input.Key.F5:
+                Run(ActivePaneIsLocal() ? viewModel.LocalExplorer.RefreshCommand : viewModel.RefreshCommand);
+                break;
+
+            case Avalonia.Input.Key.N when control && e.KeyModifiers.HasFlag(KeyModifiers.Shift):
+                Run(viewModel.CreateFolderCommand);
+                break;
+
+            case Avalonia.Input.Key.F when control:
+                (ActivePaneIsLocal() ? LocalSearchBox : CloudSearchBox).Focus();
+                e.Handled = true;
+                break;
+
+            case Avalonia.Input.Key.A when control:
+                Run(ActivePaneIsLocal() ? viewModel.LocalExplorer.SelectAllCommand : viewModel.SelectAllRowsCommand);
+                break;
+
+            // Back a folder. Backspace is the file-manager idiom; Alt+Left is the browser one, and
+            // both are free here because neither pane hosts an editable surface that wants them.
+            case Avalonia.Input.Key.Back:
+            case Avalonia.Input.Key.Left when e.KeyModifiers.HasFlag(KeyModifiers.Alt):
+                Run(ActivePaneIsLocal() ? viewModel.LocalExplorer.BackCommand : viewModel.BackCommand);
+                break;
+
+            // F2 renames exactly one row. With several marked there is no single name to edit, and
+            // silently renaming the first would be worse than doing nothing.
+            case Avalonia.Input.Key.F2 when ActivePaneIsLocal():
+                Run(SingleSelected(viewModel.LocalExplorer.Items, node => node.IsSelected)?.RenameCommand);
+                break;
+
+            case Avalonia.Input.Key.F2:
+                Run(SingleSelected(viewModel.RootItems, node => node.IsSelected)?.RenameCommand);
+                break;
+
+            // Delete acts on the whole selection, and goes through the same command the buttons
+            // use — so it inherits their confirmation prompt rather than deleting on a keypress.
+            case Avalonia.Input.Key.Delete when ActivePaneIsLocal():
+                Run(viewModel.LocalExplorer.DeleteSelectedCommand);
+                break;
+
+            case Avalonia.Input.Key.Delete:
+                Run(viewModel.TrashSelectedCommand);
+                break;
+        }
+
+        void Run(AsyncCommand? command)
+        {
+            if (command?.CanExecute(null) != true)
+            {
+                return;
+            }
+
+            e.Handled = true;
+            // Through the command, so AsyncCommand's error routing applies and this handler never
+            // becomes an `async void` that can take the process down.
+            command.Execute(null);
+        }
+    }
+
+    /// <summary>The one row marked in a pane, or null when zero or several are.</summary>
+    private static T? SingleSelected<T>(IEnumerable<T> rows, Func<T, bool> isSelected) where T : class
+    {
+        T? found = null;
+        foreach (var row in rows.Where(isSelected))
+        {
+            if (found is not null)
+            {
+                return null;
+            }
+
+            found = row;
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Which pane a keystroke belongs to. Focus decides it, and the cloud pane is the default —
+    /// the local pane can be hidden entirely, so "wherever focus last was" has to fall back to the
+    /// pane that is always there.
+    /// </summary>
+    private bool ActivePaneIsLocal()
+    {
+        if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not Visual focused)
+        {
+            return false;
+        }
+
+        for (var visual = focused; visual is not null; visual = visual.GetVisualParent())
+        {
+            if (ReferenceEquals(visual, LocalPane))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -153,8 +432,7 @@ public partial class MainWindow : Window
     {
         // Attached at the ListBox (see the constructor), not the row itself, so the row has to be
         // resolved by walking up from whatever was actually hit — usually the icon/text inside it.
-        var row = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>(includeSelf: true);
-        if (row?.DataContext is not LocalNodeViewModel node || !e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        if (NodeUnder<LocalNodeViewModel>(e.Source) is not { } node || !e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
         {
             return;
         }
@@ -247,7 +525,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private ListBoxItem? _cloudHighlightedDropRow;
+    private Control? _cloudHighlightedDropRow;
 
     /// <summary>
     /// The three-part drop-target affordance (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4):
@@ -259,20 +537,21 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnCloudListingDragOver(object? sender, DragEventArgs e)
     {
-        var listBox = sender as ListBox;
+        var listing = sender as Control;
         var hasFormat = e.DataTransfer.Contains(LocalPathsDataFormat);
         if (!hasFormat || DataContext is not MainWindowViewModel viewModel)
         {
             e.DragEffects = DragDropEffects.None;
-            ClearCloudDropHighlight(listBox);
+            ClearCloudDropHighlight(listing);
             return;
         }
 
         e.DragEffects = DragDropEffects.Copy;
-        listBox?.Classes.Add("dropTarget");
+        listing?.Classes.Add("dropTarget");
 
-        var hoveredRow = e.Source is Visual visual ? visual.FindAncestorOfType<ListBoxItem>(includeSelf: true) : null;
-        var targetsAFolderRow = hoveredRow?.DataContext is DriveNodeViewModel { IsFolder: true };
+        var hoveredNode = NodeUnder<DriveNodeViewModel>(e.Source);
+        var targetsAFolderRow = hoveredNode is { IsFolder: true };
+        var hoveredRow = targetsAFolderRow ? ContainerFor(e.Source, hoveredNode!) : null;
         if (!ReferenceEquals(hoveredRow, _cloudHighlightedDropRow) || !targetsAFolderRow)
         {
             _cloudHighlightedDropRow?.Classes.Remove("dropTarget");
@@ -285,11 +564,11 @@ public partial class MainWindow : Window
         CloudDropOverlay.IsVisible = true;
     }
 
-    private void OnCloudListingDragLeave(object? sender, DragEventArgs e) => ClearCloudDropHighlight(sender as ListBox);
+    private void OnCloudListingDragLeave(object? sender, DragEventArgs e) => ClearCloudDropHighlight(sender as Control);
 
-    private void ClearCloudDropHighlight(ListBox? listBox)
+    private void ClearCloudDropHighlight(Control? listing)
     {
-        listBox?.Classes.Remove("dropTarget");
+        listing?.Classes.Remove("dropTarget");
         _cloudHighlightedDropRow?.Classes.Remove("dropTarget");
         _cloudHighlightedDropRow = null;
         CloudDropOverlay.IsVisible = false;
@@ -297,7 +576,7 @@ public partial class MainWindow : Window
 
     private async void OnCloudListingDrop(object? sender, DragEventArgs e)
     {
-        ClearCloudDropHighlight(sender as ListBox);
+        ClearCloudDropHighlight(sender as Control);
 
         if (DataContext is not MainWindowViewModel viewModel)
         {
@@ -311,7 +590,17 @@ public partial class MainWindow : Window
         }
 
         var targetPath = ResolveCloudDropTargetPath(e, viewModel);
-        await viewModel.HandleLocalFilesDroppedAsync(localPaths, targetPath);
+
+        // async void: an exception escaping here ends the process, and an upload can fail for a
+        // dozen ordinary reasons (docs/PLAN-UX-ROUND-4.md Z1).
+        try
+        {
+            await viewModel.HandleLocalFilesDroppedAsync(localPaths, targetPath);
+        }
+        catch (Exception ex)
+        {
+            viewModel.ReportHandlerFailure(ex);
+        }
     }
 
     /// <summary>"the current folder" for the folder already open, otherwise that folder's own name.</summary>
@@ -330,13 +619,9 @@ public partial class MainWindow : Window
     /// <summary>The folder row under the drop point, if any — otherwise the currently browsed folder.</summary>
     private static string ResolveCloudDropTargetPath(DragEventArgs e, MainWindowViewModel viewModel)
     {
-        if (e.Source is Visual visual)
+        if (NodeUnder<DriveNodeViewModel>(e.Source) is { IsFolder: true } node)
         {
-            var listBoxItem = visual.FindAncestorOfType<ListBoxItem>(includeSelf: true);
-            if (listBoxItem?.DataContext is DriveNodeViewModel { IsFolder: true } node)
-            {
-                return node.Path;
-            }
+            return node.Path;
         }
 
         return viewModel.CurrentPath;
@@ -352,10 +637,9 @@ public partial class MainWindow : Window
 
     private void OnCloudRowPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        // Attached at the ListBox (see the constructor), not the row itself — see the matching
-        // comment on OnLocalRowPointerPressed.
-        var row = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>(includeSelf: true);
-        if (row?.DataContext is not DriveNodeViewModel node || !e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
+        // Attached at the listing container (see the constructor), not the row itself — see the
+        // matching comment on OnLocalRowPointerPressed.
+        if (NodeUnder<DriveNodeViewModel>(e.Source) is not { } node || !e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
         {
             return;
         }
@@ -420,7 +704,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private ListBoxItem? _localHighlightedDropRow;
+    private Control? _localHighlightedDropRow;
 
     /// <summary>Mirrors <see cref="OnCloudListingDragOver"/> for the opposite direction — see its doc comment.</summary>
     private void OnLocalListingDragOver(object? sender, DragEventArgs e)
@@ -477,7 +761,16 @@ public partial class MainWindow : Window
         }
 
         var targetPath = ResolveLocalDropTargetPath(e, viewModel);
-        await viewModel.HandleCloudItemsDroppedAsync(items, targetPath);
+
+        // See OnCloudListingDrop: async void, so nothing else would catch this.
+        try
+        {
+            await viewModel.HandleCloudItemsDroppedAsync(items, targetPath);
+        }
+        catch (Exception ex)
+        {
+            viewModel.ReportHandlerFailure(ex);
+        }
     }
 
     /// <summary>The local folder row under the drop point, if any — otherwise the currently browsed local folder.</summary>
@@ -502,18 +795,27 @@ public partial class MainWindow : Window
             return;
         }
 
-        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        // async void: the picker goes through the desktop portal, which can fail, and the assignment
+        // below writes settings.json (docs/PLAN-UX-ROUND-4.md Z1).
+        try
         {
-            Title = Loc.T(StringKeys.Picker.CliPathTitle),
-            AllowMultiple = false
-        });
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = Loc.T(StringKeys.Picker.CliPathTitle),
+                AllowMultiple = false
+            });
 
-        if (files.Count == 0)
-        {
-            return;
+            if (files.Count == 0)
+            {
+                return;
+            }
+
+            viewModel.CliPath = files[0].Path.LocalPath;
         }
-
-        viewModel.CliPath = files[0].Path.LocalPath;
+        catch (Exception ex)
+        {
+            viewModel.ReportHandlerFailure(ex);
+        }
     }
 
     private async void BrowseDefaultSyncFolder(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -523,18 +825,26 @@ public partial class MainWindow : Window
             return;
         }
 
-        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        // See BrowseCliPath.
+        try
         {
-            Title = Loc.T(StringKeys.Picker.DefaultSyncFolderTitle),
-            AllowMultiple = false
-        });
+            var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = Loc.T(StringKeys.Picker.DefaultSyncFolderTitle),
+                AllowMultiple = false
+            });
 
-        if (folders.Count == 0)
-        {
-            return;
+            if (folders.Count == 0)
+            {
+                return;
+            }
+
+            viewModel.DefaultSyncFolder = folders[0].Path.LocalPath;
         }
-
-        viewModel.DefaultSyncFolder = folders[0].Path.LocalPath;
+        catch (Exception ex)
+        {
+            viewModel.ReportHandlerFailure(ex);
+        }
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
@@ -545,20 +855,20 @@ public partial class MainWindow : Window
         }
 
         viewModel.RequestUploadFilesAsync = PickUploadFilesAsync;
-        viewModel.RequestConflictStrategyAsync = PickConflictStrategyAsync;
+        viewModel.RequestConflictStrategyAsync = files => Dialogs.UploadConflictDialog.ShowAsync(this, files);
         viewModel.RequestRenameAsync = PromptForRenameAsync;
         viewModel.RequestCopyNameAsync = PromptForCopyNameAsync;
         viewModel.RequestCreateFolderAsync = PromptForNewFolderNameAsync;
         viewModel.RequestDownloadFolderAsync = PickDownloadFolderAsync;
-        viewModel.RequestSaveActivityAsync = PickSaveActivityAsync;
-        viewModel.RequestConfirmationAsync = AskAsync;
+        viewModel.Console.RequestSaveActivityAsync = PickSaveActivityAsync;
+        viewModel.RequestConfirmationAsync = question => Dialogs.ConfirmDialog.ShowAsync(this, question);
         viewModel.RequestCopyToClipboardAsync = CopyToClipboardAsync;
-        viewModel.RequestShowPropertiesAsync = ShowPropertiesAsync;
+        viewModel.RequestShowPropertiesAsync = (title, fields) => Dialogs.PropertiesDialog.ShowAsync(this, title, fields);
 
-        viewModel.LocalExplorer.RequestConfirmationAsync = AskAsync;
+        viewModel.LocalExplorer.RequestConfirmationAsync = question => Dialogs.ConfirmDialog.ShowAsync(this, question);
         viewModel.LocalExplorer.RequestRenameAsync = PromptForRenameAsync;
         viewModel.LocalExplorer.RequestCopyToClipboardAsync = CopyToClipboardAsync;
-        viewModel.LocalExplorer.RequestShowPropertiesAsync = ShowPropertiesAsync;
+        viewModel.LocalExplorer.RequestShowPropertiesAsync = (title, fields) => Dialogs.PropertiesDialog.ShowAsync(this, title, fields);
 
 
         // ExplorerColumnsGrid.ColumnDefinitions[2] is star-sized so the splitter can resize it —
@@ -568,13 +878,13 @@ public partial class MainWindow : Window
         viewModel.PropertyChanged += OnMainWindowViewModelPropertyChanged;
         ApplyLocalExplorerPanelColumnWidth(viewModel.IsLocalExplorerPanelVisible);
 
-        viewModel.SyncPanel.RequestNewPairAsync = prefill => PromptForNewPairAsync(viewModel.SyncPanel, viewModel.RootPath, prefill);
-        viewModel.SyncPanel.RequestPreviewConfirmationAsync = ShowPreviewAsync;
-        viewModel.SyncPanel.RequestConflictResolutionsAsync = ShowConflictsAsync;
-        viewModel.SyncPanel.RequestFailureReviewAsync = ShowFailuresAsync;
-        viewModel.SyncPanel.RequestConfirmationAsync = AskAsync;
-        viewModel.SyncPanel.RequestEditPairAsync = PromptForEditPairAsync;
-        viewModel.SyncPanel.RequestAlertAsync = ShowAlertAsync;
+        viewModel.SyncPanel.RequestNewPairAsync = prefill => Dialogs.SyncPairDialog.ShowAddAsync(this, viewModel.SyncPanel, viewModel.RootPath, prefill);
+        viewModel.SyncPanel.RequestPreviewConfirmationAsync = (plan, warnings) => Dialogs.SyncPreviewDialog.ShowAsync(this, plan, warnings);
+        viewModel.SyncPanel.RequestConflictResolutionsAsync = conflicts => Dialogs.SyncConflictsDialog.ShowAsync(this, conflicts);
+        viewModel.SyncPanel.RequestFailureReviewAsync = failures => Dialogs.SyncFailuresDialog.ShowAsync(this, failures);
+        viewModel.SyncPanel.RequestConfirmationAsync = question => Dialogs.ConfirmDialog.ShowAsync(this, question);
+        viewModel.SyncPanel.RequestEditPairAsync = pair => Dialogs.SyncPairDialog.ShowEditAsync(this, pair);
+        viewModel.SyncPanel.RequestAlertAsync = message => Dialogs.AlertDialog.ShowAsync(this, message);
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -588,6 +898,16 @@ public partial class MainWindow : Window
             catch
             {
                 // The view-model already surfaced the error in the status panel.
+            }
+
+            // Something has to be focused for arrow keys and Enter to do anything, and nothing was:
+            // the app opened with focus nowhere, so the keyboard did not work until the user had
+            // clicked a row first (docs/PLAN-UX-ROUND-3.md X5). Only in list mode — an
+            // ItemsRepeater takes no focus, and the window-level shortcuts default to the cloud
+            // pane anyway, so the tile modes lose nothing by starting unfocused.
+            if (viewModel.IsListView)
+            {
+                ListModeListing.Focus();
             }
         }
     }
@@ -614,244 +934,36 @@ public partial class MainWindow : Window
         return folders.Count == 0 ? null : folders[0].Path.LocalPath;
     }
 
-    private async Task<string?> PromptForRenameAsync(string currentName)
-    {
-        var textBox = new TextBox
-        {
-            Text = currentName,
-            Width = 350,
-            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch
-        };
+    private Task<string?> PromptForRenameAsync(string currentName)
+        => Dialogs.NamePromptDialog.ShowAsync(
+            this,
+            Loc.T(StringKeys.Dialog.RenameTitle),
+            Loc.F(StringKeys.Dialog.RenamePrompt, currentName),
+            Loc.T(StringKeys.Menu.Rename),
+            initialText: currentName,
+            placeholder: null,
+            mustDifferFrom: currentName);
 
-        var dialog = new Window
-        {
-            Title = Loc.T(StringKeys.Dialog.RenameTitle),
-            Width = 400,
-            Height = 180,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Spacing = 15,
-                Margin = new Avalonia.Thickness(20),
-                Children =
-                {
-                    new TextBlock { Text = Loc.F(StringKeys.Dialog.RenamePrompt, currentName), FontWeight = Avalonia.Media.FontWeight.Bold },
-                    textBox,
-                    new StackPanel
-                    {
-                        Spacing = 10,
-                        Orientation = Avalonia.Layout.Orientation.Horizontal,
-                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-                        Children =
-                        {
-                            new Button { Content = Loc.T(StringKeys.Menu.Rename), IsDefault = true, Width = 80 },
-                            new Button { Content = Loc.T(StringKeys.Common.Cancel), IsCancel = true, Width = 80 }
-                        }
-                    }
-                }
-            }
-        };
+    private Task<string?> PromptForNewFolderNameAsync()
+        => Dialogs.NamePromptDialog.ShowAsync(
+            this,
+            Loc.T(StringKeys.Dialog.NewFolderTitle),
+            Loc.T(StringKeys.Dialog.NewFolderPrompt),
+            Loc.T(StringKeys.Common.Create),
+            initialText: null,
+            placeholder: Loc.T(StringKeys.Dialog.NewFolderPlaceholder));
 
-        string? result = null;
-        var panel = (StackPanel)dialog.Content;
-        var buttonsPanel = (StackPanel)panel.Children[2];
-        var renameButton = (Button)buttonsPanel.Children[0];
-        var cancelButton = (Button)buttonsPanel.Children[1];
+    private Task<string?> PromptForCopyNameAsync(string currentName)
+        => Dialogs.NamePromptDialog.ShowAsync(
+            this,
+            Loc.T(StringKeys.Menu.Copy),
+            Loc.F(StringKeys.Dialog.CopyPrompt, currentName),
+            Loc.T(StringKeys.Common.Copy),
+            initialText: null,
+            placeholder: Loc.T(StringKeys.Dialog.CopyPlaceholder),
+            mustDifferFrom: currentName);
 
-        renameButton.Click += (_, _) =>
-        {
-            result = textBox.Text;
-            dialog.Close();
-        };
 
-        cancelButton.Click += (_, _) =>
-        {
-            result = null;
-            dialog.Close();
-        };
-
-        await dialog.ShowDialog(this);
-        return result;
-    }
-
-    private async Task<string?> PromptForNewFolderNameAsync()
-    {
-        var textBox = new TextBox
-        {
-            PlaceholderText = Loc.T(StringKeys.Dialog.NewFolderPlaceholder),
-            Width = 350,
-            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch
-        };
-
-        var dialog = new Window
-        {
-            Title = Loc.T(StringKeys.Dialog.NewFolderTitle),
-            Width = 400,
-            Height = 180,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Spacing = 15,
-                Margin = new Avalonia.Thickness(20),
-                Children =
-                {
-                    new TextBlock { Text = Loc.T(StringKeys.Dialog.NewFolderPrompt), FontWeight = Avalonia.Media.FontWeight.Bold },
-                    textBox,
-                    new StackPanel
-                    {
-                        Spacing = 10,
-                        Orientation = Avalonia.Layout.Orientation.Horizontal,
-                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-                        Children =
-                        {
-                            new Button { Content = Loc.T(StringKeys.Common.Create), IsDefault = true, Width = 80 },
-                            new Button { Content = Loc.T(StringKeys.Common.Cancel), IsCancel = true, Width = 80 }
-                        }
-                    }
-                }
-            }
-        };
-
-        string? result = null;
-        var panel = (StackPanel)dialog.Content;
-        var buttonsPanel = (StackPanel)panel.Children[2];
-        var createButton = (Button)buttonsPanel.Children[0];
-        var cancelButton = (Button)buttonsPanel.Children[1];
-
-        createButton.Click += (_, _) =>
-        {
-            result = textBox.Text;
-            dialog.Close();
-        };
-
-        cancelButton.Click += (_, _) =>
-        {
-            result = null;
-            dialog.Close();
-        };
-
-        await dialog.ShowDialog(this);
-        return result;
-    }
-
-    private async Task<string?> PromptForCopyNameAsync(string currentName)
-    {
-        var textBox = new TextBox
-        {
-            PlaceholderText = Loc.T(StringKeys.Dialog.CopyPlaceholder),
-            Width = 350,
-            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch
-        };
-
-        var dialog = new Window
-        {
-            Title = Loc.T(StringKeys.Menu.Copy),
-            Width = 400,
-            Height = 180,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Spacing = 15,
-                Margin = new Avalonia.Thickness(20),
-                Children =
-                {
-                    new TextBlock { Text = Loc.F(StringKeys.Dialog.CopyPrompt, currentName), FontWeight = Avalonia.Media.FontWeight.Bold },
-                    textBox,
-                    new StackPanel
-                    {
-                        Spacing = 10,
-                        Orientation = Avalonia.Layout.Orientation.Horizontal,
-                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-                        Children =
-                        {
-                            new Button { Content = Loc.T(StringKeys.Common.Copy), IsDefault = true, Width = 80 },
-                            new Button { Content = Loc.T(StringKeys.Common.Cancel), IsCancel = true, Width = 80 }
-                        }
-                    }
-                }
-            }
-        };
-
-        string? result = null;
-        var panel = (StackPanel)dialog.Content;
-        var buttonsPanel = (StackPanel)panel.Children[2];
-        var copyButton = (Button)buttonsPanel.Children[0];
-        var cancelButton = (Button)buttonsPanel.Children[1];
-
-        copyButton.Click += (_, _) =>
-        {
-            result = textBox.Text ?? string.Empty;
-            dialog.Close();
-        };
-
-        cancelButton.Click += (_, _) =>
-        {
-            result = null;
-            dialog.Close();
-        };
-
-        await dialog.ShowDialog(this);
-        return result;
-    }
-
-    private async Task<UploadConflictStrategy> PickConflictStrategyAsync(IReadOnlyList<string> conflictingFiles)
-    {
-        var filesList = string.Join("\n", conflictingFiles.Take(10).Select(f => "- " + f));
-        if (conflictingFiles.Count > 10)
-        {
-            filesList += Loc.Plural(StringKeys.Common.More, conflictingFiles.Count - 10);
-        }
-
-        var dialog = new Window
-        {
-            Title = Loc.T(StringKeys.Dialog.UploadConflictTitle),
-            Width = 450,
-            Height = 350,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Spacing = 15,
-                Margin = new Avalonia.Thickness(20),
-                Children =
-                {
-                    new TextBlock { Text = Loc.T(StringKeys.Dialog.UploadConflictIntro), FontWeight = Avalonia.Media.FontWeight.Bold },
-                    new TextBlock { Text = filesList, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                    new TextBlock { Text = Loc.T(StringKeys.Dialog.UploadConflictQuestion), FontWeight = Avalonia.Media.FontWeight.Bold },
-                    new StackPanel
-                    {
-                        Spacing = 10,
-                        Orientation = Avalonia.Layout.Orientation.Vertical,
-                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
-                        Children =
-                        {
-                            new Button { Content = Loc.T(StringKeys.Dialog.UploadConflictKeepBoth), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.KeepBoth },
-                            new Button { Content = Loc.T(StringKeys.Dialog.UploadConflictReplace), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.Replace },
-                            new Button { Content = Loc.T(StringKeys.Dialog.UploadConflictSkip), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.Skip },
-                            new Button { Content = Loc.T(StringKeys.Common.Cancel), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Tag = UploadConflictStrategy.None }
-                        }
-                    }
-                }
-            }
-        };
-
-        var result = UploadConflictStrategy.None;
-        var panel = (StackPanel)dialog.Content;
-        var buttonsPanel = (StackPanel)panel.Children[3];
-        foreach (var child in buttonsPanel.Children)
-        {
-            if (child is Button button)
-            {
-                button.Click += (_, _) =>
-                {
-                    result = (UploadConflictStrategy)button.Tag!;
-                    dialog.Close();
-                };
-            }
-        }
-
-        await dialog.ShowDialog(this);
-        return result;
-    }
 
     private async Task<string?> PickSaveActivityAsync()
     {
@@ -865,718 +977,11 @@ public partial class MainWindow : Window
         return file?.Path.LocalPath;
     }
 
-    /// <summary>
-    /// "Add sync pair", with the remote folder browser as a second face of the same dialog
-    /// (swapping its Content) instead of a window stacked on top of it — one modal, not two.
-    /// </summary>
-    private async Task<NewSyncPairRequest?> PromptForNewPairAsync(SyncPanelViewModel syncPanel, string remoteRootPath, SyncPairPrefill? prefill = null)
-    {
-        var remoteBox = new TextBox { PlaceholderText = "/my-files/Documents", Width = 280, Text = prefill?.RemotePath };
-        var remoteBrowseButton = new Button { Content = Loc.T(StringKeys.Common.Browse), IsVisible = syncPanel.GetRemoteFolderChildren is not null };
-        var localBox = new TextBox { Width = 280, IsReadOnly = true, PlaceholderText = Loc.T(StringKeys.Dialog.PairLocalFolderPlaceholder), Text = prefill?.LocalPath };
-        var browseButton = new Button { Content = Loc.T(StringKeys.Common.Browse) };
 
-        // RemoteToLocal stays first, and therefore the default: it's the only direction that
-        // cannot destroy anything in the cloud (docs/PLAN-LOCAL-SYNC.md §15).
-        var directionBox = new ComboBox
-        {
-            Width = 380,
-            ItemsSource = new[]
-            {
-                Loc.T(StringKeys.Dialog.PairDirectionDownload),
-                Loc.T(StringKeys.Dialog.PairDirectionUpload),
-                Loc.T(StringKeys.Dialog.PairDirectionTwoWay),
-            },
-            SelectedIndex = 0,
-        };
 
-        var policyBox = new ComboBox
-        {
-            Width = 380,
-            ItemsSource = new[]
-            {
-                Loc.T(StringKeys.Dialog.PairPolicyAsk),
-                Loc.T(StringKeys.Dialog.PairPolicyKeepBoth),
-                Loc.T(StringKeys.Dialog.PairPolicyPreferLocal),
-                Loc.T(StringKeys.Dialog.PairPolicyPreferRemote),
-            },
-            SelectedIndex = 0,
-        };
 
-        var policyLabel = new TextBlock { Text = Loc.T(StringKeys.Dialog.PairPolicyLabel), FontWeight = Avalonia.Media.FontWeight.Bold };
 
-        // Only meaningful for a one-way pair (SyncPair.MirrorDeletes) — a two-way pair already
-        // tracks deletions through its baseline, so there is no "extra file at the destination"
-        // for this to opt out of. Checked by default: today's only behavior before this existed
-        // was a strict mirror, and every new pair should keep that unless asked otherwise.
-        var mirrorDeletesCheckBox = new CheckBox { Content = Loc.T(StringKeys.Dialog.PairMirrorDeletes), IsChecked = true };
 
-        // The conflict policy is only ever consulted in two-way mode — a one-way mirror's source
-        // side wins by definition, so showing the choice there would imply a decision that
-        // doesn't exist. "Delete extra files" is the opposite: it only means something for a
-        // one-way pair, so it's hidden exactly when the policy picker is shown.
-        void SyncPolicyVisibility()
-        {
-            var isTwoWay = directionBox.SelectedIndex == 2;
-            policyBox.IsVisible = isTwoWay;
-            policyLabel.IsVisible = isTwoWay;
-            mirrorDeletesCheckBox.IsVisible = !isTwoWay;
-        }
-
-        directionBox.SelectionChanged += (_, _) => SyncPolicyVisibility();
-        SyncPolicyVisibility();
-
-        browseButton.Click += async (_, _) =>
-        {
-            var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-            {
-                Title = Loc.T(StringKeys.Picker.LocalSyncFolderTitle),
-                AllowMultiple = false
-            });
-
-            if (folders.Count > 0)
-            {
-                localBox.Text = folders[0].Path.LocalPath;
-            }
-        };
-
-        var addButton = new Button { Content = Loc.T(StringKeys.Common.Add), IsDefault = true, Width = 80 };
-        var cancelButton = new Button { Content = Loc.T(StringKeys.Common.Cancel), IsCancel = true, Width = 80 };
-
-        var formPanel = new StackPanel
-        {
-            Spacing = 12,
-            Margin = new Avalonia.Thickness(20),
-            Children =
-            {
-                new TextBlock { Text = Loc.T(StringKeys.Dialog.PairRemotePathLabel), FontWeight = Avalonia.Media.FontWeight.Bold },
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 8,
-                    Children = { remoteBox, remoteBrowseButton }
-                },
-                new TextBlock { Text = Loc.T(StringKeys.Dialog.PairLocalFolderLabel), FontWeight = Avalonia.Media.FontWeight.Bold },
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 8,
-                    Children = { localBox, browseButton }
-                },
-                new TextBlock { Text = Loc.T(StringKeys.Dialog.PairDirectionLabel), FontWeight = Avalonia.Media.FontWeight.Bold },
-                directionBox,
-                policyLabel,
-                policyBox,
-                mirrorDeletesCheckBox,
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 10,
-                    HorizontalAlignment = HorizontalAlignment.Right,
-                    Children = { addButton, cancelButton }
-                }
-            }
-        };
-
-        var dialog = new Window
-        {
-            Title = Loc.T(StringKeys.Dialog.PairAddTitle),
-            Width = 480,
-            Height = 560,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = formPanel,
-        };
-
-        remoteBrowseButton.Click += (_, _) =>
-            ShowRemoteFolderBrowser(dialog, syncPanel, remoteRootPath, formPanel, chosenPath =>
-            {
-                remoteBox.Text = chosenPath;
-            });
-
-        NewSyncPairRequest? result = null;
-
-        addButton.Click += (_, _) =>
-        {
-            if (!string.IsNullOrWhiteSpace(remoteBox.Text) && !string.IsNullOrWhiteSpace(localBox.Text))
-            {
-                var direction = directionBox.SelectedIndex switch
-                {
-                    1 => SyncDirection.LocalToRemote,
-                    2 => SyncDirection.TwoWay,
-                    _ => SyncDirection.RemoteToLocal,
-                };
-
-                var policy = policyBox.SelectedIndex switch
-                {
-                    1 => ConflictPolicy.KeepBoth,
-                    2 => ConflictPolicy.PreferLocal,
-                    3 => ConflictPolicy.PreferRemote,
-                    _ => ConflictPolicy.Ask,
-                };
-
-                result = new NewSyncPairRequest(remoteBox.Text.Trim(), localBox.Text.Trim(), direction, policy, mirrorDeletesCheckBox.IsChecked ?? true);
-            }
-
-            dialog.Close();
-        };
-
-        cancelButton.Click += (_, _) => dialog.Close();
-
-        await dialog.ShowDialog(this);
-        return result;
-    }
-
-    /// <summary>
-    /// Lets an existing pair's direction/conflict policy change without recreating it. Remote/local
-    /// paths aren't editable here — changing those already has a working path (remove, then add a
-    /// new pair) and would need re-validating against every other pair, which this flow never does.
-    /// </summary>
-    private async Task<EditSyncPairRequest?> PromptForEditPairAsync(SyncPairViewModel pair)
-    {
-        var directionBox = new ComboBox
-        {
-            Width = 380,
-            ItemsSource = new[]
-            {
-                Loc.T(StringKeys.Dialog.PairDirectionDownload),
-                Loc.T(StringKeys.Dialog.PairDirectionUpload),
-                Loc.T(StringKeys.Dialog.PairDirectionTwoWay),
-            },
-            SelectedIndex = pair.Direction switch
-            {
-                SyncDirection.LocalToRemote => 1,
-                SyncDirection.TwoWay => 2,
-                _ => 0,
-            },
-        };
-
-        var policyBox = new ComboBox
-        {
-            Width = 380,
-            ItemsSource = new[]
-            {
-                Loc.T(StringKeys.Dialog.PairPolicyAsk),
-                Loc.T(StringKeys.Dialog.PairPolicyKeepBoth),
-                Loc.T(StringKeys.Dialog.PairPolicyPreferLocal),
-                Loc.T(StringKeys.Dialog.PairPolicyPreferRemote),
-            },
-            SelectedIndex = pair.ConflictPolicy switch
-            {
-                ConflictPolicy.KeepBoth => 1,
-                ConflictPolicy.PreferLocal => 2,
-                ConflictPolicy.PreferRemote => 3,
-                _ => 0,
-            },
-        };
-
-        var policyLabel = new TextBlock { Text = Loc.T(StringKeys.Dialog.PairPolicyLabel), FontWeight = Avalonia.Media.FontWeight.Bold };
-
-        var mirrorDeletesCheckBox = new CheckBox { Content = Loc.T(StringKeys.Dialog.PairMirrorDeletes), IsChecked = pair.MirrorDeletes };
-
-        void SyncPolicyVisibility()
-        {
-            var isTwoWay = directionBox.SelectedIndex == 2;
-            policyBox.IsVisible = isTwoWay;
-            policyLabel.IsVisible = isTwoWay;
-            mirrorDeletesCheckBox.IsVisible = !isTwoWay;
-        }
-
-        directionBox.SelectionChanged += (_, _) => SyncPolicyVisibility();
-        SyncPolicyVisibility();
-
-        var saveButton = new Button { Content = Loc.T(StringKeys.Common.Save), IsDefault = true, Width = 80 };
-        var cancelButton = new Button { Content = Loc.T(StringKeys.Common.Cancel), IsCancel = true, Width = 80 };
-
-        var dialog = new Window
-        {
-            Title = Loc.T(StringKeys.Dialog.PairEditTitle),
-            Width = 440,
-            Height = 360,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Spacing = 12,
-                Margin = new Avalonia.Thickness(20),
-                Children =
-                {
-                    new TextBlock { Text = pair.RemotePath, FontWeight = Avalonia.Media.FontWeight.Bold },
-                    new TextBlock { Text = pair.LocalPath, Opacity = 0.7 },
-                    new TextBlock { Text = Loc.T(StringKeys.Dialog.PairDirectionLabel), FontWeight = Avalonia.Media.FontWeight.Bold },
-                    directionBox,
-                    policyLabel,
-                    policyBox,
-                    mirrorDeletesCheckBox,
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 10,
-                        HorizontalAlignment = HorizontalAlignment.Right,
-                        Children = { saveButton, cancelButton }
-                    }
-                }
-            },
-        };
-
-        EditSyncPairRequest? result = null;
-
-        saveButton.Click += (_, _) =>
-        {
-            var direction = directionBox.SelectedIndex switch
-            {
-                1 => SyncDirection.LocalToRemote,
-                2 => SyncDirection.TwoWay,
-                _ => SyncDirection.RemoteToLocal,
-            };
-
-            var policy = policyBox.SelectedIndex switch
-            {
-                1 => ConflictPolicy.KeepBoth,
-                2 => ConflictPolicy.PreferLocal,
-                3 => ConflictPolicy.PreferRemote,
-                _ => ConflictPolicy.Ask,
-            };
-
-            result = new EditSyncPairRequest(direction, policy, mirrorDeletesCheckBox.IsChecked ?? true);
-            dialog.Close();
-        };
-
-        cancelButton.Click += (_, _) => dialog.Close();
-
-        await dialog.ShowDialog(this);
-        return result;
-    }
-
-    /// <summary>
-    /// Swaps the "Add sync pair" dialog's own content for a click-through folder browser — the
-    /// remote-folder picker used to be a second window stacked on top of the add-pair dialog;
-    /// this keeps it to one modal with an internal "page". "Back" restores the form instead of
-    /// closing the dialog. Only existing folders can be reached this way — there's no
-    /// "create folder" affordance here, unlike the local picker which can point at a
-    /// not-yet-existing directory.
-    /// </summary>
-    private void ShowRemoteFolderBrowser(Window dialog, SyncPanelViewModel syncPanel, string startPath, Control formPanel, Action<string> onSelected)
-    {
-        var getChildren = syncPanel.GetRemoteFolderChildren;
-        if (getChildren is null)
-        {
-            return;
-        }
-
-        var currentPath = startPath;
-        var pathHistory = new Stack<string>();
-
-        var pathText = new TextBlock { FontWeight = Avalonia.Media.FontWeight.Bold, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
-        var upButton = new Button { Content = Loc.T(StringKeys.Dialog.RemoteBrowserUp), IsEnabled = false };
-        var statusText = new TextBlock { Opacity = 0.7, IsVisible = false };
-        var itemsPanel = new StackPanel { Spacing = 4 };
-        var selectButton = new Button { Content = Loc.T(StringKeys.Dialog.RemoteBrowserSelect), IsDefault = true, Width = 200 };
-        var backButton = new Button { Content = Loc.T(StringKeys.Dialog.RemoteBrowserBack), IsCancel = true, Width = 90 };
-
-        var browsePanel = new StackPanel
-        {
-            Spacing = 10,
-            Margin = new Avalonia.Thickness(20),
-            Children =
-            {
-                new TextBlock { Text = Loc.T(StringKeys.Dialog.RemoteBrowserTitle), FontSize = 16, FontWeight = Avalonia.Media.FontWeight.Bold },
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 8,
-                    Children = { upButton, pathText }
-                },
-                new ScrollViewer { Height = 300, Content = itemsPanel },
-                statusText,
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 10,
-                    HorizontalAlignment = HorizontalAlignment.Right,
-                    Children = { selectButton, backButton }
-                }
-            }
-        };
-
-        async Task LoadAsync()
-        {
-            pathText.Text = currentPath;
-            upButton.IsEnabled = pathHistory.Count > 0;
-            itemsPanel.Children.Clear();
-            statusText.IsVisible = true;
-            statusText.Text = Loc.T(StringKeys.Common.Loading);
-
-            try
-            {
-                var children = await getChildren(currentPath, CancellationToken.None);
-                var folders = children
-                    .Where(item => item.IsFolder)
-                    .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-
-                statusText.IsVisible = folders.Count == 0;
-                statusText.Text = Loc.T(StringKeys.Dialog.RemoteBrowserEmpty);
-
-                foreach (var folder in folders)
-                {
-                    var childPath = folder.Path;
-                    var folderButton = new Button
-                    {
-                        Content = Loc.F(StringKeys.Dialog.RemoteBrowserFolder, folder.Name),
-                        HorizontalAlignment = HorizontalAlignment.Stretch,
-                        HorizontalContentAlignment = HorizontalAlignment.Left,
-                    };
-                    folderButton.Click += async (_, _) =>
-                    {
-                        pathHistory.Push(currentPath);
-                        currentPath = childPath;
-                        await LoadAsync();
-                    };
-                    itemsPanel.Children.Add(folderButton);
-                }
-            }
-            catch (Exception ex)
-            {
-                statusText.IsVisible = true;
-                statusText.Text = Loc.F(StringKeys.Dialog.RemoteBrowserError, ex.Message);
-            }
-        }
-
-        upButton.Click += async (_, _) =>
-        {
-            if (pathHistory.Count == 0)
-            {
-                return;
-            }
-
-            currentPath = pathHistory.Pop();
-            await LoadAsync();
-        };
-
-        selectButton.Click += (_, _) =>
-        {
-            onSelected(currentPath);
-            dialog.Content = formPanel;
-        };
-        backButton.Click += (_, _) => dialog.Content = formPanel;
-
-        dialog.Content = browsePanel;
-        _ = LoadAsync();
-    }
-
-    private async Task<bool> ShowPreviewAsync(SyncPlan plan, IReadOnlyList<string> warnings)
-    {
-        var stats = plan.Stats;
-        // Each count is its own clause, joined here. The three summary lines used to be single
-        // strings with "archivo(s)"/"carpeta(s)" spliced in — a Spanish-specific plural hack, and
-        // one that cannot agree correctly anyway when a sentence carries two different counts
-        // (docs/PLAN-I18N.md §6.3). Two clauses, two plural lookups, one line on screen.
-        static string TwoClauses(string first, string second) => first + ", " + second;
-
-        var lines = new List<string>
-        {
-            TwoClauses(
-                Loc.Plural(StringKeys.Dialog.PreviewDownloadFiles, stats.FilesToDownload, ByteSize.Format(stats.BytesToDownload)),
-                Loc.Plural(StringKeys.Dialog.PreviewDownloadFolders, stats.FoldersToCreateLocally)),
-            TwoClauses(
-                Loc.Plural(StringKeys.Dialog.PreviewUploadFiles, stats.FilesToUpload, ByteSize.Format(stats.BytesToUpload)),
-                Loc.Plural(StringKeys.Dialog.PreviewUploadFolders, stats.FoldersToCreateRemotely)),
-            TwoClauses(
-                Loc.Plural(StringKeys.Dialog.PreviewTrashLocal, stats.ToDeleteLocal),
-                Loc.Plural(StringKeys.Dialog.PreviewTrashRemote, stats.ToTrashRemote)),
-        };
-
-        if (stats.FilesToMoveLocally > 0)
-        {
-            lines.Add(Loc.Plural(StringKeys.Dialog.PreviewMovedLocally, stats.FilesToMoveLocally));
-        }
-
-        if (stats.FilesToMoveRemotely > 0)
-        {
-            lines.Add(Loc.Plural(StringKeys.Dialog.PreviewMovedRemotely, stats.FilesToMoveRemotely));
-        }
-
-        if (stats.Conflicts > 0)
-        {
-            lines.Add(Loc.Plural(StringKeys.Dialog.PreviewConflicts, stats.Conflicts));
-        }
-
-        foreach (var warning in warnings)
-        {
-            lines.Add(Loc.F(StringKeys.Dialog.PreviewWarning, warning));
-        }
-
-        var summary = string.Join("\n", lines);
-
-        var actionLines = plan.Actions.Take(50).Select(a => Loc.F(StringKeys.Dialog.PreviewAction, a.Operation, a.RelativePath)).ToList();
-        if (plan.Actions.Count > 50)
-        {
-            actionLines.Add(Loc.Plural(StringKeys.Common.More, plan.Actions.Count - 50).TrimStart('\n'));
-        }
-
-        // A plan with no actions but with conflicts isn't "up to date" — under the Ask policy that
-        // is precisely the state that needs the user, so don't tell them everything is fine.
-        var actionsText = actionLines.Count > 0
-            ? string.Join("\n", actionLines)
-            : stats.Conflicts > 0
-                ? Loc.T(StringKeys.Dialog.PreviewNoActionsConflicts)
-                : Loc.T(StringKeys.Dialog.PreviewNoActionsUpToDate);
-
-        var dialog = new Window
-        {
-            Title = Loc.T(StringKeys.Dialog.PreviewTitle),
-            Width = 520,
-            Height = 440,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Spacing = 12,
-                Margin = new Avalonia.Thickness(20),
-                Children =
-                {
-                    new TextBlock { Text = summary, TextWrapping = Avalonia.Media.TextWrapping.Wrap, FontWeight = Avalonia.Media.FontWeight.Bold },
-                    new ScrollViewer
-                    {
-                        Height = 230,
-                        Content = new TextBlock { Text = actionsText, TextWrapping = Avalonia.Media.TextWrapping.Wrap }
-                    },
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 10,
-                        HorizontalAlignment = HorizontalAlignment.Right,
-                        Children =
-                        {
-                            new Button { Content = Loc.T(StringKeys.Menu.SyncNow), IsDefault = true, Width = 160, IsEnabled = plan.Actions.Count > 0 },
-                            new Button { Content = Loc.T(StringKeys.Common.Close), IsCancel = true, Width = 80 }
-                        }
-                    }
-                }
-            }
-        };
-
-        var result = false;
-        var panel = (StackPanel)dialog.Content;
-        var buttonsPanel = (StackPanel)panel.Children[2];
-        var runButton = (Button)buttonsPanel.Children[0];
-        var closeButton = (Button)buttonsPanel.Children[1];
-
-        runButton.Click += (_, _) =>
-        {
-            result = true;
-            dialog.Close();
-        };
-
-        closeButton.Click += (_, _) => dialog.Close();
-
-        await dialog.ShowDialog(this);
-        return result;
-    }
-
-    /// <summary>
-    /// §5.6's per-file resolution panel. Every file starts on "Decide later" rather than a default
-    /// action: these are the cases the engine refused to guess at, so the dialog must not guess
-    /// either. Closing without choosing anything therefore changes nothing.
-    /// </summary>
-    private async Task<IReadOnlyDictionary<long, ConflictResolution>> ShowConflictsAsync(IReadOnlyList<QueuedSyncAction> conflicts)
-    {
-        var chosen = new Dictionary<long, ConflictResolution>();
-        var rows = new StackPanel { Spacing = 10 };
-
-        foreach (var conflict in conflicts)
-        {
-            var selector = new ComboBox
-            {
-                Width = 260,
-                ItemsSource = new[]
-                {
-                    Loc.T(StringKeys.Dialog.ConflictsChoiceLater),
-                    Loc.T(StringKeys.Dialog.ConflictsChoiceKeepBoth),
-                    Loc.T(StringKeys.Dialog.ConflictsChoiceKeepLocal),
-                    Loc.T(StringKeys.Dialog.ConflictsChoiceKeepRemote),
-                },
-                SelectedIndex = 0,
-            };
-
-            var id = conflict.Id;
-            selector.SelectionChanged += (_, _) =>
-            {
-                switch (selector.SelectedIndex)
-                {
-                    case 1: chosen[id] = ConflictResolution.KeepBoth; break;
-                    case 2: chosen[id] = ConflictResolution.KeepLocal; break;
-                    case 3: chosen[id] = ConflictResolution.KeepRemote; break;
-                    default: chosen.Remove(id); break;
-                }
-            };
-
-            rows.Children.Add(new StackPanel
-            {
-                Spacing = 4,
-                Children =
-                {
-                    new TextBlock { Text = conflict.RelativePath, FontWeight = Avalonia.Media.FontWeight.Bold, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                    new TextBlock { Text = DescribeReason(conflict.LastError), Opacity = 0.7, FontSize = 12 },
-                    selector,
-                }
-            });
-        }
-
-        var applyButton = new Button { Content = Loc.T(StringKeys.Common.Apply), IsDefault = true, Width = 100 };
-        var cancelButton = new Button { Content = Loc.T(StringKeys.Common.Cancel), IsCancel = true, Width = 100 };
-
-        var dialog = new Window
-        {
-            Title = Loc.Plural(StringKeys.Dialog.ConflictsTitle, conflicts.Count),
-            Width = 560,
-            Height = 460,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Spacing = 12,
-                Margin = new Avalonia.Thickness(20),
-                Children =
-                {
-                    new TextBlock
-                    {
-                        Text = Loc.T(StringKeys.Dialog.ConflictsIntro),
-                        TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-                        Opacity = 0.8,
-                    },
-                    new ScrollViewer { Height = 280, Content = rows },
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 10,
-                        HorizontalAlignment = HorizontalAlignment.Right,
-                        Children = { applyButton, cancelButton }
-                    }
-                }
-            }
-        };
-
-        var apply = false;
-        applyButton.Click += (_, _) =>
-        {
-            apply = true;
-            dialog.Close();
-        };
-        cancelButton.Click += (_, _) => dialog.Close();
-
-        await dialog.ShowDialog(this);
-        return apply ? chosen : new Dictionary<long, ConflictResolution>();
-    }
-
-    /// <summary>
-    /// The failures view (docs/PLAN-UX-ROUND-2.md §6). Same shape as
-    /// <see cref="ShowConflictsAsync"/>, because it is the same kind of decision: here is what
-    /// happened per file, choose per file. The pair row previously showed only "N acción(es)
-    /// fallaron" and a blind retry-everything button, while the per-action reason sat unread in
-    /// the queue.
-    /// </summary>
-    private async Task<IReadOnlyDictionary<long, SyncFailureDecision>> ShowFailuresAsync(IReadOnlyList<SyncFailureViewModel> failures)
-    {
-        var chosen = new Dictionary<long, SyncFailureDecision>();
-        var rows = new StackPanel { Spacing = 12 };
-
-        foreach (var failure in failures)
-        {
-            var selector = new ComboBox
-            {
-                Width = 260,
-                ItemsSource = new[]
-                {
-                    Loc.T(StringKeys.Dialog.FailuresChoiceLeave),
-                    Loc.T(StringKeys.Dialog.FailuresChoiceRetry),
-                    Loc.T(StringKeys.Dialog.FailuresChoiceDiscard),
-                },
-                SelectedIndex = 0,
-            };
-
-            var id = failure.Id;
-            selector.SelectionChanged += (_, _) =>
-            {
-                switch (selector.SelectedIndex)
-                {
-                    case 1: chosen[id] = SyncFailureDecision.Retry; break;
-                    case 2: chosen[id] = SyncFailureDecision.Discard; break;
-                    default: chosen.Remove(id); break;
-                }
-            };
-
-            rows.Children.Add(new StackPanel
-            {
-                Spacing = 4,
-                Children =
-                {
-                    new TextBlock { Text = failure.RelativePath, FontWeight = Avalonia.Media.FontWeight.Bold, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                    new TextBlock { Text = failure.Summary, Opacity = 0.7, FontSize = 12 },
-                    // The provider's own words, verbatim and wrapped rather than trimmed: this is
-                    // the sentence that tells the user whether it is their problem or ours.
-                    new TextBlock { Text = failure.ReasonText, Opacity = 0.9, FontSize = 12, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                    selector,
-                }
-            });
-        }
-
-        var retryAllButton = new Button { Content = Loc.T(StringKeys.Dialog.FailuresRetryAll), Width = 160 };
-        var applyButton = new Button { Content = Loc.T(StringKeys.Common.Apply), IsDefault = true, Width = 100 };
-        var cancelButton = new Button { Content = Loc.T(StringKeys.Common.Cancel), IsCancel = true, Width = 100 };
-
-        var dialog = new Window
-        {
-            Title = Loc.Plural(StringKeys.Dialog.FailuresTitle, failures.Count),
-            Width = 620,
-            Height = 500,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Spacing = 12,
-                Margin = new Avalonia.Thickness(20),
-                Children =
-                {
-                    new TextBlock
-                    {
-                        Text = Loc.T(StringKeys.Dialog.FailuresIntro),
-                        TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-                        Opacity = 0.8,
-                    },
-                    new ScrollViewer { Height = 300, Content = rows },
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 10,
-                        HorizontalAlignment = HorizontalAlignment.Right,
-                        Children = { retryAllButton, applyButton, cancelButton }
-                    }
-                }
-            }
-        };
-
-        var apply = false;
-
-        // The old one-click behavior, kept: deciding file by file is the new capability, not a new
-        // obligation.
-        retryAllButton.Click += (_, _) =>
-        {
-            foreach (var failure in failures)
-            {
-                chosen[failure.Id] = SyncFailureDecision.Retry;
-            }
-
-            apply = true;
-            dialog.Close();
-        };
-
-        applyButton.Click += (_, _) =>
-        {
-            apply = true;
-            dialog.Close();
-        };
-        cancelButton.Click += (_, _) => dialog.Close();
-
-        await dialog.ShowDialog(this);
-        return apply ? chosen : new Dictionary<long, SyncFailureDecision>();
-    }
 
     /// <summary>Puts text on the system clipboard — "Copiar ruta" (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6). Silently a no-op if the platform offers no clipboard (e.g. a headless test host).</summary>
     private async Task CopyToClipboardAsync(string text)
@@ -1588,170 +993,8 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>A read-only "Properties" info panel — "Propiedades" (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6).</summary>
-    private async Task ShowPropertiesAsync(string title, IReadOnlyList<PropertyField> fields)
-    {
-        var children = new List<Control>
-        {
-            new TextBlock { Text = title, FontWeight = Avalonia.Media.FontWeight.Bold, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-        };
 
-        foreach (var field in fields)
-        {
-            var text = new TextBlock
-            {
-                Text = Loc.F(StringKeys.Dialog.PropertiesField, field.Label, field.Value),
-                TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
 
-            if (!field.IsCopyable)
-            {
-                children.Add(text);
-                continue;
-            }
 
-            // Paths are the only values here anyone needs elsewhere, and the only ones long enough
-            // that retyping them is not an option (docs/PLAN-UX-ROUND-2.md §12).
-            var copyButton = new Button
-            {
-                Content = Loc.T(StringKeys.Common.Copy),
-                FontSize = 11,
-                Padding = new Avalonia.Thickness(8, 2),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-
-            var value = field.Value;
-            copyButton.Click += async (_, _) =>
-            {
-                await CopyToClipboardAsync(value);
-                // Confirm in place: a clipboard write is otherwise completely invisible.
-                copyButton.Content = Loc.T(StringKeys.Common.Copied);
-            };
-
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8 };
-            Grid.SetColumn(text, 0);
-            Grid.SetColumn(copyButton, 1);
-            row.Children.Add(text);
-            row.Children.Add(copyButton);
-            children.Add(row);
-        }
-
-        var okButton = new Button { Content = Loc.T(StringKeys.Common.Ok), IsDefault = true, IsCancel = true, Width = 80 };
-        children.Add(new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Children = { okButton },
-        });
-
-        var contentPanel = new StackPanel { Spacing = 10, Margin = new Avalonia.Thickness(20) };
-        contentPanel.Children.AddRange(children);
-
-        var dialog = new Window
-        {
-            Title = Loc.T(StringKeys.Dialog.PropertiesTitle),
-            Width = 420,
-            SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = contentPanel,
-        };
-
-        okButton.Click += (_, _) => dialog.Close();
-        await dialog.ShowDialog(this);
-    }
-
-    /// <summary>
-    /// A plain yes/no. "Cancel" is the default button, not "Continue": every question routed here is
-    /// a warning about doing something big, so the safe answer should be the one a stray Enter picks.
-    /// </summary>
-    private async Task<bool> AskAsync(string question)
-    {
-        var yes = new Button { Content = Loc.T(StringKeys.Common.Continue), Width = 100 };
-        var no = new Button { Content = Loc.T(StringKeys.Common.Cancel), IsCancel = true, IsDefault = true, Width = 100 };
-
-        var dialog = new Window
-        {
-            Title = Loc.T(StringKeys.Dialog.ConfirmTitle),
-            Width = 480,
-            SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Spacing = 16,
-                Margin = new Avalonia.Thickness(20),
-                Children =
-                {
-                    new TextBlock { Text = question, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 10,
-                        HorizontalAlignment = HorizontalAlignment.Right,
-                        Children = { yes, no }
-                    }
-                }
-            }
-        };
-
-        var confirmed = false;
-        yes.Click += (_, _) =>
-        {
-            confirmed = true;
-            dialog.Close();
-        };
-        no.Click += (_, _) => dialog.Close();
-
-        await dialog.ShowDialog(this);
-        return confirmed;
-    }
-
-    /// <summary>
-    /// A blocking, single-button notice — for a rejection the user has to actually see, not a
-    /// <c>StatusMessage</c> line that can change again (or scroll away) before anyone reads it.
-    /// Mirrors <see cref="AskAsync"/>'s shape with the "Cancel" button dropped: there's nothing to
-    /// decide here, only something to acknowledge (docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2 —
-    /// a rejected sync-pair-direction change looked indistinguishable from a silently-failed save).
-    /// </summary>
-    private async Task ShowAlertAsync(string message)
-    {
-        var ok = new Button { Content = Loc.T(StringKeys.Common.Ok), IsCancel = true, IsDefault = true, Width = 100 };
-
-        var dialog = new Window
-        {
-            Title = Loc.T(StringKeys.Dialog.AlertTitle),
-            Width = 480,
-            SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Spacing = 16,
-                Margin = new Avalonia.Thickness(20),
-                Children =
-                {
-                    new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        HorizontalAlignment = HorizontalAlignment.Right,
-                        Children = { ok }
-                    }
-                }
-            }
-        };
-
-        ok.Click += (_, _) => dialog.Close();
-
-        await dialog.ShowDialog(this);
-    }
-
-    private static string DescribeReason(string? reason) => reason switch
-    {
-        nameof(ConflictReason.BothChanged) => Loc.T(StringKeys.Dialog.ConflictsReasonBothChanged),
-        nameof(ConflictReason.BothAppearedDiffering) => Loc.T(StringKeys.Dialog.ConflictsReasonBothAppeared),
-        nameof(ConflictReason.RemoteDeletedLocalChanged) => Loc.T(StringKeys.Dialog.ConflictsReasonRemoteDeleted),
-        nameof(ConflictReason.LocalDeletedRemoteChanged) => Loc.T(StringKeys.Dialog.ConflictsReasonLocalDeleted),
-        _ => Loc.T(StringKeys.Dialog.ConflictsReasonDefault),
-    };
 
 }

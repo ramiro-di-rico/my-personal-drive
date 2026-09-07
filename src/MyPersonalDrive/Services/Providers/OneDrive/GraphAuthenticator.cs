@@ -34,8 +34,17 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
     private readonly bool _ownsClient;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
-    public GraphAuthenticator(string clientId, OneDriveTokenStore tokenStore, HttpClient? httpClient = null)
+    /// <summary>
+    /// Token expiry and the refresh margin are clock decisions, and AGENTS.md's rule exists so they
+    /// can be tested: "a token that expired while the app was open" and "a margin off by a minute"
+    /// are the failures a user reads as being signed out for no reason
+    /// (docs/PLAN-UX-ROUND-4.md Z4).
+    /// </summary>
+    private readonly TimeProvider _timeProvider;
+
+    public GraphAuthenticator(string clientId, OneDriveTokenStore tokenStore, HttpClient? httpClient = null, TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _clientId = clientId;
         _tokenStore = tokenStore;
         _ownsClient = httpClient is null;
@@ -90,7 +99,7 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
             {
                 AccessToken = token.AccessToken,
                 RefreshToken = token.RefreshToken ?? string.Empty,
-                ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(token.ExpiresIn),
+                ExpiresAt = _timeProvider.GetUtcNow().AddSeconds(token.ExpiresIn),
                 AccountLabel = accountLabel,
             });
 
@@ -127,7 +136,7 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
             throw NotAuthenticated($"There is no saved OneDrive session.", LocalizedText.Of(StringKeys.Error.AuthNoSession, "OneDrive"));
         }
 
-        if (stored.ExpiresAt - DateTimeOffset.UtcNow > RefreshMargin)
+        if (stored.ExpiresAt - _timeProvider.GetUtcNow() > RefreshMargin)
         {
             return stored.AccessToken;
         }
@@ -188,7 +197,7 @@ public sealed class GraphAuthenticator : IDriveAuthenticator
                 // Graph's refresh response doesn't always include a new refresh token; keep the old
                 // one when it doesn't, per OAuth2 refresh-token-rotation conventions.
                 RefreshToken = token.RefreshToken ?? stored.RefreshToken,
-                ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(token.ExpiresIn),
+                ExpiresAt = _timeProvider.GetUtcNow().AddSeconds(token.ExpiresIn),
                 AccountLabel = accountLabel,
             };
             _tokenStore.Save(refreshed);

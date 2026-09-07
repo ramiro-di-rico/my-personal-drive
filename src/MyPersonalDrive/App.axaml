@@ -38,6 +38,22 @@
           <SolidColorBrush x:Key="AccentBrush" Color="#6D4AFF" />
           <SolidColorBrush x:Key="AccentForegroundBrush" Color="#FFFFFF" />
           <SolidColorBrush x:Key="AccentMutedBrush" Color="#1A6D4AFF" />
+
+          <!-- Status vocabulary (docs/PLAN-UX-ROUND-3.md X6). These were seventeen hex literals
+               scattered across the two view files, identical in both themes, which is why the
+               warning card rendered as a pale yellow block inside the dark UI and why the sync
+               panel's "conflicts" label sat at 1.2:1 on this dictionary's card background.
+               Every value below clears 4.5:1 against CardBackgroundBrush except StatusSyncingBrush
+               (4.2), which is only ever an 8px dot and so answers to the 3:1 rule for UI
+               boundaries. -->
+          <SolidColorBrush x:Key="StatusOkBrush" Color="#186E2C" />
+          <SolidColorBrush x:Key="StatusOfflineBrush" Color="#5A6169" />
+          <SolidColorBrush x:Key="StatusErrorBrush" Color="#B01B29" />
+          <SolidColorBrush x:Key="StatusWarningBrush" Color="#755100" />
+          <SolidColorBrush x:Key="StatusDegradedBrush" Color="#9C4708" />
+          <SolidColorBrush x:Key="StatusSyncingBrush" Color="#0B6BB5" />
+          <SolidColorBrush x:Key="WarningCardBackgroundBrush" Color="#FFF3CD" />
+          <SolidColorBrush x:Key="WarningCardForegroundBrush" Color="#7A5B00" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
           <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#20242D" />
@@ -47,6 +63,18 @@
           <SolidColorBrush x:Key="AccentBrush" Color="#8B7CFF" />
           <SolidColorBrush x:Key="AccentForegroundBrush" Color="#FFFFFF" />
           <SolidColorBrush x:Key="AccentMutedBrush" Color="#268B7CFF" />
+
+          <!-- The dark half of the same vocabulary. Not the light values reused: every one of
+               these clears 5.4:1 against this dictionary's CardBackgroundBrush, where the light
+               set would land under 2:1. -->
+          <SolidColorBrush x:Key="StatusOkBrush" Color="#4CC66B" />
+          <SolidColorBrush x:Key="StatusOfflineBrush" Color="#9AA1AC" />
+          <SolidColorBrush x:Key="StatusErrorBrush" Color="#F1707B" />
+          <SolidColorBrush x:Key="StatusWarningBrush" Color="#F0B429" />
+          <SolidColorBrush x:Key="StatusDegradedBrush" Color="#FF9E4F" />
+          <SolidColorBrush x:Key="StatusSyncingBrush" Color="#5AB0F5" />
+          <SolidColorBrush x:Key="WarningCardBackgroundBrush" Color="#3B2E10" />
+          <SolidColorBrush x:Key="WarningCardForegroundBrush" Color="#F7DFA0" />
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
     </ResourceDictionary>

@@ -90,10 +90,27 @@ public class LocalExplorerViewModelTests : IDisposable
 
         var sut = Build(_root);
         await sut.NavigateAsync(_root);
-        await sut.Items.Single(i => i.DisplayName == "sub").RowCommand.ExecuteAsync();
+        await sut.Items.Single(i => i.DisplayName == "sub").ActivateCommand.ExecuteAsync();
 
         Assert.Equal(sub, sut.CurrentPath);
         Assert.Contains(sut.BreadcrumbItems, b => b.Label == "sub" && b.IsCurrent);
+    }
+
+    /// <summary>
+    /// docs/PLAN-UX-ROUND-3.md X2: a plain click selects, in both panes. Opening the folder is the
+    /// double click, which <see cref="LocalNodeViewModel.ActivateCommand"/> carries.
+    /// </summary>
+    [Fact]
+    public async Task ClickingAFolder_SelectsIt_WithoutNavigatingIntoIt()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "sub"));
+        var sut = Build(_root);
+        await sut.NavigateAsync(_root);
+
+        await sut.Items.Single(i => i.DisplayName == "sub").SelectCommand.ExecuteAsync();
+
+        Assert.Equal(_root, sut.CurrentPath);
+        Assert.True(sut.Items.Single(i => i.DisplayName == "sub").IsSelected);
     }
 
     [Fact]
@@ -316,7 +333,7 @@ public class LocalExplorerViewModelTests : IDisposable
         var sut = await LoadFourFilesAsync();
         await sut.SelectAllCommand.ExecuteAsync();
 
-        await Row(sut, "b.txt").RowCommand.ExecuteAsync();
+        await Row(sut, "b.txt").SelectCommand.ExecuteAsync();
 
         Assert.Equal(1, sut.SelectedCount);
         Assert.True(Row(sut, "b.txt").IsSelected);
@@ -412,6 +429,43 @@ public class LocalExplorerViewModelTests : IDisposable
         Assert.Contains(shownFields!, f => f.Label == "Name" && f.Value == "note.txt");
         Assert.Contains(shownFields!, f => f.Label == "Type" && f.Value == "File");
         Assert.Contains(shownFields!, f => f.Label == "Size");
+    }
+
+    /// <summary>
+    /// docs/PLAN-UX-ROUND-3.md X3, the local pane's half. An empty directory rendered as a blank
+    /// rectangle with no wording anywhere — this pane has no metrics panel to carry it, so there
+    /// was nothing at all.
+    /// </summary>
+    [Fact]
+    public async Task AnEmptyFolder_SaysSo()
+    {
+        var sut = Build(_root);
+
+        await sut.NavigateAsync(_root);
+
+        Assert.True(sut.IsListingEmpty);
+        Assert.False(sut.IsListingFilteredToNothing);
+        Assert.Equal("This folder is empty", sut.ListingEmptyTitle);
+    }
+
+    [Fact]
+    public async Task ASearchThatMatchesNothing_ReadsAsAFilter_NotAsAnEmptyFolder()
+    {
+        File.WriteAllText(Path.Combine(_root, "note.txt"), "hi");
+        var sut = Build(_root);
+        await sut.NavigateAsync(_root);
+
+        sut.SearchText = "zzz";
+
+        Assert.True(sut.IsListingFilteredToNothing);
+        Assert.Equal("Nothing matches", sut.ListingEmptyTitle);
+        Assert.Contains("1", sut.ListingEmptyDetail);
+    }
+
+    [Fact]
+    public void BeforeTheFirstLoad_ThereIsNoEmptyState()
+    {
+        Assert.False(Build(_root).IsListingEmpty);
     }
 
     /// <summary>Points <see cref="LocalFileSystemService.GetHomeDirectory"/> at a temp folder rather than the real OS home, so tests stay hermetic.</summary>

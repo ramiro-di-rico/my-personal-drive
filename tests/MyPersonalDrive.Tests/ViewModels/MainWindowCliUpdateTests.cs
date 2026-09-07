@@ -90,11 +90,11 @@ public class MainWindowCliUpdateTests : IDisposable
         var (viewModel, executor, _) = Build(new FakeCliReleaseFeed(Stable070));
         executor.EnqueueOutput(InstalledVersionOutput);
 
-        await viewModel.CheckForCliUpdateCommand.ExecuteAsync();
+        await viewModel.CliUpdate.CheckForCliUpdateCommand.ExecuteAsync();
 
-        Assert.True(viewModel.IsCliUpdateAvailable);
-        Assert.Contains("0.7.0", viewModel.CliUpdateStatus);
-        Assert.Contains("2026-07-31", viewModel.CliUpdateStatus);
+        Assert.True(viewModel.CliUpdate.IsCliUpdateAvailable);
+        Assert.Contains("0.7.0", viewModel.CliUpdate.CliUpdateStatus);
+        Assert.Contains("2026-07-31", viewModel.CliUpdate.CliUpdateStatus);
     }
 
     [Fact]
@@ -103,10 +103,10 @@ public class MainWindowCliUpdateTests : IDisposable
         var (viewModel, executor, _) = Build(new FakeCliReleaseFeed(Stable070));
         executor.EnqueueOutput("Proton Drive CLI cli-drive@0.7.0+f8e16aac\n");
 
-        await viewModel.CheckForCliUpdateCommand.ExecuteAsync();
+        await viewModel.CliUpdate.CheckForCliUpdateCommand.ExecuteAsync();
 
-        Assert.False(viewModel.IsCliUpdateAvailable);
-        Assert.Contains("Up to date", viewModel.CliUpdateStatus);
+        Assert.False(viewModel.CliUpdate.IsCliUpdateAvailable);
+        Assert.Contains("Up to date", viewModel.CliUpdate.CliUpdateStatus);
     }
 
     /// <summary>
@@ -119,11 +119,11 @@ public class MainWindowCliUpdateTests : IDisposable
         var (viewModel, executor, _) = Build(new FakeCliReleaseFeed(Stable070));
         executor.EnqueueFailure(new DriveException("--version", 1, string.Empty, "unknown flag", "unknown flag: --version"));
 
-        await viewModel.CheckForCliUpdateCommand.ExecuteAsync();
+        await viewModel.CliUpdate.CheckForCliUpdateCommand.ExecuteAsync();
 
-        Assert.False(viewModel.IsCliUpdateAvailable);
-        Assert.False(viewModel.InstallCliUpdateCommand.CanExecute(null));
-        Assert.Contains("the installed version could not be read", viewModel.CliUpdateStatus);
+        Assert.False(viewModel.CliUpdate.IsCliUpdateAvailable);
+        Assert.False(viewModel.CliUpdate.InstallCliUpdateCommand.CanExecute(null));
+        Assert.Contains("the installed version could not be read", viewModel.CliUpdate.CliUpdateStatus);
     }
 
     [Fact]
@@ -132,10 +132,10 @@ public class MainWindowCliUpdateTests : IDisposable
         var (viewModel, executor, _) = Build(new FakeCliReleaseFeed(failure: new HttpRequestException("no route to host")));
         executor.EnqueueOutput(InstalledVersionOutput);
 
-        await viewModel.CheckForCliUpdateCommand.ExecuteAsync();
+        await viewModel.CliUpdate.CheckForCliUpdateCommand.ExecuteAsync();
 
-        Assert.False(viewModel.IsCliUpdateAvailable);
-        Assert.Contains("Could not reach", viewModel.CliUpdateStatus);
+        Assert.False(viewModel.CliUpdate.IsCliUpdateAvailable);
+        Assert.Contains("Could not reach", viewModel.CliUpdate.CliUpdateStatus);
     }
 
     [Fact]
@@ -144,10 +144,10 @@ public class MainWindowCliUpdateTests : IDisposable
         var (viewModel, executor, _) = Build(new FakeCliReleaseFeed(candidate: null));
         executor.EnqueueOutput(InstalledVersionOutput);
 
-        await viewModel.CheckForCliUpdateCommand.ExecuteAsync();
+        await viewModel.CliUpdate.CheckForCliUpdateCommand.ExecuteAsync();
 
-        Assert.False(viewModel.IsCliUpdateAvailable);
-        Assert.Contains("does not publish a Stable build", viewModel.CliUpdateStatus);
+        Assert.False(viewModel.CliUpdate.IsCliUpdateAvailable);
+        Assert.Contains("does not publish a Stable build", viewModel.CliUpdate.CliUpdateStatus);
     }
 
     [Fact]
@@ -155,9 +155,9 @@ public class MainWindowCliUpdateTests : IDisposable
     {
         var (viewModel, _, _) = Build(feed: null);
 
-        Assert.False(viewModel.CheckForCliUpdateCommand.CanExecute(null));
-        await viewModel.CheckForCliUpdateCommand.ExecuteAsync();
-        Assert.False(viewModel.IsCliUpdateAvailable);
+        Assert.False(viewModel.CliUpdate.CheckForCliUpdateCommand.CanExecute(null));
+        await viewModel.CliUpdate.CheckForCliUpdateCommand.ExecuteAsync();
+        Assert.False(viewModel.CliUpdate.IsCliUpdateAvailable);
     }
 
     [Fact]
@@ -174,17 +174,17 @@ public class MainWindowCliUpdateTests : IDisposable
         var (viewModel, executor, _) = Build(new FakeCliReleaseFeed(release), installer, cliPath: target);
 
         executor.EnqueueOutput(InstalledVersionOutput);
-        await viewModel.CheckForCliUpdateCommand.ExecuteAsync();
-        Assert.True(viewModel.IsCliUpdateAvailable);
+        await viewModel.CliUpdate.CheckForCliUpdateCommand.ExecuteAsync();
+        Assert.True(viewModel.CliUpdate.IsCliUpdateAvailable);
 
         // The version re-read after the swap.
         executor.EnqueueOutput("Proton Drive CLI cli-drive@0.7.0+aabbccdd\n");
-        await viewModel.InstallCliUpdateCommand.ExecuteAsync();
+        await viewModel.CliUpdate.InstallCliUpdateCommand.ExecuteAsync();
 
         Assert.Equal(payload, await File.ReadAllTextAsync(target));
-        Assert.Equal("Proton Drive CLI cli-drive@0.7.0+aabbccdd", viewModel.CliVersion);
-        Assert.False(viewModel.IsCliUpdateAvailable);
-        Assert.Contains("Updated to 0.7.0", viewModel.CliUpdateStatus);
+        Assert.Equal("Proton Drive CLI cli-drive@0.7.0+aabbccdd", viewModel.CliUpdate.CliVersion);
+        Assert.False(viewModel.CliUpdate.IsCliUpdateAvailable);
+        Assert.Contains("Updated to 0.7.0", viewModel.CliUpdate.CliUpdateStatus);
     }
 
     [Fact]
@@ -198,10 +198,10 @@ public class MainWindowCliUpdateTests : IDisposable
         var (viewModel, executor, _) = Build(new FakeCliReleaseFeed(release), installer, cliPath: target);
 
         executor.EnqueueOutput(InstalledVersionOutput);
-        await viewModel.CheckForCliUpdateCommand.ExecuteAsync();
-        await viewModel.InstallCliUpdateCommand.ExecuteAsync();
+        await viewModel.CliUpdate.CheckForCliUpdateCommand.ExecuteAsync();
+        await viewModel.CliUpdate.InstallCliUpdateCommand.ExecuteAsync();
 
-        Assert.Contains("checksum", viewModel.CliUpdateStatus);
+        Assert.Contains("checksum", viewModel.CliUpdate.CliUpdateStatus);
         Assert.Equal("old binary", await File.ReadAllTextAsync(target));
     }
 
@@ -220,13 +220,13 @@ public class MainWindowCliUpdateTests : IDisposable
             new FakeCliReleaseFeed(Stable070), installer, cliPath: target, isSyncInProgress: () => syncing);
 
         executor.EnqueueOutput(InstalledVersionOutput);
-        await viewModel.CheckForCliUpdateCommand.ExecuteAsync();
-        Assert.True(viewModel.IsCliUpdateAvailable);
+        await viewModel.CliUpdate.CheckForCliUpdateCommand.ExecuteAsync();
+        Assert.True(viewModel.CliUpdate.IsCliUpdateAvailable);
 
         syncing = true;
-        await viewModel.InstallCliUpdateCommand.ExecuteAsync();
+        await viewModel.CliUpdate.InstallCliUpdateCommand.ExecuteAsync();
 
-        Assert.Contains("A sync is in progress", viewModel.CliUpdateStatus);
+        Assert.Contains("A sync is in progress", viewModel.CliUpdate.CliUpdateStatus);
         Assert.Equal("old binary", await File.ReadAllTextAsync(target));
     }
 }

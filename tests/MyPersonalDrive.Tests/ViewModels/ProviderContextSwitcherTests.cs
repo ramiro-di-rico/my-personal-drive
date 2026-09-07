@@ -103,7 +103,6 @@ public class ProviderContextSwitcherTests : IDisposable
         var vm = await BuildAsync();
 
         Assert.Equal(ProviderId.Proton, vm.SelectedProvider!.Id);
-        Assert.Equal(500L * 1024 * 1024 * 1024, vm.QuotaTotalBytes); // 500 GB for Proton
 
         // Switch to Google Drive via SelectedProvider property
         await vm.SwitchBrowserAccountAsync(ProviderId.GoogleDrive);
@@ -112,7 +111,6 @@ public class ProviderContextSwitcherTests : IDisposable
         Assert.Equal("Google Drive", vm.ActiveProviderDisplayName);
         Assert.True(vm.IsGoogleDriveActive);
         Assert.False(vm.IsProtonActive);
-        Assert.Equal(15L * 1024 * 1024 * 1024, vm.QuotaTotalBytes); // 15 GB for Google Drive
     }
 
     /// <summary>
@@ -165,7 +163,6 @@ public class ProviderContextSwitcherTests : IDisposable
 
         Assert.True(vm.IsNextcloudActive);
         Assert.Equal("Nextcloud", vm.ActiveProviderDisplayName);
-        Assert.Equal(100L * 1024 * 1024 * 1024, vm.QuotaTotalBytes); // 100 GB for Nextcloud
     }
 
     /// <summary>

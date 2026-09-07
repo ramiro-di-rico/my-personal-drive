@@ -25,6 +25,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
     private string? _statusMessage;
     private LocalizedText _statusText = LocalizedText.None;
     private string _searchText = string.Empty;
+    private bool _hasRenderedListing;
     private string? _selectionAnchorPath;
 
     /// <summary>Everything the current folder holds, before filtering — mirrors <c>MainWindowViewModel._loadedItems</c>, and for the same reason: <see cref="Items"/> is a filtered view of this, never the source of truth for what's actually in the folder.</summary>
@@ -56,6 +57,12 @@ public sealed class LocalExplorerViewModel : ObservableObject
         {
             _statusMessage = _statusText.IsEmpty ? null : _statusText.Render();
             OnAllPropertiesChanged();
+
+            // The rows are their own binding sources; the notification above does not reach them.
+            foreach (var row in Items)
+            {
+                row.RefreshLocalizedText();
+            }
         };
     }
 
@@ -102,7 +109,13 @@ public sealed class LocalExplorerViewModel : ObservableObject
     public bool IsLoading
     {
         get => _isLoading;
-        private set => SetProperty(ref _isLoading, value);
+        private set
+        {
+            if (SetProperty(ref _isLoading, value))
+            {
+                RaiseEmptyStateChanged();
+            }
+        }
     }
 
     /// <summary>
@@ -232,8 +245,9 @@ public sealed class LocalExplorerViewModel : ObservableObject
                 return string.Empty;
             }
 
-            var shown = Items.Count;
-            return shown == 1 ? "1 resultado" : $"{shown} resultados";
+            // Same plural key the cloud pane uses: this counter was two Spanish literals built by
+            // hand, in an interface that ships English by default (docs/PLAN-UX-ROUND-3.md X8).
+            return Loc.Plural(StringKeys.Explorer.SearchResults, Items.Count);
         }
     }
 
@@ -282,6 +296,31 @@ public sealed class LocalExplorerViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// The local pane's half of docs/PLAN-UX-ROUND-3.md X3 — the same three situations as the cloud
+    /// pane, minus the kind chips this pane does not have.
+    /// </summary>
+    public bool IsListingEmpty => _hasRenderedListing && !IsLoading && Items.Count == 0;
+
+    /// <summary>The folder does have contents; the search box is hiding all of them.</summary>
+    public bool IsListingFilteredToNothing => IsListingEmpty && _loadedItems.Count > 0;
+
+    public string ListingEmptyTitle => Loc.T(IsListingFilteredToNothing
+        ? StringKeys.Explorer.EmptyFilteredTitle
+        : StringKeys.Explorer.EmptyFolderTitle);
+
+    public string ListingEmptyDetail => IsListingFilteredToNothing
+        ? Loc.F(StringKeys.Local.EmptyFilteredDetail, _loadedItems.Count.ToString("n0", Loc.Culture))
+        : Loc.T(StringKeys.Local.EmptyFolderDetail);
+
+    private void RaiseEmptyStateChanged()
+    {
+        OnPropertyChanged(nameof(IsListingEmpty));
+        OnPropertyChanged(nameof(IsListingFilteredToNothing));
+        OnPropertyChanged(nameof(ListingEmptyTitle));
+        OnPropertyChanged(nameof(ListingEmptyDetail));
+    }
+
     private void RenderItems()
     {
         var visible = string.IsNullOrWhiteSpace(_searchText)
@@ -292,7 +331,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         Items.Clear();
         foreach (var item in visible)
         {
-            Items.Add(new LocalNodeViewModel(item, HandleRowClickAsync, _onError, new LocalNodeSyncActions
+            Items.Add(new LocalNodeViewModel(item, HandleRowClickAsync, SelectRowAsync, _onError, new LocalNodeSyncActions
             {
                 FindSyncPair = i => FindSyncPairByPath?.Invoke(i.Path),
                 SyncSelectedPathAsync = SyncSelectedPathAsync,
@@ -306,6 +345,9 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
         RaiseSelectionChanged();
         OnPropertyChanged(nameof(SearchResultText));
+        // See MainWindowViewModel.RenderItems: not before the first paint.
+        _hasRenderedListing = true;
+        RaiseEmptyStateChanged();
     }
 
     /// <summary>
@@ -321,6 +363,16 @@ public sealed class LocalExplorerViewModel : ObservableObject
         {
             await NavigateAsync(item.Path);
         }
+    }
+
+    /// <summary>
+    /// A plain click: selection only, matching the cloud pane (docs/PLAN-UX-ROUND-3.md X2).
+    /// Opening a folder is the double click.
+    /// </summary>
+    private async Task SelectRowAsync(DriveItem item)
+    {
+        SelectSingle(item.Path);
+        await Task.CompletedTask;
     }
 
     private void SelectSingle(string path)

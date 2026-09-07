@@ -66,7 +66,7 @@ one-line description.
 ## Commands
 
 ```bash
-./scripts/run-tests.sh                      # unit tests (xUnit)
+./scripts/run-tests.sh                      # unit tests + headless UI layout tests (xUnit)
 MYPERSONALDRIVE_INTEGRATION=1 ./scripts/run-tests.sh   # + real-CLI tests (slow, needs auth)
 dotnet run --project src/MyPersonalDrive     # run the app
 ./scripts/publish-linux.sh                   # package to artifacts/linux-x64/
@@ -86,6 +86,10 @@ src/MyPersonalDrive/
 tests/MyPersonalDrive.Tests/
   Fakes/              FakeCliExecutor, FakeTimeProvider
   Integration/        real-CLI tests, opt-in via MYPERSONALDRIVE_INTEGRATION=1
+tests/MyPersonalDrive.UiTests/
+                      the real MainWindow, laid out headless and measured — the only tests here
+                      that can see a layout defect. xUnit v3 (Avalonia.Headless.XUnit is a v3
+                      package), which is why it is a separate project
 docs/                 ARCHITECTURE.md (current state) + PLAN-*.md (planned work)
 ```
 

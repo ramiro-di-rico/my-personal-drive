@@ -15,9 +15,43 @@ namespace MyPersonalDrive.Tests.Services.Localization;
 /// </summary>
 public class NoHardcodedStringsTests
 {
+    /// <summary>
+    /// The framework's own text-bearing properties. The repo's own controls contribute theirs at
+    /// run time — see <see cref="LocalizableAttribute"/>.
+    /// </summary>
+    private static readonly string[] BuiltInTextProperties =
+        ["Text", "Content", "PlaceholderText", "Watermark", "Header", "ToolTip.Tip"];
+
+    /// <summary>
+    /// Built-in text properties plus every <c>StyledProperty&lt;string&gt;</c> this repository's own
+    /// UserControls declare.
+    ///
+    /// The fixed list missed one for an entire release: <c>BreadcrumbBar.Label</c> carried
+    /// "Este equipo (local)" through the whole i18n round and the round that added Italian, because
+    /// a custom control's own property is not called Text or Content and nothing here looked at it
+    /// (docs/PLAN-UX-ROUND-3.md X8). Deriving the list from the declarations means the next such
+    /// property is covered on the day it is written, rather than on the day someone remembers this
+    /// test exists.
+    /// </summary>
     private static readonly Regex LocalizableAttribute = new(
-        @"(?<attr>Text|Content|PlaceholderText|Watermark|Header|ToolTip\.Tip)\s*=\s*""(?<value>[^""]*)""",
+        @"(?<attr>" + string.Join("|", BuiltInTextProperties.Select(Regex.Escape).Concat(CustomStringProperties())) + @")\s*=\s*""(?<value>[^""]*)""",
         RegexOptions.Compiled);
+
+    /// <summary>
+    /// Every <c>AvaloniaProperty.Register&lt;TOwner, string?&gt;(nameof(X))</c> in src/, as X.
+    /// </summary>
+    private static IEnumerable<string> CustomStringProperties()
+    {
+        var declarations = new Regex(
+            @"AvaloniaProperty\.Register<\s*\w+\s*,\s*string\??\s*>\(\s*nameof\(\s*(?<name>\w+)\s*\)",
+            RegexOptions.Compiled);
+
+        return Directory
+            .EnumerateFiles(Path.Combine(RepositoryRoot(), "src"), "*.cs", SearchOption.AllDirectories)
+            .SelectMany(file => declarations.Matches(File.ReadAllText(file)).Select(match => match.Groups["name"].Value))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.Ordinal);
+    }
 
     /// <summary>
     /// Everything the gate accepts as a literal, and why. Proper nouns and glyphs — nothing that
@@ -157,6 +191,69 @@ public class NoHardcodedStringsTests
             "A binding onto Localizer.Instance as a static source cannot be notified, so its text\n" +
             "freezes at whatever language was current when the view loaded. Bind through a view\n" +
             "model's Loc instead.\n\n  " + string.Join("\n  ", offenders));
+    }
+
+    /// <summary>
+    /// The language heuristic below has a floor it cannot see under: it skips literals shorter than
+    /// eight characters and needs two Spanish function words or an accent. "Todos" — the label on
+    /// the "all kinds" and "all accounts" chips — is five characters, unaccented and one word, so it
+    /// sat in the interface through the localization round, the Italian round and the whole of UX
+    /// round 3, until it turned up in a screenshot (docs/PLAN-UX-ROUND-3.md X8).
+    ///
+    /// So this gate does not ask what language a string is in. It asks where it was written: a
+    /// literal assigned to a label-shaped property is copy at the call site, and copy at the call
+    /// site cannot follow the language picker no matter which language it happens to be in. An
+    /// English literal would be just as wrong, and this catches that too.
+    /// </summary>
+    [Fact]
+    public void NoUserFacingLabelIsAssignedALiteral()
+    {
+        var assignment = new Regex(
+            @"\b(?<prop>Label|Title|Header|Caption|PlaceholderText|DisplayName|Summary|Headline|ProgressText|StatusText|Note|Tooltip)\s*=\s*(?<rhs>[^;]*)",
+            RegexOptions.Compiled);
+        var literal = new Regex(@"""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
+
+        var offenders = new List<string>();
+        var root = Path.Combine(RepositoryRoot(), "src");
+
+        foreach (var file in Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
+        {
+            // StringKeys is the key table itself: every literal in it is a key, not copy.
+            if (Path.GetFileName(file) == "StringKeys.cs"
+                || file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                || file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var lines = File.ReadAllLines(file);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var trimmed = lines[i].TrimStart();
+                if (trimmed.StartsWith("//", StringComparison.Ordinal) || trimmed.StartsWith('*'))
+                {
+                    continue;
+                }
+
+                foreach (Match match in assignment.Matches(lines[i]))
+                {
+                    foreach (Match value in literal.Matches(match.Groups["rhs"].Value))
+                    {
+                        var text = value.Groups[1].Value;
+                        if (text.Length >= 2 && text.Any(char.IsLetter) && !Allowed.Contains(text))
+                        {
+                            offenders.Add($"{Path.GetFileName(file)}:{i + 1}  {match.Groups["prop"].Value} = … \"{text}\"");
+                        }
+                    }
+                }
+            }
+        }
+
+        Assert.True(
+            offenders.Count == 0,
+            "A label assigned a literal cannot follow the language picker, whatever language it is in.\n" +
+            "Add a key and read it through Loc/StringKeys. Proper nouns go in the allowlist at the top of\n" +
+            "this file, with a reason.\n\n  " + string.Join("\n  ", offenders));
     }
 
     /// <summary>

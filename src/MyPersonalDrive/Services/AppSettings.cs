@@ -129,6 +129,22 @@ public sealed class AppSettings
     /// out-of-range value rather than handing the view something that would make the content
     /// vanish (0) or become unusable (a huge multiple).
     /// </summary>
+    /// <summary>
+    /// The activity console's body height in pixels, dragged by its own handle
+    /// (docs/PLAN-UX-ROUND-3.md X7, closing round 1's Task 4). Clamped on read, so a hand-edited or
+    /// corrupt value cannot leave the console taller than the window or too short to read.
+    /// </summary>
+    public double CommandConsoleHeight { get; set; } = DefaultCommandConsoleHeight;
+
+    public const double DefaultCommandConsoleHeight = 140;
+    public const double MinCommandConsoleHeight = 60;
+    public const double MaxCommandConsoleHeight = 600;
+
+    public double CommandConsoleHeightOrDefault()
+        => double.IsFinite(CommandConsoleHeight)
+            ? Math.Clamp(CommandConsoleHeight, MinCommandConsoleHeight, MaxCommandConsoleHeight)
+            : DefaultCommandConsoleHeight;
+
     public double ViewerZoom { get; set; } = 0.5;
 
     public const double MinViewerZoom = 0.25;

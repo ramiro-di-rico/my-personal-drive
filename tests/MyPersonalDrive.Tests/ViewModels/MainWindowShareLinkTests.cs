@@ -121,11 +121,11 @@ public class MainWindowShareLinkTests : IDisposable
     {
         var supported = new DriveNodeViewModel(
             new DriveItem("/report.pdf", "report.pdf", IsFolder: false, Size: 10),
-            _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask,
+            _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask,
             syncActions: new DriveNodeSyncActions { SupportsShareLinks = true, CreateShareLinkAsync = _ => Task.CompletedTask });
         var unsupported = new DriveNodeViewModel(
             new DriveItem("/my-files/report.pdf", "report.pdf", IsFolder: false, Size: 10),
-            _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask,
+            _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask,
             syncActions: new DriveNodeSyncActions { SupportsShareLinks = false });
 
         Assert.True(supported.CanShareLink);
@@ -148,11 +148,11 @@ public class MainWindowShareLinkTests : IDisposable
     {
         var googleDoc = new DriveNodeViewModel(
             new DriveItem("/Meeting Notes", "Meeting Notes", IsFolder: false, IsRemoteOnlyDocument: true),
-            _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask,
+            _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask,
             previewItemAsync: _ => Task.CompletedTask);
         var ordinaryFile = new DriveNodeViewModel(
             new DriveItem("/notes.txt", "notes.txt", IsFolder: false, Size: 10),
-            _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask,
+            _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask,
             previewItemAsync: _ => Task.CompletedTask);
 
         Assert.False(googleDoc.CanDownload);

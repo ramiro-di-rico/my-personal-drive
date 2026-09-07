@@ -410,7 +410,7 @@ one while the process is dying, the other while the config is already corrupt.
 `AmbientClockTests.NothingReadsTheAmbientClock` is the gate, verified by putting
 `DateTimeOffset.UtcNow` back into the OneDrive authenticator and watching it name the line.
 
-### Z5 — `MainWindowViewModel` is 4415 lines and 391 members *(open — proposal below)*
+### Z5 — `MainWindowViewModel` is 4415 lines and 391 members *(done — steps 0-3, now 3394 lines)*
 
 Grouping its distinct members by concern:
 

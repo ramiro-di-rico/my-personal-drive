@@ -465,23 +465,24 @@ at each — and it should not start until the open UX items above are either don
 deferred, because both touch the same file and rebasing one across the other is where a refactor
 turns into a rewrite.
 
-**Where it actually stands.** Step 0 is committed: `ViewModels/StatusSurface.cs` owns the status
-mechanism and the view model forwards to it, so none of the 92 call sites or twelve bindings moved.
-That is the enabling step and it is done.
+**Where it actually stands.** All four steps are committed, one per commit, with
+`./scripts/run-tests.sh` green at each: `StatusSurface` (step 0), then `CliUpdateViewModel`,
+`ActivityConsoleViewModel` and `FilePreviewViewModel`. `MainWindowViewModel` went 4460 -> 3394
+lines and what remains is browsing, selection, navigation, transfer and settings.
 
-Steps 1-3 are **not started**, and stopping before them was a decision rather than an omission.
-Each is a real move — step 1 alone is roughly 190 lines of members and three async commands, seven
-bindings to re-point, and about fifty test references to rename — and two scripted attempts at
-cutting the cluster out mis-tracked their own bookkeeping before writing anything. Hand-driving a
-4400-line file that far into a long session is exactly how the paragraph above says a refactor turns
-into a rewrite, in a round whose whole subject is claims nobody checked. They are better done fresh,
-one step per commit, with the test renames scripted and reviewed on their own.
+Two things the extraction found that reading could not. The status surface was being constructed
+*after* the three children were handed it, so all three held a null reference — the viewer was
+simply the first to dereference one. And the headless keyboard test set `IsViewerVisible` by
+reflection on `MainWindowViewModel`; once the property moved, that call threw instead of silently
+setting nothing, which is the only reason anyone learned the test had been asserting against a
+property it set on the wrong object.
 
-One thing to carry into step 1: `LanguageSwitchStalenessTests` reflects over `MainWindowViewModel`'s
-string properties. `CliVersion` and `CliUpdateStatus` move out in that step, so the gate has to be
-extended to the child view model in the same commit or it silently stops covering them.
+One thing carried into step 1, and worth keeping: `LanguageSwitchStalenessTests` reflects over
+`MainWindowViewModel`'s string properties, and `CliVersion` and `CliUpdateStatus` moved out of it.
+The gate now walks one level into the child view models, so it still covers them — any further
+extraction has to keep that walk in step or the gate silently stops covering what it names.
 
-### Z6 — `MainWindow.axaml.cs` is 1978 lines, and 17 of its methods are dialogs *(open)*
+### Z6 — `MainWindow.axaml.cs` is 1978 lines, and 17 of its methods are dialogs *(done — now 1000 lines)*
 
 | Concern | Methods |
 |---|---|

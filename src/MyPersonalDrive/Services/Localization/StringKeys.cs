@@ -575,8 +575,12 @@ public static class StringKeys
         public const string FailuresChoiceDiscard = "dialog.failures.choice.discard";
         public const string FailuresChoiceLeave = "dialog.failures.choice.leave";
         public const string FailuresChoiceRetry = "dialog.failures.choice.retry";
+        public const string FailuresGlobalLabel = "dialog.failures.global.label";
         public const string FailuresIntro = "dialog.failures.intro";
         public const string FailuresRetryAll = "dialog.failures.retryall";
+        /// <summary>Plural prefix.</summary>
+        public const string FailuresSummaryLine = "dialog.failures.summary.line";
+        public const string FailuresSummaryTitle = "dialog.failures.summary.title";
         /// <summary>Plural prefix.</summary>
         public const string FailuresTitle = "dialog.failures.title";
         public const string NewFolderPlaceholder = "dialog.newfolder.placeholder";

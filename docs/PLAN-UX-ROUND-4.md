@@ -65,8 +65,9 @@
       both OAuth token-expiry checks; two allowlisted with reasons, behind a gate.
 - [x] **Z6 — the 1978-line code-behind.** Nine dialogs extracted to `Views/Dialogs/`; the file is
       1000 lines and holds only what needs the visual tree.
-- [ ] **Z5 — the 4415-line view model**, with a staged extraction order argued from its actual
-      coupling rather than from its size. Not started.
+- [~] **Z5 — the 4425-line view model.** Step 0 done: `StatusSurface` exists, so the three
+      extractions that follow have something to be handed. Steps 1-3 (CLI update, activity console,
+      file preview) not started — see the note in [§Z5](#z5--mainwindowviewmodel-is-4415-lines-and-391-members).
 
 ---
 
@@ -459,10 +460,26 @@ What stays is browsing, selection and navigation — which is what a main window
 actually for, and would be roughly 1500 lines rather than 4400.
 
 **Risk, stated plainly.** This is a large refactor of the file every feature touches, on a branch
-that already carries 25 commits. It should be its own branch, one step per commit, with
-`./scripts/run-tests.sh` green at each — and it should not start until the open UX items above are
-either done or explicitly deferred, because both touch the same file and rebasing one across the
-other is where a refactor turns into a rewrite.
+that already carries 35 commits. It wants one step per commit, with `./scripts/run-tests.sh` green
+at each — and it should not start until the open UX items above are either done or explicitly
+deferred, because both touch the same file and rebasing one across the other is where a refactor
+turns into a rewrite.
+
+**Where it actually stands.** Step 0 is committed: `ViewModels/StatusSurface.cs` owns the status
+mechanism and the view model forwards to it, so none of the 92 call sites or twelve bindings moved.
+That is the enabling step and it is done.
+
+Steps 1-3 are **not started**, and stopping before them was a decision rather than an omission.
+Each is a real move — step 1 alone is roughly 190 lines of members and three async commands, seven
+bindings to re-point, and about fifty test references to rename — and two scripted attempts at
+cutting the cluster out mis-tracked their own bookkeeping before writing anything. Hand-driving a
+4400-line file that far into a long session is exactly how the paragraph above says a refactor turns
+into a rewrite, in a round whose whole subject is claims nobody checked. They are better done fresh,
+one step per commit, with the test renames scripted and reviewed on their own.
+
+One thing to carry into step 1: `LanguageSwitchStalenessTests` reflects over `MainWindowViewModel`'s
+string properties. `CliVersion` and `CliUpdateStatus` move out in that step, so the gate has to be
+extended to the child view model in the same commit or it silently stops covering them.
 
 ### Z6 — `MainWindow.axaml.cs` is 1978 lines, and 17 of its methods are dialogs *(open)*
 

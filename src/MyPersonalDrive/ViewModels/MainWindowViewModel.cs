@@ -84,10 +84,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _googleDriveClientId;
     private string _googleDriveClientSecret;
     private string _currentPath;
-    private LocalizedText _statusText = LocalizedText.Of(StringKeys.Status.PickCliInitial);
-    private string _statusMessage = Localizer.Instance.T(StringKeys.Status.PickCliInitial);
-    private bool _isWarning;
-    private bool _statusBannerDismissed;
+    private readonly StatusSurface _status;
     private bool _hasRenderedListing;
     private bool _isLoading;
     private bool _isAuthenticated;
@@ -171,15 +168,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _quotaUsedIsPartial;
     private DriveErrorKind _lastErrorKind = DriveErrorKind.Unknown;
 
-    /// <summary>
-    /// The failure behind the standing status line, when a failure is what produced it. Null for a
-    /// warning this app raised itself — a refusal, an unsupported preview — because those have no
-    /// remedy to offer (docs/PLAN-UX-ROUND-4.md Y3). Distinct from <see cref="_lastErrorKind"/>,
-    /// which keeps the last *provider* error for the connection telemetry and is deliberately not
-    /// cleared: a stale kind is fine for "is the connection suspect", and wrong for "what should
-    /// this button do".
-    /// </summary>
-    private DriveErrorKind? _statusErrorKind;
     private bool _isStatusPanelVisible;
     private bool _isLocalExplorerPanelVisible;
 
@@ -450,6 +438,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // (verified: docs/PLAN-CLOUD-PROVIDERS.md Appendix A), which is exactly the "path no
         // longer exists" warning this was hardcoded into before a second provider existed to catch
         // it.
+        _status = new StatusSurface(LocalizedText.Of(StringKeys.Status.PickCliInitial), RaiseStatusSurfaceChanged);
         _rootPath = _provider.Id == ProviderId.Proton ? "/my-files" : "/";
         _currentPath = _rootPath;
         _cacheService = cacheService;
@@ -854,22 +843,8 @@ public sealed class MainWindowViewModel : ObservableObject
     /// Whether the standing warning has a remedy the app can offer. A warning the user cannot act
     /// on is a dead end, which is the whole point of U1 (docs/PLAN-UX-ROUND-2.md §1).
     /// </summary>
-    public bool HasStatusAction => _isWarning && _statusErrorKind is { } kind && HasRemedy(kind);
+    public bool HasStatusAction => _status.HasAction;
 
-    /// <summary>
-    /// Which failures the app can actually offer to do something about. Reconnecting fixes a dead
-    /// session; retrying fixes a transport that was momentarily unavailable. Everything else is the
-    /// provider refusing this specific request — a path that is gone, a name already taken, a
-    /// permission the account does not have — and repeating it verbatim produces the same refusal,
-    /// so offering "Retry" would be theatre (docs/PLAN-UX-ROUND-4.md Y3).
-    /// </summary>
-    private static bool HasRemedy(DriveErrorKind kind) => kind is
-        DriveErrorKind.NotAuthenticated
-        or DriveErrorKind.Network
-        or DriveErrorKind.Timeout
-        or DriveErrorKind.Busy
-        or DriveErrorKind.RateLimited
-        or DriveErrorKind.Unknown;
 
     /// <summary>
     /// Whether the window-level alert strip is up (docs/PLAN-UX-ROUND-3.md X1). U1's recovery
@@ -878,13 +853,13 @@ public sealed class MainWindowViewModel : ObservableObject
     /// everyone while they were in Settings or Sync. Only warnings get the strip: routine progress
     /// keeps the panel it has always used, because a banner for "Loaded 14 items" is noise.
     /// </summary>
-    public bool IsStatusBannerVisible => _isWarning && !_statusBannerDismissed && _statusMessage.Length > 0;
+    public bool IsStatusBannerVisible => _status.IsBannerVisible;
 
     /// <summary>
     /// The other half of the split: the status panel's card now carries progress and results only,
     /// so a warning is never rendered twice on the same screen.
     /// </summary>
-    public bool IsInformationalStatus => !_isWarning && _statusMessage.Length > 0;
+    public bool IsInformationalStatus => _status.IsInformational;
 
     /// <summary>
     /// Which remedy, derived from the typed <see cref="DriveErrorKind"/> rather than from
@@ -1309,27 +1284,14 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public string StatusMessage
     {
-        get => _statusMessage;
+        get => _status.Message;
         set => SetStatus(LocalizedText.Verbatim(value));
     }
 
     /// <summary>The unrendered form, so tests can assert on a key instead of on prose.</summary>
-    internal LocalizedText StatusText => _statusText;
+    internal LocalizedText StatusText => _status.Text;
 
-    private void SetStatus(LocalizedText text)
-    {
-        _statusText = text;
-        if (SetProperty(ref _statusMessage, text.Render(), nameof(StatusMessage)))
-        {
-            // A new message is a new thing to say, so a dismissal of the previous one does not
-            // carry over to it (docs/PLAN-UX-ROUND-3.md X1).
-            _statusBannerDismissed = false;
-            _statusErrorKind = null;
-            IsWarning = false;
-            RaiseStatusSurfaceChanged();
-            UpdateConnectionTelemetry();
-        }
-    }
+    private void SetStatus(LocalizedText text) => _status.Set(text);
 
     /// <summary>
     /// The two surfaces a status message can land on. Both are derived from
@@ -1350,17 +1312,23 @@ public sealed class MainWindowViewModel : ObservableObject
         ClearFiltersCommand.RaiseCanExecuteChanged();
     }
 
+    /// <summary>Announces everything <see cref="StatusSurface"/> feeds, after any change to it.</summary>
     private void RaiseStatusSurfaceChanged()
     {
+        OnPropertyChanged(nameof(StatusMessage));
+        OnPropertyChanged(nameof(IsWarning));
         OnPropertyChanged(nameof(IsStatusBannerVisible));
         OnPropertyChanged(nameof(IsInformationalStatus));
-        DismissStatusBannerCommand.RaiseCanExecuteChanged();
+        OnPropertyChanged(nameof(HasStatusAction));
+        OnPropertyChanged(nameof(StatusActionLabel));
+        OnPropertyChanged(nameof(StatusActionCommand));
+        DismissStatusBannerCommand?.RaiseCanExecuteChanged();
+        UpdateConnectionTelemetry();
     }
 
     private async Task DismissStatusBannerAsync()
     {
-        _statusBannerDismissed = true;
-        RaiseStatusSurfaceChanged();
+        _status.Dismiss();
         await Task.CompletedTask;
     }
 
@@ -1372,13 +1340,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// statements at twenty call sites, and the third was simply missing
     /// (docs/PLAN-UX-ROUND-4.md Y3).
     /// </summary>
-    private void SetFailure(LocalizedText text, Exception ex)
-    {
-        var kind = (ex as DriveException)?.Kind ?? DriveErrorKind.Unknown;
-        SetStatus(text);
-        _statusErrorKind = kind;
-        IsWarning = true;
-    }
+    private void SetFailure(LocalizedText text, Exception ex) => _status.Fail(text, ex);
 
     private void SetStatusPlural(string keyPrefix, int count, params object?[] args)
         => SetStatus(LocalizedText.Plural(keyPrefix, count, args));
@@ -1391,7 +1353,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     private void OnLanguageChanged()
     {
-        _statusMessage = _statusText.Render();
+        _status.Rerender();
         RefreshSelectionLabels();
         UpdateConnectionTelemetry();
         OnAllPropertiesChanged();
@@ -1445,13 +1407,16 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public bool IsWarning
     {
-        get => _isWarning;
+        get => _status.IsWarning;
         private set
         {
-            if (SetProperty(ref _isWarning, value))
+            if (value)
             {
-                RaiseStatusSurfaceChanged();
-                UpdateConnectionTelemetry();
+                _status.Warn();
+            }
+            else
+            {
+                _status.ClearWarning();
             }
         }
     }
@@ -3758,19 +3723,19 @@ public sealed class MainWindowViewModel : ObservableObject
             _connectionStatusKind = "Disconnected";
             _connectionStatusDescription = Loc.F(StringKeys.Connection.DescDisconnected, _provider.DisplayName);
         }
-        else if (_isWarning && _lastErrorKind == DriveErrorKind.RateLimited)
+        else if (_status.IsWarning && _lastErrorKind == DriveErrorKind.RateLimited)
         {
             _connectionStatus = Loc.T(StringKeys.Connection.StateRateLimited);
             _connectionStatusKind = "RateLimited";
             _connectionStatusDescription = Loc.F(StringKeys.Connection.DescRateLimited, _provider.DisplayName);
         }
-        else if (_isWarning && IsConnectionFailure(_lastErrorKind))
+        else if (_status.IsWarning && IsConnectionFailure(_lastErrorKind))
         {
             // Deliberately ahead of the Syncing branch: a sync running on top of a broken
             // connection is not the headline, the broken connection is.
             _connectionStatus = Loc.T(StringKeys.Connection.StateDegraded);
             _connectionStatusKind = "Degraded";
-            _connectionStatusDescription = Loc.F(StringKeys.Connection.DescDegraded, _provider.DisplayName, _statusMessage);
+            _connectionStatusDescription = Loc.F(StringKeys.Connection.DescDegraded, _provider.DisplayName, _status.Message);
         }
         else if ((_isSyncInProgress is not null && _isSyncInProgress()) || IsLoading || IsDeepScanRunning)
         {

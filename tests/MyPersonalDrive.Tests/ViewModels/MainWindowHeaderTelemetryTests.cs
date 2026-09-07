@@ -184,10 +184,7 @@ public class MainWindowHeaderTelemetryTests : IDisposable
         var sut = Build(isAuthenticated: true);
         Assert.False(sut.HasStatusAction);
 
-        sut.StatusMessage = "Failed to load /my-files: Invalid access token";
-        SetErrorKind(sut, DriveErrorKind.NotAuthenticated);
-        SetStatusErrorKind(sut, DriveErrorKind.NotAuthenticated);
-        SetWarning(sut);
+        Fail(sut, DriveErrorKind.NotAuthenticated, "Invalid access token");
 
         Assert.True(sut.HasStatusAction);
         Assert.Equal("Reconnect", sut.StatusActionLabel);
@@ -199,10 +196,7 @@ public class MainWindowHeaderTelemetryTests : IDisposable
     {
         var sut = Build(isAuthenticated: true);
 
-        sut.StatusMessage = "Failed to load /my-files: connection reset";
-        SetErrorKind(sut, DriveErrorKind.Network);
-        SetStatusErrorKind(sut, DriveErrorKind.Network);
-        SetWarning(sut);
+        Fail(sut, DriveErrorKind.Network, "connection reset");
 
         Assert.True(sut.HasStatusAction);
         Assert.Equal("Retry", sut.StatusActionLabel);
@@ -276,15 +270,18 @@ public class MainWindowHeaderTelemetryTests : IDisposable
             .SetValue(sut, kind);
 
     /// <summary>
-    /// The failure behind the standing status line. Separate from <see cref="SetErrorKind"/>, which
-    /// only feeds the connection telemetry: a remedy is offered for the failure that produced *this*
-    /// message, so a refusal the app raised itself gets no button at all
-    /// (docs/PLAN-UX-ROUND-4.md Y3).
+    /// Drives a real provider failure through the view model's own error path, which is what
+    /// decides whether the alert strip offers a remedy (docs/PLAN-UX-ROUND-4.md Y3). Separate from
+    /// <see cref="SetErrorKind"/>, which only feeds the connection telemetry.
     /// </summary>
-    private static void SetStatusErrorKind(MainWindowViewModel sut, DriveErrorKind kind)
-        => typeof(MainWindowViewModel)
-            .GetField("_statusErrorKind", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .SetValue(sut, kind);
+    private static void Fail(MainWindowViewModel sut, DriveErrorKind kind, string message)
+    {
+        var ex = new DriveException("filesystem list", 1, string.Empty, string.Empty, message, kind);
+        var format = typeof(MainWindowViewModel).GetMethod("FormatDriveError", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        typeof(MainWindowViewModel)
+            .GetMethod("SetFailure", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .Invoke(sut, [format.Invoke(sut, ["/my-files", ex])!, ex]);
+    }
 
     private static void SetWarning(MainWindowViewModel sut)
     {

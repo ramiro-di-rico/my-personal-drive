@@ -373,7 +373,7 @@
            until the selection is something the viewer can actually show (TextPreviewPolicy /
            ImagePreviewPolicy). -->
       <Button Command="{Binding ViewSelectedFileCommand}"
-              Classes.active="{Binding IsViewerVisible}"
+              Classes.active="{Binding Preview.IsViewerVisible}"
               ToolTip.Tip="{Binding Loc[nav.viewer.tooltip]}">
         <StackPanel Orientation="Horizontal" Spacing="8">
           <Path Classes="icon" Data="{StaticResource IconEye}" />
@@ -1571,12 +1571,12 @@
               Padding="16"
               CornerRadius="6"
               Background="{DynamicResource PanelBackgroundBrush}"
-              IsVisible="{Binding IsViewerVisible}">
+              IsVisible="{Binding Preview.IsViewerVisible}">
         <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="8">
           <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
             <StackPanel Spacing="2">
-              <TextBlock FontSize="18" FontWeight="Bold" Text="{Binding ViewerTitle}" TextTrimming="CharacterEllipsis" />
-              <TextBlock FontSize="12" Opacity="0.7" Text="{Binding ViewerPath}" TextTrimming="CharacterEllipsis" />
+              <TextBlock FontSize="18" FontWeight="Bold" Text="{Binding Preview.ViewerTitle}" TextTrimming="CharacterEllipsis" />
+              <TextBlock FontSize="12" Opacity="0.7" Text="{Binding Preview.ViewerPath}" TextTrimming="CharacterEllipsis" />
             </StackPanel>
 
             <!-- Only images and PDF pages can be too big for the panel — the text viewer sizes by
@@ -1585,7 +1585,7 @@
                         Orientation="Horizontal"
                         Spacing="8"
                         VerticalAlignment="Center"
-                        IsVisible="{Binding HasViewerZoomableContent}">
+                        IsVisible="{Binding Preview.HasViewerZoomableContent}">
               <TextBlock VerticalAlignment="Center" FontSize="12" Opacity="0.7" Text="{Binding Loc[viewer.zoom.label]}" />
               <!-- Named so the code-behind can commit the value when the drag ends: the setter no
                    longer writes settings.json on every tick (docs/PLAN-UX-ROUND-4.md Y6). -->
@@ -1596,17 +1596,17 @@
                       Maximum="1.5"
                       SmallChange="0.05"
                       LargeChange="0.25"
-                      Value="{Binding ViewerZoom, Mode=TwoWay}" />
+                      Value="{Binding Preview.ViewerZoom, Mode=TwoWay}" />
               <TextBlock VerticalAlignment="Center"
                          FontSize="12"
                          Opacity="0.7"
                          Width="36"
-                         Text="{Binding ViewerZoom, StringFormat={}{0:P0}}" />
+                         Text="{Binding Preview.ViewerZoom, StringFormat={}{0:P0}}" />
             </StackPanel>
 
             <Button Grid.Column="2"
                     VerticalAlignment="Top"
-                    Command="{Binding CloseViewerCommand}"
+                    Command="{Binding Preview.CloseViewerCommand}"
                     ToolTip.Tip="{Binding Loc[viewer.close.tooltip]}"
                     AutomationProperties.Name="{Binding Loc[viewer.close.tooltip]}">
               <Path Classes="icon" Data="{StaticResource IconClear}" />
@@ -1617,10 +1617,10 @@
                      FontSize="12"
                      Opacity="0.8"
                      TextWrapping="Wrap"
-                     Text="{Binding ViewerNote}"
-                     IsVisible="{Binding ViewerNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                     Text="{Binding Preview.ViewerNote}"
+                     IsVisible="{Binding Preview.ViewerNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
-          <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsViewerLoading}">
+          <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" IsVisible="{Binding Preview.IsViewerLoading}">
             <ProgressBar Width="120" IsIndeterminate="True" />
             <TextBlock VerticalAlignment="Center" Text="{Binding Loc[viewer.loading]}" />
           </StackPanel>
@@ -1633,12 +1633,12 @@
                   Padding="12"
                   CornerRadius="4"
                   Background="{DynamicResource ConsoleBackgroundBrush}"
-                  IsVisible="{Binding HasViewerText}">
+                  IsVisible="{Binding Preview.HasViewerText}">
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
               <SelectableTextBlock FontFamily="monospace"
                                    FontSize="13"
                                    TextWrapping="NoWrap"
-                                   Text="{Binding ViewerText}" />
+                                   Text="{Binding Preview.ViewerText}" />
             </ScrollViewer>
           </Border>
 
@@ -1652,10 +1652,10 @@
                   Padding="12"
                   CornerRadius="4"
                   Background="{DynamicResource ConsoleBackgroundBrush}"
-                  IsVisible="{Binding HasViewerImage}">
+                  IsVisible="{Binding Preview.HasViewerImage}">
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-              <LayoutTransformControl LayoutTransform="{Binding ViewerZoom, Converter={x:Static conv:DoubleToScaleTransformConverter.Instance}}">
-                <Image Source="{Binding ViewerImageBytes, Converter={x:Static conv:BytesToBitmapConverter.Instance}}"
+              <LayoutTransformControl LayoutTransform="{Binding Preview.ViewerZoom, Converter={x:Static conv:DoubleToScaleTransformConverter.Instance}}">
+                <Image Source="{Binding Preview.ViewerImageBytes, Converter={x:Static conv:BytesToBitmapConverter.Instance}}"
                        Stretch="Uniform"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center" />
@@ -1675,10 +1675,10 @@
                   Padding="12"
                   CornerRadius="4"
                   Background="{DynamicResource ConsoleBackgroundBrush}"
-                  IsVisible="{Binding HasViewerPdf}">
+                  IsVisible="{Binding Preview.HasViewerPdf}">
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-              <LayoutTransformControl LayoutTransform="{Binding ViewerZoom, Converter={x:Static conv:DoubleToScaleTransformConverter.Instance}}">
-                <ItemsControl ItemsSource="{Binding ViewerPdfPages, Converter={x:Static conv:PdfPagesToBitmapsConverter.Instance}}">
+              <LayoutTransformControl LayoutTransform="{Binding Preview.ViewerZoom, Converter={x:Static conv:DoubleToScaleTransformConverter.Instance}}">
+                <ItemsControl ItemsSource="{Binding Preview.ViewerPdfPages, Converter={x:Static conv:PdfPagesToBitmapsConverter.Instance}}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
                       <StackPanel Orientation="Vertical" Spacing="12" />

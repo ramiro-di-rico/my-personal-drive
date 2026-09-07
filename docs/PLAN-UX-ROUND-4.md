@@ -65,9 +65,9 @@
       both OAuth token-expiry checks; two allowlisted with reasons, behind a gate.
 - [x] **Z6 — the 1978-line code-behind.** Nine dialogs extracted to `Views/Dialogs/`; the file is
       1000 lines and holds only what needs the visual tree.
-- [~] **Z5 — the 4425-line view model.** Step 0 done: `StatusSurface` exists, so the three
-      extractions that follow have something to be handed. Steps 1-3 (CLI update, activity console,
-      file preview) not started — see the note in [§Z5](#z5--mainwindowviewmodel-is-4415-lines-and-391-members).
+- [x] **Z5 — the 4425-line view model.** Steps 0-3 done: `StatusSurface`, then
+      `CliUpdateViewModel`, `ActivityConsoleViewModel` and `FilePreviewViewModel` were handed it.
+      `MainWindowViewModel` is 3394 lines — see [§Z5](#z5--mainwindowviewmodel-is-4415-lines-and-391-members).
 
 ---
 

@@ -103,14 +103,14 @@ public class MainWindowTextViewerTests : IDisposable
             new TextFilePreview(item.Path, item.Name, "hola\nmundo\n", 2, 11, IsTruncated: false, IsBinary: false, "UTF-8")));
         var sut = Build(loader);
 
-        await sut.PreviewItemAsync(TextItem());
+        await sut.Preview.PreviewItemAsync(TextItem());
 
-        Assert.True(sut.IsViewerVisible);
-        Assert.False(sut.IsViewerLoading);
-        Assert.Equal("notes.txt", sut.ViewerTitle);
-        Assert.Equal("/my-files/notes.txt", sut.ViewerPath);
-        Assert.Equal("hola\nmundo\n", sut.ViewerText);
-        Assert.Contains("2", sut.ViewerNote);
+        Assert.True(sut.Preview.IsViewerVisible);
+        Assert.False(sut.Preview.IsViewerLoading);
+        Assert.Equal("notes.txt", sut.Preview.ViewerTitle);
+        Assert.Equal("/my-files/notes.txt", sut.Preview.ViewerPath);
+        Assert.Equal("hola\nmundo\n", sut.Preview.ViewerText);
+        Assert.Contains("2", sut.Preview.ViewerNote);
         Assert.False(sut.IsWarning);
     }
 
@@ -121,11 +121,11 @@ public class MainWindowTextViewerTests : IDisposable
             new TextFilePreview(item.Path, item.Name, string.Empty, 0, 4096, IsTruncated: false, IsBinary: true, "binary")));
         var sut = Build(loader);
 
-        await sut.PreviewItemAsync(TextItem("mystery"));
+        await sut.Preview.PreviewItemAsync(TextItem("mystery"));
 
-        Assert.True(sut.IsViewerVisible);
-        Assert.Equal(string.Empty, sut.ViewerText);
-        Assert.False(sut.HasViewerText);
+        Assert.True(sut.Preview.IsViewerVisible);
+        Assert.Equal(string.Empty, sut.Preview.ViewerText);
+        Assert.False(sut.Preview.HasViewerText);
         Assert.True(sut.IsWarning);
     }
 
@@ -135,7 +135,7 @@ public class MainWindowTextViewerTests : IDisposable
         var loader = new FakeLoader(_ => throw new InvalidOperationException("boom"));
         var sut = Build(loader);
 
-        await sut.PreviewItemAsync(TextItem());
+        await sut.Preview.PreviewItemAsync(TextItem());
 
         Assert.True(sut.IsWarning);
         Assert.Contains("boom", sut.StatusMessage);
@@ -147,9 +147,9 @@ public class MainWindowTextViewerTests : IDisposable
         var loader = new FakeLoader(_ => throw new InvalidOperationException("should not be called"));
         var sut = Build(loader);
 
-        await sut.PreviewItemAsync(new DriveItem("/my-files/movie.mp4", "movie.mp4", IsFolder: false, Size: 32));
+        await sut.Preview.PreviewItemAsync(new DriveItem("/my-files/movie.mp4", "movie.mp4", IsFolder: false, Size: 32));
 
-        Assert.False(sut.IsViewerVisible);
+        Assert.False(sut.Preview.IsViewerVisible);
         Assert.Empty(loader.Requests);
         Assert.True(sut.IsWarning);
     }
@@ -159,9 +159,9 @@ public class MainWindowTextViewerTests : IDisposable
     {
         var sut = Build(loader: null);
 
-        await sut.PreviewItemAsync(TextItem());
+        await sut.Preview.PreviewItemAsync(TextItem());
 
-        Assert.False(sut.IsViewerVisible);
+        Assert.False(sut.Preview.IsViewerVisible);
         Assert.True(sut.IsWarning);
     }
 
@@ -171,12 +171,12 @@ public class MainWindowTextViewerTests : IDisposable
         var loader = new FakeLoader(item => Task.FromResult(
             new TextFilePreview(item.Path, item.Name, "content", 1, 7, IsTruncated: false, IsBinary: false, "UTF-8")));
         var sut = Build(loader);
-        await sut.PreviewItemAsync(TextItem());
+        await sut.Preview.PreviewItemAsync(TextItem());
 
-        await sut.CloseViewerCommand.ExecuteAsync();
+        await sut.Preview.CloseViewerCommand.ExecuteAsync();
 
-        Assert.False(sut.IsViewerVisible);
-        Assert.Equal(string.Empty, sut.ViewerText);
+        Assert.False(sut.Preview.IsViewerVisible);
+        Assert.Equal(string.Empty, sut.Preview.ViewerText);
     }
 
     [Fact]
@@ -197,13 +197,13 @@ public class MainWindowTextViewerTests : IDisposable
         var imageLoader = new FakeImageLoader(item => Task.FromResult(new ImageFilePreview(item.Path, item.Name, bytes, bytes.Length)));
         var sut = Build(textLoader, imageLoader);
 
-        await sut.PreviewItemAsync(ImageItem());
+        await sut.Preview.PreviewItemAsync(ImageItem());
 
-        Assert.True(sut.IsViewerVisible);
-        Assert.False(sut.IsViewerLoading);
-        Assert.Equal(bytes, sut.ViewerImageBytes);
-        Assert.True(sut.HasViewerImage);
-        Assert.False(sut.HasViewerText);
+        Assert.True(sut.Preview.IsViewerVisible);
+        Assert.False(sut.Preview.IsViewerLoading);
+        Assert.Equal(bytes, sut.Preview.ViewerImageBytes);
+        Assert.True(sut.Preview.HasViewerImage);
+        Assert.False(sut.Preview.HasViewerText);
         Assert.Empty(textLoader.Requests);
         Assert.False(sut.IsWarning);
     }
@@ -217,14 +217,14 @@ public class MainWindowTextViewerTests : IDisposable
         var imageLoader = new FakeImageLoader(item => Task.FromResult(new ImageFilePreview(item.Path, item.Name, bytes, bytes.Length)));
         var sut = Build(textLoader, imageLoader);
 
-        await sut.PreviewItemAsync(ImageItem());
-        Assert.True(sut.HasViewerImage);
+        await sut.Preview.PreviewItemAsync(ImageItem());
+        Assert.True(sut.Preview.HasViewerImage);
 
-        await sut.PreviewItemAsync(TextItem());
+        await sut.Preview.PreviewItemAsync(TextItem());
 
-        Assert.False(sut.HasViewerImage);
-        Assert.Null(sut.ViewerImageBytes);
-        Assert.True(sut.HasViewerText);
+        Assert.False(sut.Preview.HasViewerImage);
+        Assert.Null(sut.Preview.ViewerImageBytes);
+        Assert.True(sut.Preview.HasViewerText);
     }
 
     [Fact]
@@ -233,9 +233,9 @@ public class MainWindowTextViewerTests : IDisposable
         var textLoader = new FakeLoader(_ => throw new InvalidOperationException("should not be called"));
         var sut = Build(textLoader, imageLoader: null);
 
-        await sut.PreviewItemAsync(ImageItem());
+        await sut.Preview.PreviewItemAsync(ImageItem());
 
-        Assert.False(sut.IsViewerVisible);
+        Assert.False(sut.Preview.IsViewerVisible);
         Assert.True(sut.IsWarning);
     }
 
@@ -248,9 +248,9 @@ public class MainWindowTextViewerTests : IDisposable
 
         // A RAW camera format: classified as FileKind.Image, but not something the bitmap viewer
         // can decode (ImagePreviewPolicyTests covers the policy itself).
-        await sut.PreviewItemAsync(new DriveItem("/my-files/shot.cr2", "shot.cr2", IsFolder: false, Size: 32));
+        await sut.Preview.PreviewItemAsync(new DriveItem("/my-files/shot.cr2", "shot.cr2", IsFolder: false, Size: 32));
 
-        Assert.False(sut.IsViewerVisible);
+        Assert.False(sut.Preview.IsViewerVisible);
         Assert.Empty(imageLoader.Requests);
         Assert.True(sut.IsWarning);
     }
@@ -261,12 +261,12 @@ public class MainWindowTextViewerTests : IDisposable
         byte[] bytes = [1, 2, 3];
         var imageLoader = new FakeImageLoader(item => Task.FromResult(new ImageFilePreview(item.Path, item.Name, bytes, bytes.Length)));
         var sut = Build(loader: null, imageLoader);
-        await sut.PreviewItemAsync(ImageItem());
+        await sut.Preview.PreviewItemAsync(ImageItem());
 
-        await sut.CloseViewerCommand.ExecuteAsync();
+        await sut.Preview.CloseViewerCommand.ExecuteAsync();
 
-        Assert.False(sut.IsViewerVisible);
-        Assert.Null(sut.ViewerImageBytes);
-        Assert.False(sut.HasViewerImage);
+        Assert.False(sut.Preview.IsViewerVisible);
+        Assert.Null(sut.Preview.ViewerImageBytes);
+        Assert.False(sut.Preview.HasViewerImage);
     }
 }

@@ -141,7 +141,7 @@ public class MainWindowRowActivationTests : IDisposable
 
         Assert.True(Row(viewModel, "notes.txt").IsSelected);
         Assert.Equal(before, viewModel.CurrentPath);
-        Assert.True(viewModel.IsViewerVisible);
+        Assert.True(viewModel.Preview.IsViewerVisible);
     }
 
     /// <summary>A file the app cannot show still just selects — there is nothing else to do with it.</summary>
@@ -154,6 +154,6 @@ public class MainWindowRowActivationTests : IDisposable
         await Row(viewModel, "clip.webm").ActivateCommand.ExecuteAsync();
 
         Assert.True(Row(viewModel, "clip.webm").IsSelected);
-        Assert.False(viewModel.IsViewerVisible);
+        Assert.False(viewModel.Preview.IsViewerVisible);
     }
 }

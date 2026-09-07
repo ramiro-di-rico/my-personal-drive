@@ -490,14 +490,14 @@ public class MainWindowHeaderTelemetryTests : IDisposable
     public void ViewerZoom_DefaultsToFiftyPercent_AndPersistsChanges()
     {
         var sut = Build();
-        Assert.Equal(0.5, sut.ViewerZoom);
+        Assert.Equal(0.5, sut.Preview.ViewerZoom);
 
-        sut.ViewerZoom = 1.0;
+        sut.Preview.ViewerZoom = 1.0;
         // Persisted when the gesture ends, not on every intermediate value of a drag
         // (docs/PLAN-UX-ROUND-4.md Y6).
-        sut.CommitViewerZoom();
+        sut.Preview.CommitViewerZoom();
 
-        Assert.Equal(1.0, sut.ViewerZoom);
+        Assert.Equal(1.0, sut.Preview.ViewerZoom);
         Assert.Equal(1.0, new AppSettingsService().Load().ViewerZoom);
     }
 
@@ -508,10 +508,10 @@ public class MainWindowHeaderTelemetryTests : IDisposable
     {
         var sut = Build();
 
-        sut.ViewerZoom = attempted;
-        sut.CommitViewerZoom();
+        sut.Preview.ViewerZoom = attempted;
+        sut.Preview.CommitViewerZoom();
 
-        Assert.Equal(expected, sut.ViewerZoom);
+        Assert.Equal(expected, sut.Preview.ViewerZoom);
         Assert.Equal(expected, new AppSettingsService().Load().ViewerZoom);
     }
 

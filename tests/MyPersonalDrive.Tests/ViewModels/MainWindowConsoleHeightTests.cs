@@ -127,13 +127,13 @@ public class MainWindowConsoleHeightTests : IDisposable
     public void DraggingTheZoomSlider_DoesNotTouchTheConfigFile()
     {
         var viewModel = Build();
-        viewModel.CommitViewerZoom();
+        viewModel.Preview.CommitViewerZoom();
         var settingsPath = Directory.EnumerateFiles(_tempAppData, "settings.json", SearchOption.AllDirectories).Single();
         var writtenAt = File.GetLastWriteTimeUtc(settingsPath);
 
         for (var step = 0; step < 20; step++)
         {
-            viewModel.ViewerZoom = 0.5 + (step * 0.01);
+            viewModel.Preview.ViewerZoom = 0.5 + (step * 0.01);
         }
 
         Assert.Equal(writtenAt, File.GetLastWriteTimeUtc(settingsPath));
@@ -143,12 +143,12 @@ public class MainWindowConsoleHeightTests : IDisposable
     public void TheZoomSurvivesARestart_OnceTheGestureEnds()
     {
         var viewModel = Build();
-        viewModel.ViewerZoom = 1.25;
+        viewModel.Preview.ViewerZoom = 1.25;
 
-        viewModel.CommitViewerZoom();
+        viewModel.Preview.CommitViewerZoom();
 
         Assert.Equal(1.25, new AppSettingsService().Load().ViewerZoomOrDefault());
-        Assert.Equal(1.25, Build().ViewerZoom);
+        Assert.Equal(1.25, Build().Preview.ViewerZoom);
     }
 
     /// <summary>

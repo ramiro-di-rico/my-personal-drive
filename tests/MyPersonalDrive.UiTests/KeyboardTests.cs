@@ -107,9 +107,9 @@ public class KeyboardTests : WindowLayoutTests
         // worse than an acknowledged gap. Tracked in docs/PLAN-UX-ROUND-4.md Y4.
 
         // Escape closes the viewer and nothing else.
-        typeof(MainWindowViewModel).GetProperty("IsViewerVisible")!.SetValue(viewModel, true);
+        typeof(FilePreviewViewModel).GetProperty("IsViewerVisible")!.SetValue(viewModel.Preview, true);
         Press(Key.Escape);
-        Check("Escape", !viewModel.IsViewerVisible, "closes the viewer");
+        Check("Escape", !viewModel.Preview.IsViewerVisible, "closes the viewer");
 
         // Ctrl+F puts focus in the pane's search box.
         Press(Key.F, RawInputModifiers.Control);

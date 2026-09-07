@@ -91,7 +91,7 @@ public partial class MainWindow : Window
     {
         if (DataContext is MainWindowViewModel viewModel)
         {
-            viewModel.CommitViewerZoom();
+            viewModel.Preview.CommitViewerZoom();
         }
     }
 
@@ -265,8 +265,8 @@ public partial class MainWindow : Window
         {
             // Closes the viewer panel and nothing else: unguarded, Escape would also be the way out
             // of a dialog, and those are separate windows with their own IsCancel buttons.
-            case Avalonia.Input.Key.Escape when viewModel.IsViewerVisible:
-                Run(viewModel.CloseViewerCommand);
+            case Avalonia.Input.Key.Escape when viewModel.Preview.IsViewerVisible:
+                Run(viewModel.Preview.CloseViewerCommand);
                 break;
 
             case Avalonia.Input.Key.F5:

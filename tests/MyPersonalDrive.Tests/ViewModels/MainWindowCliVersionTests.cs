@@ -78,11 +78,11 @@ public class MainWindowCliVersionTests : IDisposable
         var (viewModel, executor) = Build();
         executor.EnqueueOutput("proton-drive 1.2.3\n");
 
-        await viewModel.CheckCliVersionCommand.ExecuteAsync();
+        await viewModel.CliUpdate.CheckCliVersionCommand.ExecuteAsync();
 
-        Assert.Equal("proton-drive 1.2.3", viewModel.CliVersion);
+        Assert.Equal("proton-drive 1.2.3", viewModel.CliUpdate.CliVersion);
         Assert.Equal(["--version"], Assert.Single(executor.Calls).Arguments);
-        Assert.False(viewModel.IsCheckingCliVersion);
+        Assert.False(viewModel.CliUpdate.IsCheckingCliVersion);
     }
 
     [Fact]
@@ -97,10 +97,10 @@ public class MainWindowCliVersionTests : IDisposable
             message: "unknown flag: --version",
             kind: DriveErrorKind.InvalidArgument));
 
-        await viewModel.CheckCliVersionCommand.ExecuteAsync();
+        await viewModel.CliUpdate.CheckCliVersionCommand.ExecuteAsync();
 
-        Assert.Contains("unknown flag: --version", viewModel.CliVersion);
-        Assert.False(viewModel.IsCheckingCliVersion);
+        Assert.Contains("unknown flag: --version", viewModel.CliUpdate.CliVersion);
+        Assert.False(viewModel.CliUpdate.IsCheckingCliVersion);
     }
 
     [Fact]
@@ -108,11 +108,11 @@ public class MainWindowCliVersionTests : IDisposable
     {
         var (viewModel, executor) = Build();
         executor.EnqueueOutput("proton-drive 1.2.3");
-        await viewModel.CheckCliVersionCommand.ExecuteAsync();
+        await viewModel.CliUpdate.CheckCliVersionCommand.ExecuteAsync();
 
         viewModel.CliPath = "/opt/other/proton-drive";
 
-        Assert.Equal("Unknown", viewModel.CliVersion);
+        Assert.Equal("Unknown", viewModel.CliUpdate.CliVersion);
     }
 
     [Fact]
@@ -121,9 +121,9 @@ public class MainWindowCliVersionTests : IDisposable
         var (viewModel, executor) = Build();
         viewModel.CliPath = string.Empty;
 
-        await viewModel.CheckCliVersionCommand.ExecuteAsync();
+        await viewModel.CliUpdate.CheckCliVersionCommand.ExecuteAsync();
 
         Assert.Empty(executor.Calls);
-        Assert.Equal("Unknown", viewModel.CliVersion);
+        Assert.Equal("Unknown", viewModel.CliUpdate.CliVersion);
     }
 }

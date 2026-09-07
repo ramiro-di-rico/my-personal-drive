@@ -318,6 +318,7 @@ public static class StringKeys
         public const string NoData = "metrics.nodata";
         public const string Oldest = "metrics.oldest";
         public const string ProgressQueued = "metrics.progress.queued";
+        public const string ProgressScanning = "metrics.progress.scanning";
         /// <summary>Plural prefix.</summary>
         public const string ProgressScanned = "metrics.progress.scanned";
         public const string Scan = "metrics.scan";

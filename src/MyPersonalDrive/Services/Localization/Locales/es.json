@@ -335,6 +335,7 @@
   "metrics.progress.queued": "{0} · {1} en cola",
   "metrics.progress.scanned.one": "{0} carpeta analizada",
   "metrics.progress.scanned.other": "{0} carpetas analizadas",
+  "metrics.progress.scanning": "Analizando carpetas...",
   "metrics.scan": "Calcular tamaño total (recursivo)",
   "metrics.scan.cancel": "Cancelar análisis",
   "metrics.scan.hint": "Analiza todas las subcarpetas; puede tardar varios minutos.",

@@ -335,6 +335,7 @@
   "metrics.progress.queued": "{0} · {1} in queue",
   "metrics.progress.scanned.one": "{0} folder scanned",
   "metrics.progress.scanned.other": "{0} folders scanned",
+  "metrics.progress.scanning": "Scanning folders...",
   "metrics.scan": "Calculate the total size (recursive)",
   "metrics.scan.cancel": "Cancel the scan",
   "metrics.scan.hint": "Scans every subfolder; this can take several minutes.",

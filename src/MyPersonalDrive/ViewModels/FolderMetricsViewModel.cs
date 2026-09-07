@@ -212,7 +212,7 @@ public sealed class FolderMetricsViewModel : ObservableObject
     public void BeginDeepScan()
     {
         IsScanning = true;
-        ProgressText = "Analizando carpetas...";
+        ProgressText = Loc.T(StringKeys.Metrics.ProgressScanning);
     }
 
     public void ReportDeepScanProgress(int foldersScanned, int foldersQueued)
@@ -230,8 +230,33 @@ public sealed class FolderMetricsViewModel : ObservableObject
         ProgressText = string.Empty;
     }
 
+    /// <summary>
+    /// The last metrics rendered, so a language change can re-derive every label from them. Every
+    /// string here is computed from this one value, so re-running Update is both the smallest fix
+    /// and the one that cannot miss a label (docs/PLAN-UX-ROUND-4.md Y7).
+    /// </summary>
+    private FolderMetrics? _lastMetrics;
+
+    /// <summary>Re-renders every label after a language change.</summary>
+    public void OnLanguageChanged()
+    {
+        if (_lastMetrics is { } metrics)
+        {
+            Update(metrics);
+        }
+        else
+        {
+            // No folder measured yet, and the placeholders are localized too.
+            Headline = Loc.T(StringKeys.Metrics.NoData);
+            TotalSizeCaption = Loc.T(StringKeys.Metrics.CaptionThisFolder);
+        }
+
+        OnAllPropertiesChanged();
+    }
+
     public void Update(FolderMetrics metrics)
     {
+        _lastMetrics = metrics;
         IsDeep = metrics.IsDeep;
         IsPartial = !metrics.IsComplete;
         DepthNote = BuildDepthNote(metrics, _timeProvider.GetUtcNow());

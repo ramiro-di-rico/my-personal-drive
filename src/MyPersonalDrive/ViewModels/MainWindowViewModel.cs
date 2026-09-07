@@ -132,26 +132,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _searchText = string.Empty;
     private string _filterSummary = string.Empty;
     private bool _sortDescending;
-    private static string UnknownCliVersion => Localizer.Instance.T(StringKeys.Common.Unknown);
-
-    /// <summary>
-    /// The unrendered forms behind <see cref="CliVersion"/> and <see cref="CliUpdateStatus"/>. Both
-    /// carry the result of a past operation and used to be stored as rendered prose, so both stayed
-    /// in whichever language was current when the check ran (docs/PLAN-UX-ROUND-4.md Y7). Same shape
-    /// as the status line's own <c>_statusText</c>.
-    /// </summary>
-    private LocalizedText _cliVersionText = LocalizedText.Of(StringKeys.Common.Unknown);
-
-    private LocalizedText _cliUpdateStatusText = LocalizedText.Of(StringKeys.CliUpdate.Unchecked);
-    private string _cliVersion = UnknownCliVersion;
-    private bool _isCheckingCliVersion;
-    private readonly ICliReleaseFeed? _releaseFeed;
-    private readonly CliUpdateInstaller _updateInstaller;
     private readonly Func<bool> _isSyncInProgress;
-    private CliReleaseCandidate? _availableRelease;
-    private string _cliUpdateStatus = Localizer.Instance.T(StringKeys.CliUpdate.Unchecked);
-    private bool _isCliUpdateAvailable;
-    private bool _isCliUpdateBusy;
     private string _theme = "Default";
     private int _bandwidthLimitKbps;
     private double _viewerZoom;
@@ -425,8 +406,14 @@ public sealed class MainWindowViewModel : ObservableObject
         _imagePreviewLoader = imagePreviewLoader;
         _pdfPreviewLoader = pdfPreviewLoader;
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _releaseFeed = releaseFeed;
-        _updateInstaller = updateInstaller ?? new CliUpdateInstaller();
+        CliUpdate = new CliUpdateViewModel(
+            () => _provider,
+            releaseFeed,
+            updateInstaller ?? new CliUpdateInstaller(),
+            () => CliPath,
+            () => _isSyncInProgress?.Invoke() ?? false,
+            _status,
+            HandleUnexpectedError);
         // Injected rather than read off SyncPanel directly so the refusal-while-syncing path is
         // reachable in a test without driving a real sync cycle to a chosen moment.
         // Capturing the parameter, not the SyncPanel property, which is only assigned below.
@@ -530,14 +517,11 @@ public sealed class MainWindowViewModel : ObservableObject
         ShowGalleryViewCommand = new AsyncCommand(() => SetViewModeAsync(DriveViewMode.Gallery), onError: HandleUnexpectedError);
         ShowSettingsCommand = new AsyncCommand(ShowSettingsAsync, onError: HandleUnexpectedError);
         ShowSyncCommand = new AsyncCommand(ShowSyncAsync, onError: HandleUnexpectedError);
-        CheckCliVersionCommand = new AsyncCommand(CheckCliVersionAsync, CanCheckCliVersion, HandleUnexpectedError);
-        CheckForCliUpdateCommand = new AsyncCommand(CheckForCliUpdateAsync, CanCheckForCliUpdate, HandleUnexpectedError);
         SwitchToProtonCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.Proton), () => !IsLoading && !IsProtonActive, HandleUnexpectedError);
         SwitchToOneDriveCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.OneDrive), () => !IsLoading && !IsOneDriveActive, HandleUnexpectedError);
         SwitchToGoogleDriveCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.GoogleDrive), () => !IsLoading && !IsGoogleDriveActive, HandleUnexpectedError);
         SwitchToNextcloudCommand = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.Nextcloud), () => !IsLoading && !IsNextcloudActive, HandleUnexpectedError);
         SwitchToS3Command = new AsyncCommand(() => SwitchBrowserAccountAsync(ProviderId.S3), () => !IsLoading && !IsS3Active, HandleUnexpectedError);
-        InstallCliUpdateCommand = new AsyncCommand(InstallCliUpdateAsync, CanInstallCliUpdate, HandleUnexpectedError);
         ViewSelectedFileCommand = new AsyncCommand(ViewSelectedFileAsync, CanViewSelectedFile, HandleUnexpectedError);
         CloseViewerCommand = new AsyncCommand(CloseViewerAsync, onError: HandleUnexpectedError);
         SelectAllRowsCommand = new AsyncCommand(SelectAllRowsAsync, () => RootItems.Count > 0, HandleUnexpectedError);
@@ -588,6 +572,13 @@ public sealed class MainWindowViewModel : ObservableObject
     public Sync.SyncPanelViewModel SyncPanel { get; }
 
     public LocalExplorerViewModel LocalExplorer { get; }
+
+    /// <summary>
+    /// The CLI's installed version and its self-update (docs/PLAN-UX-ROUND-4.md Z5 step 1). Its own
+    /// view model: everything it does needs the release feed, the installer and somewhere to
+    /// report, and nothing else here needs any of those.
+    /// </summary>
+    public CliUpdateViewModel CliUpdate { get; }
 
     public TransferQueueViewModel TransferQueue { get; } = new();
 
@@ -667,47 +658,10 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>Moves every selected row (files and folders) to trash, after one confirmation for the whole batch.</summary>
     public AsyncCommand TrashSelectedCommand { get; }
 
-    public AsyncCommand CheckCliVersionCommand { get; }
-
     /// <summary>
     /// What `proton-drive --version` last reported, or why it could not be read. Shown as-is in the
     /// settings view; the CLI owns the wording, this view model does not reformat it.
     /// </summary>
-    private void SetCliVersion(LocalizedText text)
-    {
-        _cliVersionText = text;
-        CliVersion = text.Render();
-    }
-
-    private void SetCliUpdateStatus(LocalizedText text)
-    {
-        _cliUpdateStatusText = text;
-        CliUpdateStatus = text.Render();
-    }
-
-    /// <summary>Whether the installed version is still the "not checked yet" placeholder. Compared on the key, not on the rendered prose — that comparison silently stopped matching after a language change.</summary>
-    private bool CliVersionIsUnknown => _cliVersionText.Key == StringKeys.Common.Unknown;
-
-    public string CliVersion
-    {
-        get => _cliVersion;
-        private set => SetProperty(ref _cliVersion, value);
-    }
-
-    public bool IsCheckingCliVersion
-    {
-        get => _isCheckingCliVersion;
-        private set
-        {
-            if (SetProperty(ref _isCheckingCliVersion, value))
-            {
-                CheckCliVersionCommand.RaiseCanExecuteChanged();
-            }
-        }
-    }
-
-    public AsyncCommand CheckForCliUpdateCommand { get; }
-
     public AsyncCommand SwitchToProtonCommand { get; }
 
     public AsyncCommand SwitchToOneDriveCommand { get; }
@@ -717,8 +671,6 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand SwitchToNextcloudCommand { get; }
 
     public AsyncCommand SwitchToS3Command { get; }
-
-    public AsyncCommand InstallCliUpdateCommand { get; }
 
     public AsyncCommand SetThemeDefaultCommand { get; }
 
@@ -911,42 +863,6 @@ public sealed class MainWindowViewModel : ObservableObject
     public string QuotaTooltip => _quotaUsedIsPartial
         ? Loc.T(StringKeys.Quota.TooltipPartial)
         : Loc.T(StringKeys.Quota.TooltipExact);
-
-    /// <summary>Human-readable result of the last update check, or the progress of a running install.</summary>
-    public string CliUpdateStatus
-    {
-        get => _cliUpdateStatus;
-        private set => SetProperty(ref _cliUpdateStatus, value);
-    }
-
-    /// <summary>
-    /// True only when a newer Stable release was positively identified for this platform. An
-    /// unreadable installed version leaves this false — see <see cref="CliUpdateAvailability"/>.
-    /// </summary>
-    public bool IsCliUpdateAvailable
-    {
-        get => _isCliUpdateAvailable;
-        private set
-        {
-            if (SetProperty(ref _isCliUpdateAvailable, value))
-            {
-                InstallCliUpdateCommand.RaiseCanExecuteChanged();
-            }
-        }
-    }
-
-    public bool IsCliUpdateBusy
-    {
-        get => _isCliUpdateBusy;
-        private set
-        {
-            if (SetProperty(ref _isCliUpdateBusy, value))
-            {
-                CheckForCliUpdateCommand.RaiseCanExecuteChanged();
-                InstallCliUpdateCommand.RaiseCanExecuteChanged();
-            }
-        }
-    }
 
     /// <summary>
     /// What the listing is ordered by. Clicking the active key again flips the direction, which is
@@ -1151,7 +1067,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         try
         {
-            await CheckForCliUpdateCommand.ExecuteAsync();
+            await CliUpdate.CheckForCliUpdateCommand.ExecuteAsync();
         }
         catch (Exception ex)
         {
@@ -1186,12 +1102,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _cliPath, value))
             {
-                // A different executable is a different version; what was read no longer applies,
-                // and neither does an update offer that was computed against the old one.
-                SetCliVersion(LocalizedText.Of(StringKeys.Common.Unknown));
-                _availableRelease = null;
-                IsCliUpdateAvailable = false;
-                SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.Unchecked));
+                CliUpdate.Reset();
                 PersistSettings();
                 RaiseCommandStates();
             }
@@ -1364,8 +1275,8 @@ public sealed class MainWindowViewModel : ObservableObject
         // carry the result of a past operation and need a LocalizedText each; that is a change to
         // the self-update flow rather than to this method, and it is tracked rather than smuggled
         // in here.
-        CliVersion = _cliVersionText.Render();
-        CliUpdateStatus = _cliUpdateStatusText.Render();
+        CliUpdate.OnLanguageChanged();
+        Metrics.OnLanguageChanged();
         CommandConsoleToggleLabel = Loc.T(IsCommandConsoleVisible ? StringKeys.Console.ToggleHide : StringKeys.Console.ToggleShow);
 
         if (_activeOperationCount == 0)
@@ -3850,9 +3761,7 @@ public sealed class MainWindowViewModel : ObservableObject
         CreateFolderCommand.RaiseCanExecuteChanged();
         DownloadActivityCommand.RaiseCanExecuteChanged();
         ClearActivityCommand.RaiseCanExecuteChanged();
-        CheckCliVersionCommand.RaiseCanExecuteChanged();
-        CheckForCliUpdateCommand.RaiseCanExecuteChanged();
-        InstallCliUpdateCommand.RaiseCanExecuteChanged();
+        CliUpdate.RaiseCommandStates();
         ViewSelectedFileCommand.RaiseCanExecuteChanged();
         SwitchToProtonCommand.RaiseCanExecuteChanged();
         SwitchToOneDriveCommand.RaiseCanExecuteChanged();
@@ -3991,168 +3900,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
         // Read it on the way in, so the settings view is never showing a stale or empty version,
         // but only once per configured path — the CLI costs a whole process launch (~3.5s cold).
-        if (CliVersionIsUnknown && !string.IsNullOrWhiteSpace(CliPath))
-        {
-            await CheckCliVersionAsync();
-        }
+        await CliUpdate.EnsureVersionReadAsync();
     }
-
-    private bool CanCheckCliVersion() => !IsCheckingCliVersion && !string.IsNullOrWhiteSpace(CliPath);
-
-    private async Task CheckCliVersionAsync()
-    {
-        IsCheckingCliVersion = true;
-        try
-        {
-            // Diagnostics is only ever null for a provider with no external binary to version
-            // (docs/PLAN-CLOUD-PROVIDERS.md §2.6); the settings UI stops offering this command for
-            // such a provider as of P5. Today's only provider (Proton) always has one.
-            var version = _provider.Diagnostics is not null
-                ? await _provider.Diagnostics.GetVersionAsync()
-                : null;
-            SetCliVersion(string.IsNullOrWhiteSpace(version)
-                ? LocalizedText.Of(StringKeys.CliVersion.NoVersionReported)
-                : LocalizedText.Verbatim(version));
-        }
-        catch (InvalidOperationException ex)
-        {
-            // Includes DriveException. The CLI's own text is the most useful thing on screen here:
-            // if `--version` is not the flag this build understands, the user sees exactly that.
-            SetCliVersion(LocalizedText.Of(StringKeys.CliVersion.Unavailable, ex.DescribeForUser().Render()));
-        }
-        catch (FileNotFoundException ex)
-        {
-            SetCliVersion(LocalizedText.Of(StringKeys.CliVersion.Unavailable, ex.DescribeForUser().Render()));
-        }
-        finally
-        {
-            IsCheckingCliVersion = false;
-        }
-    }
-
-    private bool CanCheckForCliUpdate() => _releaseFeed is not null && !IsCliUpdateBusy;
 
     /// <summary>
     /// Compares the installed CLI against Proton's published Stable release. This is the app's only
     /// outbound network call; everything else goes through the CLI process.
     /// </summary>
-    private async Task CheckForCliUpdateAsync()
-    {
-        if (_releaseFeed is null)
-        {
-            SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.Unavailable));
-            return;
-        }
-
-        IsCliUpdateBusy = true;
-        try
-        {
-            // The comparison needs a version to compare against, and the user may never have
-            // opened the settings view this session.
-            if (CliVersionIsUnknown && !string.IsNullOrWhiteSpace(CliPath))
-            {
-                await CheckCliVersionAsync();
-            }
-
-            var release = await _releaseFeed.GetLatestStableAsync();
-            if (release is null)
-            {
-                _availableRelease = null;
-                IsCliUpdateAvailable = false;
-                SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.NoBuildForPlatform));
-                return;
-            }
-
-            switch (CliVersionComparer.Compare(CliVersion, release.Version))
-            {
-                case CliUpdateAvailability.UpdateAvailable:
-                    _availableRelease = release;
-                    IsCliUpdateAvailable = true;
-                    SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.Available, release.Version, release.ReleaseDate));
-                    break;
-
-                case CliUpdateAvailability.UpToDate:
-                    _availableRelease = null;
-                    IsCliUpdateAvailable = false;
-                    SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.UpToDate, release.Version));
-                    break;
-
-                default:
-                    // Refusing to offer an install here is the point: overwriting a working CLI on
-                    // the strength of a version string we couldn't read is the one outcome worse
-                    // than not updating.
-                    _availableRelease = null;
-                    IsCliUpdateAvailable = false;
-                    SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.InstalledVersionUnknown, release.Version));
-                    break;
-            }
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
-        {
-            _availableRelease = null;
-            IsCliUpdateAvailable = false;
-            SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.ManifestUnreachable, ex.Message));
-        }
-        finally
-        {
-            IsCliUpdateBusy = false;
-        }
-    }
-
-    private bool CanInstallCliUpdate()
-        => IsCliUpdateAvailable && _availableRelease is not null && !IsCliUpdateBusy && !string.IsNullOrWhiteSpace(CliPath);
-
-    private async Task InstallCliUpdateAsync()
-    {
-        var release = _availableRelease;
-        if (release is null)
-        {
-            return;
-        }
-
-        // A scan or transfer in flight is holding the CLI. The rename itself is atomic and an
-        // already-running process keeps its own inode, so this is not about corrupting the swap —
-        // it is that the next call in that same cycle would land on a different binary version
-        // mid-operation, which is not a state worth reasoning about.
-        if (_isSyncInProgress())
-        {
-            SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.SyncInProgress));
-            return;
-        }
-
-        IsCliUpdateBusy = true;
-        try
-        {
-            SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.Downloading, release.Version));
-            await _updateInstaller.InstallAsync(
-                release,
-                CliPath,
-                onProgress: bytes => Dispatcher.UIThread.Post(
-                    () => SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.DownloadingWithSize, release.Version, bytes / (1024 * 1024)))));
-
-            _availableRelease = null;
-            IsCliUpdateAvailable = false;
-            SetCliVersion(LocalizedText.Of(StringKeys.Common.Unknown));
-            await CheckCliVersionAsync();
-            SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.Done, release.Version));
-        }
-        catch (CliUpdateException ex)
-        {
-            // Includes the checksum mismatch, which leaves the old binary in place by design.
-            SetCliUpdateStatus(LocalizedText.Verbatim(ex.Message));
-            IsWarning = true;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or TaskCanceledException)
-        {
-            SetCliUpdateStatus(LocalizedText.Of(StringKeys.CliUpdate.Failed, ex.DescribeForUser().Render()));
-            IsWarning = true;
-        }
-        finally
-        {
-            IsCliUpdateBusy = false;
-        }
-    }
-
     private async Task DownloadActivityAsync()
     {
         var picker = RequestSaveActivityAsync;

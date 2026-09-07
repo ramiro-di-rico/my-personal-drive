@@ -209,7 +209,7 @@ public class NoHardcodedStringsTests
     public void NoUserFacingLabelIsAssignedALiteral()
     {
         var assignment = new Regex(
-            @"\b(?<prop>Label|Title|Header|Caption|PlaceholderText|DisplayName|Summary|Headline)\s*=\s*(?<rhs>[^;]*)",
+            @"\b(?<prop>Label|Title|Header|Caption|PlaceholderText|DisplayName|Summary|Headline|ProgressText|StatusText|Note|Tooltip)\s*=\s*(?<rhs>[^;]*)",
             RegexOptions.Compiled);
         var literal = new Regex(@"""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
 

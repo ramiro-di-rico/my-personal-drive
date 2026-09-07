@@ -1891,34 +1891,34 @@
                    flag, so a third provider with no external binary needs no XAML change here
                    (docs/PLAN-CLOUD-PROVIDERS.md §5 item 2) — for now that's every non-Proton
                    provider, but the binding itself doesn't know that. -->
-              <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding HasDiagnostics}">
+              <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding CliUpdate.HasDiagnostics}">
                 <TextBlock VerticalAlignment="Center" Text="{Binding Loc[settings.proton.cliversion.label]}" />
                 <TextBlock VerticalAlignment="Center"
                            MaxWidth="420"
                            TextWrapping="Wrap"
                            Opacity="0.8"
-                           Text="{Binding CliVersion}" />
-                <Button ToolTip.Tip="{Binding Loc[settings.proton.cliversion.recheck.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.proton.cliversion.recheck.tooltip]}" Command="{Binding CheckCliVersionCommand}">
+                           Text="{Binding CliUpdate.CliVersion}" />
+                <Button ToolTip.Tip="{Binding Loc[settings.proton.cliversion.recheck.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.proton.cliversion.recheck.tooltip]}" Command="{Binding CliUpdate.CheckCliVersionCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
               </StackPanel>
 
-              <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding HasDiagnostics}">
+              <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding CliUpdate.HasDiagnostics}">
                 <TextBlock VerticalAlignment="Center" Text="{Binding Loc[settings.proton.update.label]}" />
                 <TextBlock VerticalAlignment="Center"
                            MaxWidth="420"
                            TextWrapping="Wrap"
                            Opacity="0.8"
-                           Text="{Binding CliUpdateStatus}" />
+                           Text="{Binding CliUpdate.CliUpdateStatus}" />
                 <Button ToolTip.Tip="{Binding Loc[settings.proton.update.check.tooltip]}" AutomationProperties.Name="{Binding Loc[settings.proton.update.check.tooltip]}"
-                        Command="{Binding CheckForCliUpdateCommand}">
+                        Command="{Binding CliUpdate.CheckForCliUpdateCommand}">
                   <Path Classes="icon" Data="{StaticResource IconRefresh}" />
                 </Button>
                 <Button Classes="primary"
                         Content="{Binding Loc[settings.proton.update.install]}"
-                        IsVisible="{Binding IsCliUpdateAvailable}"
+                        IsVisible="{Binding CliUpdate.IsCliUpdateAvailable}"
                         ToolTip.Tip="{Binding Loc[settings.proton.update.install.tooltip]}"
-                        Command="{Binding InstallCliUpdateCommand}" />
+                        Command="{Binding CliUpdate.InstallCliUpdateCommand}" />
               </StackPanel>
             </StackPanel>
           </Border>

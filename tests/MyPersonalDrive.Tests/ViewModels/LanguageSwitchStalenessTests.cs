@@ -76,26 +76,63 @@ public class LanguageSwitchStalenessTests : IDisposable
             new SyncPanelViewModel(store, executor, new SyncCrashRecovery(store)));
     }
 
+    /// <summary>
+    /// Every readable string on the view model *and* on the child view models it owns, keyed by
+    /// "Child.Property".
+    ///
+    /// The children are not an optional extra. CliVersion and CliUpdateStatus were on
+    /// MainWindowViewModel when this gate was written and moved to CliUpdateViewModel in
+    /// docs/PLAN-UX-ROUND-4.md Z5 step 1 — a gate that only looked at the parent would have gone on
+    /// passing while quietly covering two properties fewer. Extracting a cluster must not shrink
+    /// what is checked.
+    /// </summary>
     private static Dictionary<string, string> ReadableStrings(MainWindowViewModel viewModel)
-        => typeof(MainWindowViewModel)
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(property => property.PropertyType == typeof(string)
-                && property.CanRead
-                && property.GetIndexParameters().Length == 0)
-            .ToDictionary(
-                property => property.Name,
-                property =>
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        Collect(viewModel, prefix: string.Empty);
+        return values;
+
+        void Collect(ObservableObject target, string prefix)
+        {
+            foreach (var property in target.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (property.GetIndexParameters().Length > 0 || !property.CanRead)
                 {
-                    try
-                    {
-                        return (string?)property.GetValue(viewModel) ?? string.Empty;
-                    }
-                    catch (TargetInvocationException)
-                    {
-                        return string.Empty;
-                    }
-                },
-                StringComparer.Ordinal);
+                    continue;
+                }
+
+                if (property.PropertyType == typeof(string))
+                {
+                    values[prefix + property.Name] = Read(target, property);
+                    continue;
+                }
+
+                // One level down, into the children this view model owns. Deeper would reach the
+                // listing rows, which are rebuilt per folder and have nothing stable to compare.
+                if (prefix.Length == 0
+                    && typeof(ObservableObject).IsAssignableFrom(property.PropertyType)
+                    && Read(target, property) is not null
+                    && property.GetValue(target) is ObservableObject child)
+                {
+                    Collect(child, property.Name + ".");
+                }
+            }
+        }
+
+        static string Read(object target, PropertyInfo property)
+        {
+            try
+            {
+                return property.PropertyType == typeof(string)
+                    ? (string?)property.GetValue(target) ?? string.Empty
+                    : string.Empty;
+            }
+            catch (TargetInvocationException)
+            {
+                return string.Empty;
+            }
+        }
+    }
 
     [Fact]
     public void EveryStringProperty_ReadsTheSameAfterASwitchAsItDoesFromAFreshStart()

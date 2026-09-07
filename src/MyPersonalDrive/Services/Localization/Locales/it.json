@@ -335,6 +335,7 @@
   "metrics.progress.queued": "{0} · {1} in coda",
   "metrics.progress.scanned.one": "{0} cartella analizzata",
   "metrics.progress.scanned.other": "{0} cartelle analizzate",
+  "metrics.progress.scanning": "Analisi delle cartelle...",
   "metrics.scan": "Calcola la dimensione totale (ricorsivo)",
   "metrics.scan.cancel": "Annulla l'analisi",
   "metrics.scan.hint": "Analizza ogni sottocartella; può richiedere diversi minuti.",

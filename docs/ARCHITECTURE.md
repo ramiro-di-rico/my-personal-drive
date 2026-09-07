@@ -1,7 +1,7 @@
 # MyPersonalDrive — Technical Reference
 
 > Reference document describing the current state of the application (branch
-> `feature/ux-round-3`, commit `1730fd9`).
+> `main`, commit `66e3827`).
 > Meant to give full context to any future chat/session without having to re-read all the code.
 
 ---

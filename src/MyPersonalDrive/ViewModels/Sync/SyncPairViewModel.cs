@@ -77,6 +77,30 @@ public sealed class SyncPairViewModel : ObservableObject
     public bool MirrorDeletes => _pair.MirrorDeletes;
 
     /// <summary>
+    /// Whether another pair — usually another provider — syncs this same local folder. Read-only
+    /// here: it is derived from the whole set of pairs by
+    /// <c>SyncPanelViewModel.RefreshSharedLocalFolderFlagsAsync</c>, never chosen per row. See
+    /// <see cref="SyncPair.SharesLocalFolder"/>.
+    /// </summary>
+    public bool SharesLocalFolder => _pair.SharesLocalFolder;
+
+    /// <summary>
+    /// Re-reads this row's pair from the store.
+    ///
+    /// Needed because the row hands <see cref="SyncPair"/> itself to the executor
+    /// (<c>PreviewAsync</c>/<c>RunAsync</c> take it by value), so a setting changed in the database
+    /// by anything other than this row's own commands would otherwise not reach the engine until
+    /// the app restarted. That is exactly what happens to
+    /// <see cref="SyncPair.SharesLocalFolder"/>: adding a *second* pair on this pair's folder marks
+    /// this one too, and without this the already-loaded row would keep syncing unprotected.
+    /// </summary>
+    public async Task ReloadAsync()
+    {
+        _pair = await _stateStore.GetPairAsync(_pair.Id) ?? _pair;
+        OnAllPropertiesChanged();
+    }
+
+    /// <summary>
     /// The row's status line. Deferred, like the two explorer panes' — a row saying "Up to date"
     /// sits there for as long as nothing changes, which is exactly the case that must not freeze in
     /// the old language (docs/PLAN-I18N.md §6.3).
@@ -230,13 +254,15 @@ public sealed class SyncPairViewModel : ObservableObject
     public Func<SyncPairViewModel, Task<EditSyncPairRequest?>>? RequestEditAsync { get; set; }
 
     /// <summary>
-    /// Re-runs <see cref="SyncPairValidator"/>'s shared-local-folder rule against a proposed new
-    /// direction, before <see cref="EditAsync"/> applies it — see
-    /// <see cref="SyncPairValidator.ValidateDirectionChange"/>. Returns the error message to show,
-    /// or null when the change is safe. Left null disables the check (e.g. in tests that don't
-    /// care about it), the same way every other optional delegate on this type does.
+    /// Re-runs <see cref="SyncPairValidator"/>'s shared-local-folder rule against the proposed edit,
+    /// before <see cref="EditAsync"/> applies it — see
+    /// <see cref="SyncPairValidator.ValidateEdit"/>. Takes the whole request rather than just the
+    /// direction because the mirror-deletes setting can turn a shared folder unsafe on its own.
+    /// Returns the issue to show, or null when the change is safe. Left null disables the check
+    /// (e.g. in tests that don't care about it), the same way every other optional delegate on this
+    /// type does.
     /// </summary>
-    public Func<SyncDirection, Task<SyncPairIssue?>>? ValidateDirectionChangeAsync { get; set; }
+    public Func<EditSyncPairRequest, Task<SyncPairIssue?>>? ValidateEditAsync { get; set; }
 
     public Action<string>? OnError { get; set; }
 
@@ -482,8 +508,8 @@ public sealed class SyncPairViewModel : ObservableObject
             return;
         }
 
-        var validate = ValidateDirectionChangeAsync;
-        if (validate is not null && await validate(request.Direction) is { } issue)
+        var validate = ValidateEditAsync;
+        if (validate is not null && await validate(request) is { } issue)
         {
             var described = SyncIssuePresenter.Describe(issue);
             SetStatus(described);

@@ -96,7 +96,8 @@ public sealed class SyncExecutor
         var baseline = await LoadBaselineAsync(pair, cancellationToken);
         var (local, remote, _) = await ScanBothSidesAsync(pair, baseline, cancellationToken);
         var plan = SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote,
-            baseline, _timeProvider.GetUtcNow(), mirrorDeletes: pair.MirrorDeletes);
+            baseline, _timeProvider.GetUtcNow(), mirrorDeletes: pair.MirrorDeletes,
+            protectForeignDestinationFiles: NeedsForeignFileProtection(pair));
         await _stateStore.ClearStaleFailedActionsAsync(pair.Id, plan.Actions, cancellationToken);
         return plan;
     }
@@ -129,7 +130,8 @@ public sealed class SyncExecutor
         var (local, remote, mapper) = await ScanBothSidesAsync(pair, baseline, cancellationToken);
         var now = _timeProvider.GetUtcNow();
         var plan = SyncReconciler.Reconcile(pair.Id, pair.Direction, pair.ConflictPolicy, local, remote,
-            baseline, now, mirrorDeletes: pair.MirrorDeletes);
+            baseline, now, mirrorDeletes: pair.MirrorDeletes,
+            protectForeignDestinationFiles: NeedsForeignFileProtection(pair));
 
         await _stateStore.EnqueueActionsAsync(pair.Id, plan.Actions, now, cancellationToken);
 
@@ -148,7 +150,7 @@ public sealed class SyncExecutor
         await _stateStore.EnqueueConflictsAsync(pair.Id, unresolved, now, cancellationToken);
 
         var context = new RunContext(pair, mapper, local, remote,
-            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_operations, _hasher, _remoteHashAlgorithm, _stateStore, mapper, pair.Id) : null);
+            KeepsBaseline(pair) ? new SyncBaselineWriter(_operations, _hasher, _remoteHashAlgorithm, _stateStore, mapper, pair.Id) : null);
         context.Baseline?.SeedFromScan(remote);
 
         var (failureCount, aborted) = await DrainQueueAsync(context, cancellationToken);
@@ -272,9 +274,42 @@ public sealed class SyncExecutor
         => _stateStore.LogAsync(context.Pair.Id, level, relativePath, message, _timeProvider.GetUtcNow(), cancellationToken);
 
     private async Task<IReadOnlyDictionary<string, SyncBaselineEntry>> LoadBaselineAsync(SyncPair pair, CancellationToken cancellationToken)
-        => pair.Direction == SyncDirection.TwoWay
+        => KeepsBaseline(pair)
             ? await _stateStore.GetBaselineAsync(pair.Id, cancellationToken)
             : new Dictionary<string, SyncBaselineEntry>();
+
+    /// <summary>
+    /// Whether this pair needs protecting from files it did not write — and therefore whether it
+    /// keeps a baseline, which is the only thing that can tell it which those are.
+    ///
+    /// Deliberately narrower than <see cref="SyncPair.SharesLocalFolder"/> alone: only a
+    /// <see cref="SyncDirection.RemoteToLocal"/> pair writes into the shared local folder, so only
+    /// it can be surprised by what another pair put there. An upload-only pair sharing the folder
+    /// merely reads it — the shape that was already supported before sharing was generalised — and
+    /// switching it on would start it keeping a baseline and raising conflicts about pre-existing
+    /// *remote* files, which is a different problem, not this one, and not one its owner asked to
+    /// have solved. <see cref="SyncReconciler"/> implements the protection symmetrically all the
+    /// same, since it is a pure function and the symmetry costs nothing; this is the seam that
+    /// decides where it actually applies.
+    ///
+    /// See docs/PLAN-LOCAL-SYNC.md §12.
+    /// </summary>
+    private static bool NeedsForeignFileProtection(SyncPair pair)
+        => pair.SharesLocalFolder && pair.Direction == SyncDirection.RemoteToLocal;
+
+    /// <summary>
+    /// Which pairs maintain a baseline. TwoWay always has: the whole decision table is three-way.
+    /// A one-way pair normally does not — its source side is authoritative, so there is nothing a
+    /// baseline could tell it — with the one exception
+    /// <see cref="NeedsForeignFileProtection"/> describes, which needs it to answer "did I write
+    /// this file?".
+    ///
+    /// The rows come from <see cref="SyncBaselineWriter.RecordAsync"/>, which runs after each
+    /// action this pair actually carried out — so the baseline means "what this pair touched", not
+    /// "what this pair saw", which is precisely the distinction the protection rests on.
+    /// </summary>
+    private static bool KeepsBaseline(SyncPair pair)
+        => pair.Direction == SyncDirection.TwoWay || NeedsForeignFileProtection(pair);
 
     /// <summary>
     /// Carries out one parked conflict's resolution (§5.6's manual path) and marks the row done.
@@ -306,7 +341,7 @@ public sealed class SyncExecutor
         }
 
         var context = new RunContext(pair, mapper, new Dictionary<string, NodeFingerprint>(), remote,
-            pair.Direction == SyncDirection.TwoWay ? new SyncBaselineWriter(_operations, _hasher, _remoteHashAlgorithm, _stateStore, mapper, pair.Id) : null);
+            KeepsBaseline(pair) ? new SyncBaselineWriter(_operations, _hasher, _remoteHashAlgorithm, _stateStore, mapper, pair.Id) : null);
         context.Baseline?.SeedFromScan(remote);
 
         var now = _timeProvider.GetUtcNow();

@@ -40,8 +40,10 @@ public class SyncReconcilerTests
         Dictionary<string, NodeFingerprint>? remote = null,
         Dictionary<string, SyncBaselineEntry>? baseline = null,
         ConflictPolicy policy = ConflictPolicy.Ask,
-        bool mirrorDeletes = true)
-        => SyncReconciler.Reconcile(pairId: 1, direction, policy, local ?? Empty, remote ?? Empty, baseline ?? NoBaseline, Timestamp, mirrorDeletes: mirrorDeletes);
+        bool mirrorDeletes = true,
+        bool protectForeignDestinationFiles = false)
+        => SyncReconciler.Reconcile(pairId: 1, direction, policy, local ?? Empty, remote ?? Empty, baseline ?? NoBaseline, Timestamp,
+            mirrorDeletes: mirrorDeletes, protectForeignDestinationFiles: protectForeignDestinationFiles);
 
     // ---- TwoWay: row by row from §5.2 ----
 
@@ -409,6 +411,177 @@ public class SyncReconcilerTests
         var plan = Reconcile(SyncDirection.RemoteToLocal, local: Map(FileFp("orphan.txt")));
 
         Assert.DoesNotContain(plan.Actions, a => a.Operation is SyncOperation.UploadFile or SyncOperation.TrashRemote or SyncOperation.CreateRemoteFolder);
+    }
+
+    // ---- One-way on a shared local folder: foreign destination files (§12) ----
+    //
+    // Two providers mirroring into one folder. Without protection each pair sees the other's
+    // same-named file as a stale destination and overwrites it, every run, forever. The baseline
+    // is what says "I wrote this"; a file with no row belongs to something else.
+
+    [Fact]
+    public void SharedFolder_ADifferingLocalFileThisPairNeverWrote_IsAConflictNotAnOverwrite()
+    {
+        var plan = Reconcile(SyncDirection.RemoteToLocal,
+            local: Map(FileFp("a.txt", hash: "theirs")),
+            remote: Map(FileFp("a.txt", hash: "mine")),
+            protectForeignDestinationFiles: true);
+
+        var conflict = Assert.Single(plan.Conflicts);
+        Assert.Equal(ConflictReason.ForeignDestinationFile, conflict.Reason);
+        Assert.Equal("a.txt", conflict.RelativePath);
+        // Ask is the default policy: nothing is done to the file until the user decides.
+        Assert.Empty(plan.Actions);
+    }
+
+    [Fact]
+    public void SharedFolder_AFileThisPairDidWrite_IsStillUpdatedNormally()
+    {
+        // The baseline row is the whole difference from the test above — this is the pair's own
+        // file, and a mirror that stopped updating its own files would be broken.
+        var plan = Reconcile(SyncDirection.RemoteToLocal,
+            local: Map(FileFp("a.txt", hash: "old")),
+            remote: Map(FileFp("a.txt", hash: "new")),
+            baseline: BaselineMap(BaselineOf("a.txt", false, FileFp("a.txt", hash: "old"), FileFp("a.txt", hash: "old"))),
+            protectForeignDestinationFiles: true);
+
+        Assert.Equal(SyncOperation.DownloadFile, Assert.Single(plan.Actions).Operation);
+        Assert.Empty(plan.Conflicts);
+    }
+
+    [Fact]
+    public void SharedFolder_AnIdenticalFileFromBothProviders_IsLeftAloneWithoutAConflict()
+    {
+        // Both providers hold the same bytes: there is nothing to disagree about, so this must not
+        // be reported as a conflict for the user to resolve.
+        var plan = Reconcile(SyncDirection.RemoteToLocal,
+            local: Map(FileFp("a.txt", hash: "same")),
+            remote: Map(FileFp("a.txt", hash: "same")),
+            protectForeignDestinationFiles: true);
+
+        Assert.Empty(plan.Actions);
+        Assert.Empty(plan.Conflicts);
+    }
+
+    [Fact]
+    public void SharedFolder_APathOnlyThisProviderHas_IsDownloadedWithNoConflict()
+    {
+        // Protection is about not overwriting; there is nothing at the destination to overwrite.
+        var plan = Reconcile(SyncDirection.RemoteToLocal,
+            remote: Map(FileFp("only-mine.txt")),
+            protectForeignDestinationFiles: true);
+
+        Assert.Equal(SyncOperation.DownloadFile, Assert.Single(plan.Actions).Operation);
+        Assert.Empty(plan.Conflicts);
+    }
+
+    [Fact]
+    public void SharedFolder_PreferRemote_LetsTheSourceWin_ForADownloadPair()
+    {
+        // The policy is read as a statement about sides: for a RemoteToLocal pair the remote *is*
+        // the source, so "prefer remote" means overwrite the foreign file.
+        var plan = Reconcile(SyncDirection.RemoteToLocal,
+            local: Map(FileFp("a.txt", hash: "theirs")),
+            remote: Map(FileFp("a.txt", hash: "mine")),
+            policy: ConflictPolicy.PreferRemote,
+            protectForeignDestinationFiles: true);
+
+        Assert.Equal(SyncOperation.DownloadFile, Assert.Single(plan.Actions).Operation);
+        Assert.Single(plan.Conflicts);
+    }
+
+    [Fact]
+    public void SharedFolder_PreferLocal_KeepsTheForeignFile_ForADownloadPair()
+    {
+        var plan = Reconcile(SyncDirection.RemoteToLocal,
+            local: Map(FileFp("a.txt", hash: "theirs")),
+            remote: Map(FileFp("a.txt", hash: "mine")),
+            policy: ConflictPolicy.PreferLocal,
+            protectForeignDestinationFiles: true);
+
+        Assert.Empty(plan.Actions);
+        Assert.Single(plan.Conflicts);
+    }
+
+    [Fact]
+    public void SharedFolder_KeepBoth_MovesTheForeignFileAsideAndBringsTheSourcesCopy()
+    {
+        var plan = Reconcile(SyncDirection.RemoteToLocal,
+            local: Map(FileFp("a.txt", hash: "theirs")),
+            remote: Map(FileFp("a.txt", hash: "mine")),
+            policy: ConflictPolicy.KeepBoth,
+            protectForeignDestinationFiles: true);
+
+        Assert.Contains(plan.Actions, a => a.Operation == SyncOperation.ResolveConflictKeepBoth);
+        Assert.Contains(plan.Actions, a => a.Operation == SyncOperation.DownloadFile);
+        Assert.Single(plan.Conflicts);
+    }
+
+    [Fact]
+    public void SharedFolder_ADownloadPair_StillNeverTouchesTheRemote_WhateverThePolicy()
+    {
+        // The one invariant that must survive the new conflict path: resolving it must never write
+        // to the cloud, whichever policy is set. RemoteToLocal exists precisely to rule that out.
+        foreach (var policy in Enum.GetValues<ConflictPolicy>())
+        {
+            var plan = Reconcile(SyncDirection.RemoteToLocal,
+                local: Map(FileFp("a.txt", hash: "theirs")),
+                remote: Map(FileFp("a.txt", hash: "mine")),
+                policy: policy,
+                protectForeignDestinationFiles: true);
+
+            Assert.DoesNotContain(plan.Actions, a =>
+                a.Operation is SyncOperation.UploadFile or SyncOperation.TrashRemote or SyncOperation.CreateRemoteFolder);
+        }
+    }
+
+    [Fact]
+    public void SharedFolder_AnUploadPair_ProtectsTheRemoteSideTheSameWay_AndNeverTouchesLocal()
+    {
+        // Symmetric: for LocalToRemote the destination is the remote, so a remote file this pair
+        // never uploaded is the foreign one. "Prefer local" is the source here, hence the upload.
+        //
+        // The reconciler treats both directions alike because it costs nothing to; note that
+        // SyncExecutor.NeedsForeignFileProtection currently only switches this on for download
+        // pairs, since only they write into the shared *local* folder. This pins the mechanism, so
+        // that widening it later is a one-line change with its behavior already covered.
+        var plan = Reconcile(SyncDirection.LocalToRemote,
+            local: Map(FileFp("a.txt", hash: "mine")),
+            remote: Map(FileFp("a.txt", hash: "theirs")),
+            policy: ConflictPolicy.PreferLocal,
+            protectForeignDestinationFiles: true);
+
+        Assert.Equal(SyncOperation.UploadFile, Assert.Single(plan.Actions).Operation);
+        Assert.Single(plan.Conflicts);
+        Assert.DoesNotContain(plan.Actions, a => a.Operation is SyncOperation.DownloadFile or SyncOperation.DeleteLocal);
+    }
+
+    [Fact]
+    public void WithoutTheFlag_AForeignFileIsOverwrittenExactlyAsBefore()
+    {
+        // The regression guard for every pair that owns its folder alone: protection is opt-in per
+        // pair, and a pair without it must behave byte for byte as it did before the flag existed.
+        var plan = Reconcile(SyncDirection.RemoteToLocal,
+            local: Map(FileFp("a.txt", hash: "theirs")),
+            remote: Map(FileFp("a.txt", hash: "mine")),
+            protectForeignDestinationFiles: false);
+
+        Assert.Equal(SyncOperation.DownloadFile, Assert.Single(plan.Actions).Operation);
+        Assert.Empty(plan.Conflicts);
+    }
+
+    [Fact]
+    public void SharedFolder_DeletesAreStillGovernedByMirrorDeletesAlone()
+    {
+        // Protection is about overwriting, not deleting: with mirrorDeletes off a source-less
+        // destination file is left alone and is not a conflict either.
+        var plan = Reconcile(SyncDirection.RemoteToLocal,
+            local: Map(FileFp("theirs.txt")),
+            mirrorDeletes: false,
+            protectForeignDestinationFiles: true);
+
+        Assert.Empty(plan.Actions);
+        Assert.Empty(plan.Conflicts);
     }
 
     // ---- One-way: LocalToRemote (mirror image) ----

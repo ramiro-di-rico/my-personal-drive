@@ -805,6 +805,24 @@ In one-way modes the table collapses: `RemoteToLocal` only emits `Download*`/`De
 never touches the remote side; diverging local changes are **overwritten** (with a prior warning
 in the preview).
 
+Two per-pair settings carve exceptions out of that collapse, both off by default so a pair with
+neither behaves exactly as described above:
+
+- **`MirrorDeletes = false`** drops the `DeleteLocal` half: a destination-only item is left alone
+  instead of trashed, making the pair an additive copy.
+- **`SharesLocalFolder = true`** drops the *authoritative* half, for one case only. A destination
+  file that differs from the source **and has no baseline row for this pair** is not overwritten;
+  it raises `ConflictReason.ForeignDestinationFile` and is resolved by the pair's
+  `ConflictPolicy`. This is the only circumstance in which a one-way pair consults a baseline —
+  and the only reason it keeps one (§12). The baseline answers exactly one question here, "did I
+  write this?", so the source stays authoritative for everything the pair does own.
+
+  The policy is read as a statement about *sides*, not source and destination: `PreferLocal` keeps
+  the local file whether local is the pair's source or its destination. `KeepBoth` moves the
+  foreign file aside and lets the source's copy take the original path. `Ask` leaves the file
+  untouched and records the conflict. No branch ever writes to the pair's source side, so a
+  `RemoteToLocal` pair still cannot touch the cloud.
+
 ### 5.3 Plan execution order
 
 Not optional; the order matters:
@@ -1110,17 +1128,57 @@ New **"Sync"** tab next to the current browser (or a side panel).
 Implemented in `SyncPairValidator` (pure, so the rules are covered exhaustively without IO):
 
 - [x] It's not nested inside (nor contains) another existing pair — **on both sides**, see below.
+- [x] If it is the *same* local folder as an existing pair, the combination is one of the shapes
+      that can share it safely — see below.
 - [x] It's not `$HOME` or `/`, and the remote path is absolute.
 - [x] The local folder exists and is writable — `LocalFolderInspector`, checked by probing.
 - [x] Warn if it already contains many files, for directions that would upload them.
 - [x] Sufficient free space — evaluated at **preview** time, not here; see the F4 entry for why.
 
-**Why overlap is a hard error rather than a warning**, on each side:
+**Why *nested* local folders are a hard error rather than a warning:**
 
-- **Overlapping local folders are destructive.** With `~/A ↔ /my-files/X` and
-  `~/A/Sub ↔ /my-files/Y`, the first pair's scanner walks `~/A/Sub` as well; its own remote root has
-  no `Sub`, so it reads the folder as deleted remotely and moves it to the local trash — which the
-  second pair downloads again, forever.
+- **They are destructive.** With `~/A ↔ /my-files/X` and `~/A/Sub ↔ /my-files/Y`, the first pair's
+  scanner walks `~/A/Sub` as well; its own remote root has no `Sub`, so it reads the folder as
+  deleted remotely and moves it to the local trash — which the second pair downloads again,
+  forever. Note this is a property of the *scan*, not of any one file, so none of the per-file
+  protection below addresses it. Nesting stays refused, with the sole exception of two
+  upload-only pairs, which write nothing locally and so merely upload the inner folder twice.
+
+**Sharing the exact same local folder is supported**, which is what makes "keep this folder on two
+providers" possible. `SyncPairValidator.CheckSharable` decides, applied to each side
+independently, and two conditions close the two distinct ways it could destroy data:
+
+1. **No two-way pair.** Its local side is authoritative too, so it would upload the other
+   provider's files into its own remote as if they were the user's, and answer their later
+   disappearance with a remote trash. The pair genuinely cannot tell the difference, so there is
+   no per-file fix.
+2. **Two download pairs must both be additive** (`MirrorDeletes = false`). Everything the other
+   provider put in the folder is missing from this pair's remote, and a mirroring pair deletes
+   exactly that — the whole other provider's contents, on its first run.
+
+Condition 2 is deliberately conditioned on there being *two* writers. An upload-only pair never
+writes locally, so any number of them may share a folder, one may sit beside a download pair
+("fetch from here, replicate to those"), and that download pair may still mirror strictly: with
+nothing else writing there, its mirror only governs the user's own files, exactly as when it owned
+the folder alone.
+
+What the validator does **not** decide is what happens when two pairs disagree about a same-named
+file. Left alone, each would see the other's file as a stale destination and overwrite it on every
+run, forever, losing a version each time. That is handled per file at sync time: a pair sharing a
+folder is marked `SharesLocalFolder`, which makes `SyncExecutor` keep a baseline for it even though
+it is one-way, and makes `SyncReconciler` raise `ForeignDestinationFile` instead of overwriting
+(§5.2).
+
+`SyncExecutor.NeedsForeignFileProtection` narrows that to **download pairs only**: they are the
+only ones that write into the shared local folder, so only they can be surprised by what another
+pair left there. An upload-only pair sharing the folder just reads it — the shape that already
+worked before sharing was generalised — and switching protection on for it would make it keep a
+baseline and raise conflicts about pre-existing *remote* files, which is a separate problem and a
+silent behavior change for every fan-out pair already configured. The reconciler implements the
+protection symmetrically anyway, since it is a pure function and the symmetry is free; the executor
+is the seam that decides where it applies. The flag is maintained by `SyncPanelViewModel` as pairs are added and removed — not derived
+at sync time, because the executor only ever sees one account's store while a shared folder is
+shared *across* accounts by definition.
 - **Overlapping remote folders break echo suppression**, which is keyed per pair
   (`SyncEchoSuppressor`). Pair A cannot know pair B just trashed a node, so it sees it still listed
   (Appendix A #15's stale listing), reads that as "new remotely", and downloads back what the other

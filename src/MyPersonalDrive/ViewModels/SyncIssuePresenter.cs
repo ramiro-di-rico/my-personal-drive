@@ -20,11 +20,11 @@ public static class SyncIssuePresenter
         SyncPairIssueKind.LocalPathIsHomeOrRoot => StringKeys.Issue.LocalPathHomeOrRoot,
         SyncPairIssueKind.LocalPathIsAFile => StringKeys.Issue.LocalPathIsAFile,
         SyncPairIssueKind.LocalPathNotWritable => StringKeys.Issue.LocalPathNotWritable,
-        SyncPairIssueKind.LocalAlreadySynced => StringKeys.Issue.LocalAlreadySynced,
         SyncPairIssueKind.LocalOverlaps => StringKeys.Issue.LocalOverlaps,
         SyncPairIssueKind.RemoteAlreadySynced => StringKeys.Issue.RemoteAlreadySynced,
         SyncPairIssueKind.RemoteOverlaps => StringKeys.Issue.RemoteOverlaps,
-        SyncPairIssueKind.DirectionUnsafeOverlap => StringKeys.Issue.DirectionUnsafeOverlap,
+        SyncPairIssueKind.SharedFolderNeedsOneWay => StringKeys.Issue.SharedFolderNeedsOneWay,
+        SyncPairIssueKind.SharedFolderNeedsAdditive => StringKeys.Issue.SharedFolderNeedsAdditive,
         _ => StringKeys.Issue.FreeSpace,
     };
 }

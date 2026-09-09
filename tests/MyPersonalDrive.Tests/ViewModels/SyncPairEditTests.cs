@@ -101,9 +101,9 @@ public class SyncPairEditTests : IDisposable
     }
 
     /// <summary>
-    /// docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2: switching a pair to a direction that would
-    /// start writing into a local folder another pair already uploads from (SyncPairValidator's
-    /// real, correct refusal) looked indistinguishable from a silently-failed save — the dialog
+    /// docs/PLAN-CLOUD-PROVIDERS.md P10 Appendix A2: switching a pair to a direction that is unsafe
+    /// for a local folder it shares with another pair (SyncPairValidator's real, correct refusal)
+    /// looked indistinguishable from a silently-failed save — the dialog
     /// closed as if it worked, and only a StatusMessage line, easy to miss, actually explained why
     /// nothing changed. This pins down that the rejection also reaches RequestAlertAsync.
     /// </summary>
@@ -115,9 +115,10 @@ public class SyncPairEditTests : IDisposable
         var store = new SyncStateStore(_dbPath);
         var provider = new ProtonDriveProvider(new ProtonDriveService(cli));
         var executor = new SyncExecutor(provider.Operations, store, new LocalScanner(), new RemoteScanner(provider));
-        // Two pairs sharing one local folder, both upload-only — the one safe overlap shape
-        // (SyncPairValidator.FindOverlap's own doc comment) — so switching either to TwoWay would
-        // let it start writing into what the other uploads.
+        // Two pairs sharing one local folder, both upload-only. Sharing a folder is supported now
+        // (SyncPairValidator.CheckSharable), but never for a two-way pair: switching either of
+        // these to TwoWay would let it upload the other provider's files as if they were the
+        // user's, and trash them from its own cloud when they go.
         await store.CreatePairAsync(RemoteRoot, _localRoot, SyncDirection.LocalToRemote, ConflictPolicy.Ask);
         await store.CreatePairAsync("/my-files/Other", _localRoot, SyncDirection.LocalToRemote, ConflictPolicy.Ask);
 
@@ -131,7 +132,7 @@ public class SyncPairEditTests : IDisposable
         await row.EditCommand.ExecuteAsync();
 
         Assert.Equal(SyncDirection.LocalToRemote, row.Direction);
-        Assert.Contains("is also synced (upload only)", panel.StatusMessage);
-        Assert.Contains(alerts, message => message.Contains("is also synced (upload only)"));
+        Assert.Contains("only if neither syncs both ways", panel.StatusMessage);
+        Assert.Contains(alerts, message => message.Contains("only if neither syncs both ways", StringComparison.Ordinal));
     }
 }

@@ -26,7 +26,11 @@ A recursive scan costs ~3.5 s per subfolder, so it is never automatic. See
 
 Synchronization with a local directory is **present** as of commit `87e91d6`: sync pairs
 (download-only, upload-only, or two-way) that run on their own, with the on/off choice persisted
-across restarts. See [PLAN-LOCAL-SYNC.md](PLAN-LOCAL-SYNC.md) for the design.
+across restarts. Several providers may share one local folder, in either direction, provided no
+pair sharing it is two-way and no two download pairs sharing it mirror deletes — a shared pair is
+marked `SyncPair.SharesLocalFolder`, which is what makes it keep a baseline despite being one-way
+and refuse to overwrite a file it did not write (PLAN-LOCAL-SYNC.md §5.2/§12).
+See [PLAN-LOCAL-SYNC.md](PLAN-LOCAL-SYNC.md) for the design.
 
 Proton is currently the only supported provider, but the app no longer talks to
 `ProtonDriveService` directly anywhere outside `Services/Providers/Proton/` — every consumer goes

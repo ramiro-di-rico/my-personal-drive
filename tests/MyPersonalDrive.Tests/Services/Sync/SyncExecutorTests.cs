@@ -63,6 +63,119 @@ public class SyncExecutorTests : IDisposable
     private async Task<SyncPair> CreatePairAsync(SyncStateStore store, SyncDirection direction = SyncDirection.RemoteToLocal, ConflictPolicy policy = ConflictPolicy.Ask)
         => await store.CreatePairAsync(RemoteRoot, _localRoot, direction, policy);
 
+    // ---------------------------------------------------------------- shared local folder (§12)
+
+    [Fact]
+    public async Task ASharedOneWayPair_KeepsABaseline_WhereAnUnsharedOneDoesNot()
+    {
+        // The link between the flag and the engine. A one-way pair normally records nothing, so if
+        // KeepsBaseline missed the shared case the reconciler would find no baseline row for its own
+        // downloads, treat every one of them as foreign on the next run, and flag conflicts about
+        // files it had just written itself. That failure is invisible in the reconciler's own tests,
+        // which are handed a baseline directly.
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath(RemoteRoot, $"[{FileEntry("a.txt", "hello")}]");
+        executor.EnqueueOutput(args =>
+        {
+            File.WriteAllText(Path.Combine(args[3], "a.txt"), "hello");
+            return "";
+        });
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await stateStore.CreatePairAsync(RemoteRoot, _localRoot, SyncDirection.RemoteToLocal, ConflictPolicy.Ask,
+            mirrorDeletes: false, sharesLocalFolder: true);
+        var provider = new ProtonDriveProvider(new ProtonDriveService(executor));
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
+
+        await sut.RunAsync(pair);
+
+        var baseline = await stateStore.GetBaselineAsync(pair.Id);
+        Assert.True(baseline.ContainsKey("a.txt"), "A shared one-way pair recorded no baseline row for the file it downloaded.");
+    }
+
+    [Fact]
+    public async Task AnUnsharedOneWayPair_StillRecordsNoBaseline()
+    {
+        // The other half of the same guarantee: the flag is opt-in, and a pair that owns its folder
+        // alone must not start paying for a baseline it has no use for.
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath(RemoteRoot, $"[{FileEntry("a.txt", "hello")}]");
+        executor.EnqueueOutput(args =>
+        {
+            File.WriteAllText(Path.Combine(args[3], "a.txt"), "hello");
+            return "";
+        });
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore);
+        var provider = new ProtonDriveProvider(new ProtonDriveService(executor));
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
+
+        await sut.RunAsync(pair);
+
+        Assert.Empty(await stateStore.GetBaselineAsync(pair.Id));
+    }
+
+    [Fact]
+    public async Task ASharedUploadOnlyPair_KeepsNoBaseline_BecauseItWritesNothingLocally()
+    {
+        // The deliberate asymmetry (SyncExecutor.NeedsForeignFileProtection). Uploading one folder
+        // to several providers was already supported and is unaffected by sharing: those pairs only
+        // read the folder. Switching protection on for them would start them keeping a baseline and
+        // raising conflicts about pre-existing remote files — a different problem, and a silent
+        // behavior change for every fan-out pair that already exists.
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath(RemoteRoot, "[]");
+        for (var i = 0; i < 6; i++)
+        {
+            executor.EnqueueOutput(_ => "");
+        }
+
+        WriteSettledLocalFile("a.txt", "hello");
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await stateStore.CreatePairAsync(RemoteRoot, _localRoot, SyncDirection.LocalToRemote, ConflictPolicy.Ask,
+            mirrorDeletes: false, sharesLocalFolder: true);
+        var provider = new ProtonDriveProvider(new ProtonDriveService(executor));
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
+
+        var plan = await sut.RunAsync(pair);
+
+        // Assert the upload actually happened first: an empty baseline proves nothing if the run
+        // simply had nothing to do, or failed before recording anything.
+        Assert.Equal(1, plan.Stats.FilesToUpload);
+        Assert.Contains(executor.Calls, c => c.Arguments is ["filesystem", "upload", ..]);
+        Assert.Empty(await stateStore.GetBaselineAsync(pair.Id));
+    }
+
+    [Fact]
+    public async Task ASharedPair_DoesNotReDownloadItsOwnFileOnASecondRun()
+    {
+        // The end-to-end shape of the whole feature: run once, then run again with the same remote.
+        // If the baseline round-trip were broken the pair would either re-download its own file or
+        // raise a conflict about it — the resurrection-style bug the protection is meant to prevent,
+        // aimed at itself.
+        var executor = new FakeCliExecutor();
+        executor.RespondForPath(RemoteRoot, $"[{FileEntry("a.txt", "hello")}]");
+        executor.EnqueueOutput(args =>
+        {
+            File.WriteAllText(Path.Combine(args[3], "a.txt"), "hello");
+            return "";
+        });
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await stateStore.CreatePairAsync(RemoteRoot, _localRoot, SyncDirection.RemoteToLocal, ConflictPolicy.Ask,
+            mirrorDeletes: false, sharesLocalFolder: true);
+        var provider = new ProtonDriveProvider(new ProtonDriveService(executor));
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
+
+        await sut.RunAsync(pair);
+        var second = await sut.RunAsync(pair);
+
+        Assert.Equal(0, second.Stats.FilesToDownload);
+        Assert.Empty(second.Conflicts);
+    }
+
     /// <summary>
     /// Writes a local file with an mtime old enough that <see cref="LocalScanner"/> doesn't skip
     /// it as "possibly still being written" (its 2s settling guard).

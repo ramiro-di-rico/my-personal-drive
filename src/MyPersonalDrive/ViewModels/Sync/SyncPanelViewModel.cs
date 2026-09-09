@@ -415,9 +415,9 @@ public sealed class SyncPanelViewModel : ObservableObject
             RequestConflictResolutionsAsync = RequestConflictResolutionsAsync,
             RequestFailureReviewAsync = RequestFailureReviewAsync,
             RequestEditAsync = RequestEditPairAsync,
-            ValidateDirectionChangeAsync = async newDirection
-                => SyncPairValidator.ValidateDirectionChange(pair, newDirection, await GetAllPairsAcrossAccountsAsync()),
-            // A rejected edit (SyncPairValidator.ValidateDirectionChange) routes through here —
+            ValidateEditAsync = async request
+                => SyncPairValidator.ValidateEdit(pair, request.Direction, request.MirrorDeletes, await GetAllPairsAcrossAccountsAsync()),
+            // A rejected edit (SyncPairValidator.ValidateEdit) routes through here —
             // fire-and-forget is fine, OnError itself is a synchronous Action<string>.
             OnError = message => _ = AlertAsync(message),
         };
@@ -432,6 +432,71 @@ public sealed class SyncPanelViewModel : ObservableObject
     {
         viewModel.PropertyChanged -= OnPairPropertyChanged;
         Pairs.Remove(viewModel);
+
+        // Deleting one of two pairs that shared a folder leaves the survivor owning it alone, and
+        // it should go back to plain one-way behavior rather than keeping a baseline and flagging
+        // conflicts forever. Fire-and-forget with its own error routing: the removal itself already
+        // succeeded, and a failure to clear a now-stale flag is not worth undoing it over — the next
+        // add or remove recomputes from scratch anyway.
+        _ = RefreshSharedLocalFolderFlagsSafelyAsync();
+    }
+
+    private async Task RefreshSharedLocalFolderFlagsSafelyAsync()
+    {
+        try
+        {
+            await RefreshSharedLocalFolderFlagsAsync();
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException)
+        {
+            SetStatus(StringKeys.Sync.SharedFolderFlagRefreshFailed, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Recomputes <see cref="SyncPair.SharesLocalFolder"/> for every pair of every account, and
+    /// writes back only the ones whose value actually changed.
+    ///
+    /// Derived from the full set rather than adjusted incrementally, and deliberately idempotent:
+    /// it is the flag's single definition, so running it after any change — and it is run after
+    /// every add and every remove — also repairs a value left stale by an interrupted earlier run.
+    /// Two pairs sharing a folder is decided by <see cref="SyncPairValidator.NormalizeLocal"/>, the
+    /// same comparison the validator refuses unsafe combinations with; a second, looser or stricter
+    /// notion of "same folder" here would mark the wrong pairs.
+    /// </summary>
+    private async Task RefreshSharedLocalFolderFlagsAsync()
+    {
+        var byLocalPath = new Dictionary<string, int>(StringComparer.Ordinal);
+        var loaded = new List<(SyncStateStore Store, SyncPair Pair, string LocalPath)>();
+
+        foreach (var slot in _slots)
+        {
+            foreach (var pair in await slot.StateStore.GetPairsAsync())
+            {
+                var normalized = SyncPairValidator.NormalizeLocal(pair.LocalPath);
+                byLocalPath[normalized] = byLocalPath.GetValueOrDefault(normalized) + 1;
+                loaded.Add((slot.StateStore, pair, normalized));
+            }
+        }
+
+        var changed = new List<int>();
+        foreach (var (store, pair, normalized) in loaded)
+        {
+            var shares = byLocalPath[normalized] > 1;
+            if (shares != pair.SharesLocalFolder)
+            {
+                await store.SetPairSharesLocalFolderAsync(pair.Id, shares);
+                changed.Add(pair.Id);
+            }
+        }
+
+        // The rows hand their SyncPair to the executor by value, so a row already on screen would
+        // otherwise keep syncing with the old flag until the app restarted — unprotected, in the
+        // case that matters. Only the ones that actually changed are re-read.
+        foreach (var row in Pairs.Where(row => changed.Contains(row.Id)).ToList())
+        {
+            await row.ReloadAsync();
+        }
     }
 
     private void OnPairPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -553,7 +618,7 @@ public sealed class SyncPanelViewModel : ObservableObject
             var targetSlot = ActiveSlot;
             var sameAccountPairs = await targetSlot.StateStore.GetPairsAsync();
             var allAccountPairs = await GetAllPairsAcrossAccountsAsync();
-            var issue = SyncPairValidator.Validate(request.RemotePath, request.LocalPath, request.Direction, sameAccountPairs, allAccountPairs)
+            var issue = SyncPairValidator.Validate(request.RemotePath, request.LocalPath, request.Direction, sameAccountPairs, allAccountPairs, request.MirrorDeletes)
                         ?? LocalFolderInspector.CheckWritable(request.LocalPath);
             if (issue is not null)
             {
@@ -568,6 +633,13 @@ public sealed class SyncPanelViewModel : ObservableObject
             }
 
             var pair = await targetSlot.StateStore.CreatePairAsync(request.RemotePath, request.LocalPath, request.Direction, request.ConflictPolicy, mirrorDeletes: request.MirrorDeletes);
+
+            // Marks both this pair and the one it now shares a folder with. Done after the insert
+            // rather than passed into it so there is one implementation of the rule instead of two,
+            // and the pair is re-read because the flag decides how the engine treats it from its
+            // very first run (SyncPair.SharesLocalFolder).
+            await RefreshSharedLocalFolderFlagsAsync();
+            pair = await targetSlot.StateStore.GetPairAsync(pair.Id) ?? pair;
             AddPairViewModel(pair, targetSlot);
             SetStatus(StringKeys.Sync.AddPairAdded, pair.RemotePath, DirectionArrow(pair.Direction), pair.LocalPath);
         }

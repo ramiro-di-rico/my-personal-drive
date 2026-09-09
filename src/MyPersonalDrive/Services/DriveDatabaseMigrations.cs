@@ -236,5 +236,15 @@ public static class DriveDatabaseMigrations
         new SqliteMigration(7, """
             ALTER TABLE SyncPairs ADD COLUMN MirrorDeletes INTEGER NOT NULL DEFAULT 1;
             """),
+        // Marks a pair whose local folder another pair — usually on another account, i.e. another
+        // provider — is also configured against (docs/PLAN-LOCAL-SYNC.md §12). Maintained by
+        // ViewModels.Sync.SyncPanelViewModel as pairs come and go, because a shared folder is
+        // shared across accounts and Services.Sync.SyncExecutor only ever sees one account's store.
+        // Defaults to 0, so every existing pair keeps behaving exactly as it did: the flag is what
+        // turns on both the one-way baseline and the refusal to overwrite a foreign destination
+        // file, and neither applies to a pair that owns its folder alone.
+        new SqliteMigration(8, """
+            ALTER TABLE SyncPairs ADD COLUMN SharesLocalFolder INTEGER NOT NULL DEFAULT 0;
+            """),
     ];
 }

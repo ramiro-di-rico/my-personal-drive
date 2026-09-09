@@ -16,17 +16,17 @@ public enum SyncPairIssueKind
     LocalPathIsAFile,
     LocalPathNotWritable,
 
-    /// <summary>The exact same local folder is already paired.</summary>
-    LocalAlreadySynced,
-
-    /// <summary>A different local folder, but one nests inside the other.</summary>
+    /// <summary>A different local folder, but one nests inside the other. Sharing the *same* folder is allowed for the shapes <see cref="SharedFolderNeedsOneWay"/>/<see cref="SharedFolderNeedsAdditive"/> describe, so this is only ever nesting.</summary>
     LocalOverlaps,
 
     RemoteAlreadySynced,
     RemoteOverlaps,
 
-    /// <summary>The requested direction would start writing into a folder another pair uploads from.</summary>
-    DirectionUnsafeOverlap,
+    /// <summary>Sharing a local folder is only safe one-way: a two-way pair would upload the other provider's files and delete against its own remote.</summary>
+    SharedFolderNeedsOneWay,
+
+    /// <summary>A download pair sharing a local folder has to be additive — mirroring deletes would delete whatever the other provider put there.</summary>
+    SharedFolderNeedsAdditive,
 
     /// <summary>Not a refusal — a warning shown alongside a preview.</summary>
     NotEnoughFreeSpace,

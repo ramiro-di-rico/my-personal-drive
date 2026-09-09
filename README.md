@@ -66,10 +66,18 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
   automatically with the on/off choice persisted across restarts. Every provider syncs
   independently — pausing one doesn't affect the others. A one-way pair can mirror the destination
   exactly (deleting whatever isn't at the source, the historical behavior) or, unchecked, sync
-  additively — never deleting files the destination already had. The same local folder can be
-  synced to several providers at once as long as every pair sharing it is upload-only, since none
-  of them ever writes back to that folder — any other combination (a pair that downloads or
-  mirrors into a shared folder) is rejected
+  additively — never deleting files the destination already had
+- Share one local folder between several providers, in either direction. Uploading it to several
+  providers at once works with no conditions, since none of those pairs ever writes back to the
+  folder. Downloading into a shared folder works too, as long as every download pair sharing it is
+  additive: otherwise the first run would trash everything the other provider put there, all of
+  which is missing from this one's cloud. Mixing directions is allowed — fetch from one provider
+  and replicate to others. Two-way pairs can never share a folder: a two-way pair would upload the
+  other provider's files as if they were yours, then delete them from its own cloud when they go.
+  When two providers hold a different file under the same name, the second pair does **not**
+  overwrite the first one's copy — it reports a conflict and applies that pair's conflict policy,
+  so neither version is lost. Nested folders (one pair inside another's) stay rejected: that
+  breaks at the folder-scan level, which no per-file rule can fix
 - Right-click a row in either pane for a context menu: copy its path, upload into or download a
   cloud folder, start a sync pair pre-filled with that path, pause/resume/run-now an existing pair,
   rename or delete a local item, and view its properties. Folders with an active sync pair show a

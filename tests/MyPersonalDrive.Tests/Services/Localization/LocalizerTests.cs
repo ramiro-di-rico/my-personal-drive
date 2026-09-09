@@ -265,10 +265,11 @@ public class IssuePresenterTests
 
     [Fact]
     public void TheReasonsArgumentsReachTheSentence()
-        => Assert.Equal(
-            "'/home/me/Docs' is already synced with '/my-files/Docs'.",
+        => Assert.StartsWith(
+            "That local folder overlaps '/home/me/Docs', which is already synced with '/my-files/Docs'.",
             SyncIssuePresenter.Describe(
-                new SyncPairIssue(SyncPairIssueKind.LocalAlreadySynced, "/home/me/Docs", "/my-files/Docs")).Render());
+                new SyncPairIssue(SyncPairIssueKind.LocalOverlaps, "/home/me/Docs", "/my-files/Docs")).Render(),
+            StringComparison.Ordinal);
 
     [Fact]
     public void EveryDriveErrorKindHasASentence()

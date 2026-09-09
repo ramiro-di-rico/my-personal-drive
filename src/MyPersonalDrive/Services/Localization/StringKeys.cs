@@ -396,6 +396,7 @@ public static class StringKeys
         public const string AddPairAdded = "sync.addpair.added";
         public const string AddPairCancelled = "sync.addpair.cancelled";
         public const string AddPairDuplicate = "sync.addpair.duplicate";
+        public const string SharedFolderFlagRefreshFailed = "sync.sharedfolder.refreshfailed";
         public const string AddPairUnavailable = "sync.addpair.unavailable";
         public const string Analyzing = "sync.analyzing";
         public const string AutoSyncLabel = "sync.autosync.label";
@@ -763,14 +764,14 @@ public static class StringKeys
     /// <summary>Why a sync pair was refused. The validator names the reason; these word it (docs/PLAN-I18N.md §9).</summary>
     public static class Issue
     {
-        public const string DirectionUnsafeOverlap = "issue.direction.unsafeoverlap";
         public const string FreeSpace = "issue.freespace";
-        public const string LocalAlreadySynced = "issue.local.alreadysynced";
         public const string LocalOverlaps = "issue.local.overlaps";
         public const string LocalPathHomeOrRoot = "issue.localpath.homeorroot";
         public const string LocalPathIsAFile = "issue.localpath.isafile";
         public const string LocalPathMissing = "issue.localpath.missing";
         public const string LocalPathNotWritable = "issue.localpath.notwritable";
+        public const string SharedFolderNeedsAdditive = "issue.sharedfolder.needsadditive";
+        public const string SharedFolderNeedsOneWay = "issue.sharedfolder.needsoneway";
         public const string RemoteAlreadySynced = "issue.remote.alreadysynced";
         public const string RemoteOverlaps = "issue.remote.overlaps";
         public const string RemotePathNotAbsolute = "issue.remotepath.notabsolute";

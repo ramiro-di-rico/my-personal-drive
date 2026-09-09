@@ -31,7 +31,8 @@ public static class SyncReconciler
         IReadOnlyDictionary<string, SyncBaselineEntry> baseline,
         DateTimeOffset conflictTimestamp,
         TimeSpan? mtimeTolerance = null,
-        bool mirrorDeletes = true)
+        bool mirrorDeletes = true,
+        bool protectForeignDestinationFiles = false)
     {
         var tolerance = mtimeTolerance ?? DefaultMtimeTolerance;
         var actions = new List<SyncAction>();
@@ -71,21 +72,27 @@ public static class SyncReconciler
             switch (direction)
             {
                 case SyncDirection.RemoteToLocal:
-                    ReconcileOneWay(path, isFolder, source: r, destination: l, tolerance,
+                    ReconcileOneWay(path, isFolder, source: r, destination: l, baseline: b, tolerance,
                         createDestinationFolder: SyncOperation.CreateLocalFolder,
                         transferToDestination: SyncOperation.DownloadFile,
                         deleteDestination: SyncOperation.DeleteLocal,
                         mirrorDeletes,
-                        actions);
+                        protectForeignDestinationFiles,
+                        destinationIsLocal: true,
+                        conflictPolicy, conflictTimestamp,
+                        actions, conflicts);
                     break;
 
                 case SyncDirection.LocalToRemote:
-                    ReconcileOneWay(path, isFolder, source: l, destination: r, tolerance,
+                    ReconcileOneWay(path, isFolder, source: l, destination: r, baseline: b, tolerance,
                         createDestinationFolder: SyncOperation.CreateRemoteFolder,
                         transferToDestination: SyncOperation.UploadFile,
                         deleteDestination: SyncOperation.TrashRemote,
                         mirrorDeletes,
-                        actions);
+                        protectForeignDestinationFiles,
+                        destinationIsLocal: false,
+                        conflictPolicy, conflictTimestamp,
+                        actions, conflicts);
                     break;
 
                 default:
@@ -267,12 +274,30 @@ public static class SyncReconciler
     /// additive one-way copy (docs/INTERFACE_IMPROVEMENT_PLAN.md — "keep what's already there").
     /// Creates and transfers are unaffected either way; the source side is still authoritative
     /// for anything it actually has an opinion about.
+    ///
+    /// <paramref name="protectForeignDestinationFiles"/> is the opt-out from the *authoritative*
+    /// half, and the one thing that makes two providers able to mirror into one local folder
+    /// (docs/PLAN-LOCAL-SYNC.md §12). When set — only for a pair with
+    /// <see cref="SyncPair.SharesLocalFolder"/> — a destination file this pair has no baseline row
+    /// for is not overwritten; it raises <see cref="ConflictReason.ForeignDestinationFile"/>
+    /// instead. Without it, two pairs sharing a folder overwrite each other's copy of any
+    /// same-named file on every single run, each one seeing the other's file as a stale
+    /// destination.
+    ///
+    /// This is the one place a one-way pair consults the baseline, and the reason such a pair keeps
+    /// one at all. The baseline answers exactly one question here — "did I write this?" — and
+    /// nothing else about it is read: the source side stays authoritative for everything this pair
+    /// does own.
     /// </summary>
     private static void ReconcileOneWay(
-        string path, bool isFolder, NodeFingerprint? source, NodeFingerprint? destination, TimeSpan tolerance,
+        string path, bool isFolder, NodeFingerprint? source, NodeFingerprint? destination,
+        SyncBaselineEntry? baseline, TimeSpan tolerance,
         SyncOperation createDestinationFolder, SyncOperation transferToDestination, SyncOperation deleteDestination,
         bool mirrorDeletes,
-        List<SyncAction> actions)
+        bool protectForeignDestinationFiles,
+        bool destinationIsLocal,
+        ConflictPolicy conflictPolicy, DateTimeOffset conflictTimestamp,
+        List<SyncAction> actions, List<SyncConflict> conflicts)
     {
         if (source is null)
         {
@@ -294,10 +319,78 @@ public static class SyncReconciler
             return;
         }
 
-        if (destination is null || IsChanged(source, destination, tolerance))
+        if (destination is null)
         {
             actions.Add(new SyncAction(transferToDestination, path, null, source.Size, PriorityFor(transferToDestination, path)));
+            return;
         }
+
+        if (!IsChanged(source, destination, tolerance))
+        {
+            return;
+        }
+
+        // The destination differs. Normally the source wins outright; on a shared folder, a file
+        // with no baseline row was put there by something other than this pair, and "differs from
+        // my source" is not evidence it is stale.
+        if (protectForeignDestinationFiles && baseline is null)
+        {
+            ResolveOneWayConflict(
+                path, source, destination, destinationIsLocal, transferToDestination,
+                conflictPolicy, conflictTimestamp, actions, conflicts);
+            return;
+        }
+
+        actions.Add(new SyncAction(transferToDestination, path, null, source.Size, PriorityFor(transferToDestination, path)));
+    }
+
+    /// <summary>
+    /// Resolves a <see cref="ConflictReason.ForeignDestinationFile"/> without ever writing to the
+    /// pair's source side — which is what separates this from <see cref="ResolveConflict"/>, whose
+    /// <see cref="ConflictPolicy.PreferLocal"/> branch uploads. A one-way pair that touched its
+    /// source would stop being one-way, and for <see cref="SyncDirection.RemoteToLocal"/> that
+    /// means writing to the cloud, which is the one thing that direction exists to rule out.
+    ///
+    /// So the policy is read as a statement about sides, not about source and destination:
+    /// "prefer local" keeps the local file whether local is this pair's source or its destination.
+    /// </summary>
+    private static void ResolveOneWayConflict(
+        string path, NodeFingerprint source, NodeFingerprint destination, bool destinationIsLocal,
+        SyncOperation transferToDestination,
+        ConflictPolicy policy, DateTimeOffset conflictTimestamp,
+        List<SyncAction> actions, List<SyncConflict> conflicts)
+    {
+        conflicts.Add(new SyncConflict(path, ConflictReason.ForeignDestinationFile));
+
+        var sourceWins = policy switch
+        {
+            // Destination local means the source is the remote, and vice versa.
+            ConflictPolicy.PreferLocal => !destinationIsLocal,
+            ConflictPolicy.PreferRemote => destinationIsLocal,
+            _ => false,
+        };
+
+        if (sourceWins)
+        {
+            actions.Add(new SyncAction(transferToDestination, path, null, source.Size, PriorityFor(transferToDestination, path)));
+            return;
+        }
+
+        if (policy == ConflictPolicy.KeepBoth)
+        {
+            // The foreign file is moved aside under a conflict name and the source's copy takes the
+            // original path, so both survive and neither pair loses its own view of it. Renaming
+            // the *destination* rather than landing the source under the conflict name keeps the
+            // path the source owns pointing at the source's content, which is what the pair's next
+            // run expects to find.
+            var conflictCopyPath = BuildConflictCopyPath(path, conflictTimestamp);
+            actions.Add(new SyncAction(SyncOperation.ResolveConflictKeepBoth, path, conflictCopyPath, destination.Size, PriorityFor(SyncOperation.ResolveConflictKeepBoth, path)));
+            actions.Add(new SyncAction(transferToDestination, path, null, source.Size, PriorityFor(transferToDestination, path)));
+            return;
+        }
+
+        // Ask, or a policy that resolves in the destination's favour: leave the file alone. The
+        // conflict is recorded above for the UI, and the pair simply does not own this path.
     }
 
     private static void ReconcileTwoWay(

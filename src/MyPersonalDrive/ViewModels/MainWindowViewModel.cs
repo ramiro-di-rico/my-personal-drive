@@ -483,6 +483,7 @@ public sealed class MainWindowViewModel : ObservableObject
         DownloadSelectedCommand = new AsyncCommand(DownloadSelectedAsync, () => SelectedCount > 0, HandleUnexpectedError);
         MergeSelectedCommand = new AsyncCommand(MergeSelectedAsync, () => SelectedMergeableCount >= 2, HandleUnexpectedError);
         TrashSelectedCommand = new AsyncCommand(TrashSelectedAsync, () => SelectedCount > 0, HandleUnexpectedError);
+        MoveSelectedCommand = new AsyncCommand(MoveSelectedAsync, () => SelectedCount > 0 && CanMoveItems, HandleUnexpectedError);
         SetThemeDefaultCommand = new AsyncCommand(() => SetThemeAsync("Default"), onError: HandleUnexpectedError);
         SetThemeLightCommand = new AsyncCommand(() => SetThemeAsync("Light"), onError: HandleUnexpectedError);
         SetThemeDarkCommand = new AsyncCommand(() => SetThemeAsync("Dark"), onError: HandleUnexpectedError);
@@ -618,6 +619,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>Moves every selected row (files and folders) to trash, after one confirmation for the whole batch.</summary>
     public AsyncCommand TrashSelectedCommand { get; }
+
+    /// <summary>The batch "Move to..." in the multi-select bar. One picked target, one provider call — see <see cref="MoveSelectedAsync"/>.</summary>
+    public AsyncCommand MoveSelectedCommand { get; }
 
     /// <summary>
     /// What `proton-drive --version` last reported, or why it could not be read. Shown as-is in the
@@ -1043,6 +1047,14 @@ public sealed class MainWindowViewModel : ObservableObject
     public Func<string, Task<string?>>? RequestRenameAsync { get; set; }
 
     public Func<string, Task<string?>>? RequestCopyNameAsync { get; set; }
+
+    /// <summary>
+    /// Asks the user for the folder to move something into: given what is being moved (already
+    /// formatted for the prompt) and the path to start browsing from, returns the chosen parent
+    /// path, or null if they cancelled. Left null disables moving from the UI the same way every
+    /// other Request* delegate here degrades.
+    /// </summary>
+    public Func<string, string, Task<string?>>? RequestMoveTargetAsync { get; set; }
 
     public Func<Task<string?>>? RequestCreateFolderAsync { get; set; }
 
@@ -1688,6 +1700,10 @@ public sealed class MainWindowViewModel : ObservableObject
         // path, mixing the two).
         SyncPanel.GetRemoteFolderChildren = _provider.Operations.ListFolderAsync;
         SyncPanel.SetActiveAccount(_provider.DisplayName);
+        // Same reason: "Move to..." is gated on a capability that belongs to the provider, not to
+        // the window, so the gate has to be re-announced when the provider underneath changes.
+        OnPropertyChanged(nameof(CanMoveItems));
+        MoveSelectedCommand.RaiseCanExecuteChanged();
         
         // Re-read fresh rather than trust the field left over from the previous account — it can
         // otherwise go stale the moment auth changes for the account not currently on screen.
@@ -2187,6 +2203,184 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Whether the active backend can relocate a node server-side
+    /// (<c>ProviderCapabilities.SupportsServerSideMove</c>) — i.e. without the download-then-upload
+    /// round trip a user would otherwise have to do by hand. True for all three providers today;
+    /// the gate exists so a backend that lacks it disables the affordance rather than failing
+    /// halfway through a move.
+    /// </summary>
+    public bool CanMoveItems => _provider.Capabilities.SupportsServerSideMove;
+
+    /// <summary>
+    /// Lists a remote folder's children for the "Move to..." folder picker. A property rather than
+    /// a settable delegate like <c>SyncPanelViewModel.GetRemoteFolderChildren</c>: it reads
+    /// <c>_provider</c> on each call, so switching accounts can't leave it pointing at the previous
+    /// one (the bug that wiring did have, fixed in <see cref="SwitchBrowserAccountAsync"/>).
+    /// </summary>
+    public Func<string, CancellationToken, Task<IReadOnlyList<DriveItem>>> ListRemoteFolderAsync
+        => _provider.Operations.ListFolderAsync;
+
+    /// <summary>
+    /// Moves one row into a folder the user picks, entirely inside the provider — this is the
+    /// point of the feature: no bytes travel through this machine. Refuses the two moves the
+    /// backend would reject anyway (into the folder it is already in, and a folder into its own
+    /// subtree), because each of those costs a round trip and an error card to learn.
+    /// </summary>
+    public async Task MoveItemAsync(DriveItem item)
+    {
+        if (!CanMoveItems)
+        {
+            SetStatus(StringKeys.Status.MoveUnsupported, _provider.DisplayName);
+            IsWarning = true;
+            return;
+        }
+
+        var target = await PickMoveTargetAsync(item.Name);
+        if (target is null)
+        {
+            return;
+        }
+
+        if (!ValidateMoveTarget([item], target))
+        {
+            return;
+        }
+
+        try
+        {
+            IsLoading = true;
+            SetStatus(StringKeys.Status.MoveProgress, item.Name, target);
+            await _provider.Operations.MoveItemsAsync([item.Path], target);
+            SetStatus(StringKeys.Status.MoveDoneOne, item.Name, target);
+            await ApplyMoveToCacheAsync(item, target);
+
+            _ = RefreshAsync(); // Refresh in background
+        }
+        catch (InvalidOperationException ex)
+        {
+            SetFailure(FormatDriveError(item.Path, ex), ex);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// The batch counterpart to <see cref="MoveItemAsync"/>. One provider call for the whole
+    /// selection where the backend supports it (<c>ProviderCapabilities.SupportsBatchMove</c> is
+    /// what <see cref="Services.Providers.IDriveOperations.MoveItemsAsync"/> already decides
+    /// internally), so this stays a single <c>MoveItemsAsync</c> rather than a loop.
+    /// </summary>
+    private async Task MoveSelectedAsync()
+    {
+        var selected = RootItems.Where(n => n.IsSelected).Select(n => n.Item).ToList();
+        if (selected.Count == 0)
+        {
+            return;
+        }
+
+        if (!CanMoveItems)
+        {
+            SetStatus(StringKeys.Status.MoveUnsupported, _provider.DisplayName);
+            IsWarning = true;
+            return;
+        }
+
+        var target = await PickMoveTargetAsync(Loc.Plural(StringKeys.Status.BatchItems, selected.Count));
+        if (target is null)
+        {
+            return;
+        }
+
+        if (!ValidateMoveTarget(selected, target))
+        {
+            return;
+        }
+
+        try
+        {
+            IsLoading = true;
+            SetStatusPlural(StringKeys.Status.MoveProgressMany, selected.Count, target);
+            await _provider.Operations.MoveItemsAsync(selected.Select(i => i.Path).ToList(), target);
+            SetStatusPlural(StringKeys.Status.MoveDoneMany, selected.Count, target);
+
+            foreach (var item in selected)
+            {
+                await ApplyMoveToCacheAsync(item, target);
+            }
+
+            _ = RefreshAsync(); // Refresh in background
+        }
+        catch (InvalidOperationException ex)
+        {
+            SetFailure(FormatDriveError(CurrentPath, ex), ex);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    /// <summary>Asks for the destination folder, starting the browse at this account's root — null when there is no picker wired, or the user cancelled.</summary>
+    private async Task<string?> PickMoveTargetAsync(string what)
+    {
+        var picker = RequestMoveTargetAsync;
+        if (picker is null)
+        {
+            SetStatus(StringKeys.Status.MoveUnavailable);
+            IsWarning = true;
+            return null;
+        }
+
+        return await picker(what, RootPath);
+    }
+
+    /// <summary>
+    /// The two rejections worth making locally. Everything else (a name collision in the target, a
+    /// permission problem) is the provider's call and surfaces as a normal typed error.
+    /// </summary>
+    private bool ValidateMoveTarget(IReadOnlyList<DriveItem> items, string target)
+    {
+        foreach (var item in items)
+        {
+            if (string.Equals(GetParentPath(item.Path), target, _provider.Paths.Comparison))
+            {
+                SetStatus(StringKeys.Status.MoveSameFolder, item.Name);
+                IsWarning = true;
+                return false;
+            }
+
+            if (item.IsFolder && IsWithin(target, item.Path))
+            {
+                SetStatus(StringKeys.Status.MoveIntoItself);
+                IsWarning = true;
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>True when <paramref name="candidate"/> is <paramref name="ancestor"/> itself or sits under it.</summary>
+    private bool IsWithin(string candidate, string ancestor)
+        => string.Equals(candidate, ancestor, _provider.Paths.Comparison)
+            || candidate.StartsWith(ancestor.EndsWith('/') ? ancestor : ancestor + "/", _provider.Paths.Comparison);
+
+    /// <summary>
+    /// Re-points the cached row at its new parent so the panes are right before the background
+    /// refresh lands, and throws away the recursive metrics both ends of the move invalidate.
+    /// </summary>
+    private async Task ApplyMoveToCacheAsync(DriveItem item, string targetParentPath)
+    {
+        var newPath = _provider.Paths.Combine(targetParentPath, item.Name);
+        await _cacheService.RemoveItemAsync(item.Path);
+        await _cacheService.AddOrUpdateItemAsync(targetParentPath, item with { Path = newPath });
+        await InvalidateDeepMetricsAsync(item.Path);
+        await InvalidateDeepMetricsAsync(newPath);
+    }
+
     public async Task TrashItemAsync(DriveItem item)
     {
         if (item.IsFolder)
@@ -2526,6 +2720,7 @@ public sealed class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectionSummaryText));
         DownloadSelectedCommand.RaiseCanExecuteChanged();
         TrashSelectedCommand.RaiseCanExecuteChanged();
+        MoveSelectedCommand.RaiseCanExecuteChanged();
         OnPropertyChanged(nameof(SelectedMergeableCount));
         OnPropertyChanged(nameof(CanMergeSelected));
         MergeSelectedCommand.RaiseCanExecuteChanged();
@@ -2959,6 +3154,8 @@ public sealed class MainWindowViewModel : ObservableObject
                 UploadToFolderAsync = UploadToFolderAsync,
                 DownloadHereAsync = DownloadToLocalPaneAsync,
                 ShowPropertiesAsync = ShowPropertiesAsync,
+                SupportsMove = CanMoveItems,
+                MoveItemAsync = MoveItemAsync,
                 SupportsShareLinks = _provider.Capabilities.SupportsShareLinks,
                 CreateShareLinkAsync = CreateShareLinkAsync,
                 RefreshPaneAsync = RefreshAsync,

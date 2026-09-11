@@ -82,6 +82,11 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
   cloud folder, start a sync pair pre-filled with that path, pause/resume/run-now an existing pair,
   rename or delete a local item, and view its properties. Folders with an active sync pair show a
   small badge (paused pairs show a different one) — see badge in list view and the local pane
+- Move a cloud item into another folder of the same provider, server-side: pick the destination in
+  a folder browser and the provider relocates it — nothing is downloaded and re-uploaded. Works on
+  one row ("Move to..." in the context menu) or on a whole multi-selection ("Move selected" in the
+  selection bar). Moving something into the folder it is already in, or a folder into its own
+  subtree, is refused before any call is made
 - Copy a share link for a cloud item to the clipboard (OneDrive and Google Drive — Proton Drive's
   CLI has no such command, so the menu entry stays disabled there, with a tooltip explaining why)
 - Live console with realtime output from the CLI (Proton) and HTTP requests (OneDrive, Google

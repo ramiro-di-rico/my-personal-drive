@@ -26,6 +26,16 @@ public sealed class DriveNodeSyncActions
     public Func<DriveItem, Task>? ShowPropertiesAsync { get; init; }
 
     /// <summary>
+    /// Whether the active provider can move a node to another folder without a round trip through
+    /// the local disk (<c>ProviderCapabilities.SupportsServerSideMove</c>). A fixed value per row,
+    /// same as <see cref="SupportsShareLinks"/>: every row in a pane shares one provider.
+    /// </summary>
+    public bool SupportsMove { get; init; }
+
+    /// <summary>Moves this row to a folder the user picks — see <c>MainWindowViewModel.MoveItemAsync</c>.</summary>
+    public Func<DriveItem, Task>? MoveItemAsync { get; init; }
+
+    /// <summary>
     /// Whether the active provider can generate a share link at all — Proton's CLI can't
     /// (<c>ProviderCapabilities.SupportsShareLinks</c>). A fixed value per row, not per item: every
     /// row in a pane shares the same provider.

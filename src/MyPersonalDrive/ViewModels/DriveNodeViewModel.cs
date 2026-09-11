@@ -47,6 +47,7 @@ public sealed class DriveNodeViewModel : ObservableObject
         TogglePauseSyncCommand = new AsyncCommand(TogglePauseSyncAsync, () => SyncPair is not null, onError);
         PropertiesCommand = new AsyncCommand(ShowPropertiesAsync, () => _syncActions?.ShowPropertiesAsync is not null, onError);
         ShareLinkCommand = new AsyncCommand(ShareLinkAsync, () => CanShareLink && _syncActions?.CreateShareLinkAsync is not null, onError);
+        MoveCommand = new AsyncCommand(MoveAsync, () => CanMove && _syncActions?.MoveItemAsync is not null, onError);
     }
 
     public DriveItem Item { get; }
@@ -124,6 +125,18 @@ public sealed class DriveNodeViewModel : ObservableObject
     /// <summary>Whether "Sync Selected Path..." makes sense here — a folder with no pair on it yet.</summary>
     public bool CanCreateSyncPair => IsFolder && !HasSyncPair;
 
+    /// <summary>
+    /// Whether the backend can relocate a node without downloading and re-uploading it
+    /// (<c>ProviderCapabilities.SupportsServerSideMove</c>). True for all three providers today;
+    /// gated anyway so a future backend without it disables the entry instead of failing mid-move.
+    /// </summary>
+    public bool CanMove => _syncActions?.SupportsMove ?? false;
+
+    /// <summary>Explains a disabled "Move to..." entry, the way <see cref="ShareLinkTooltip"/> does.</summary>
+    public string MoveTooltip => CanMove
+        ? Loc.T(StringKeys.Node.MoveTooltip)
+        : Loc.T(StringKeys.Node.MoveUnsupported);
+
     /// <summary>Whether the active provider can generate a share link at all — false for Proton, whose CLI has no such command.</summary>
     public bool CanShareLink => _syncActions?.SupportsShareLinks ?? false;
 
@@ -179,6 +192,8 @@ public sealed class DriveNodeViewModel : ObservableObject
 
     public AsyncCommand ShareLinkCommand { get; }
 
+    public AsyncCommand MoveCommand { get; }
+
     private async Task HandleRowClickAsync()
     {
         await _handleRowClickAsync(Item);
@@ -212,6 +227,16 @@ public sealed class DriveNodeViewModel : ObservableObject
     private async Task CopyAsync()
     {
         await _copyItemAsync(Item);
+    }
+
+    private async Task MoveAsync()
+    {
+        if (!CanMove || _syncActions?.MoveItemAsync is not { } moveAsync)
+        {
+            return;
+        }
+
+        await moveAsync(Item);
     }
 
     private async Task PreviewAsync()

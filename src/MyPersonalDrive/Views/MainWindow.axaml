@@ -611,6 +611,7 @@
                       Content="{Binding Loc[pdfmerge.action]}"
                       Command="{Binding MergeSelectedCommand}"
                       IsVisible="{Binding CanMergeSelected}" />
+              <Button Content="{Binding Loc[explorer.move.selected]}" Command="{Binding MoveSelectedCommand}" />
               <Button Content="{Binding Loc[menu.trash]}" Command="{Binding TrashSelectedCommand}" />
             </StackPanel>
           </Border>
@@ -695,6 +696,11 @@
                            they make this menu the same menu the tile modes already offered. -->
                       <MenuItem Header="{Binding Loc[menu.preview]}" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
                       <MenuItem Header="{Binding Loc[menu.copy]}" Command="{Binding CopyCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.moveto]}"
+                                Command="{Binding MoveCommand}"
+                                IsEnabled="{Binding CanMove}"
+                                ToolTip.Tip="{Binding MoveTooltip}"
+                                ToolTip.ShowOnDisabled="True" />
                       <MenuItem Header="{Binding Loc[menu.rename]}" Command="{Binding RenameCommand}" />
                       <MenuItem Header="{Binding Loc[menu.download]}"
                                 Command="{Binding DownloadCommand}"
@@ -829,6 +835,11 @@
                       <MenuItem Header="{Binding Loc[menu.open]}" Command="{Binding ActivateCommand}" />
                       <MenuItem Header="{Binding Loc[menu.preview]}" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
                       <MenuItem Header="{Binding Loc[menu.copy]}" Command="{Binding CopyCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.moveto]}"
+                                Command="{Binding MoveCommand}"
+                                IsEnabled="{Binding CanMove}"
+                                ToolTip.Tip="{Binding MoveTooltip}"
+                                ToolTip.ShowOnDisabled="True" />
                       <MenuItem Header="{Binding Loc[menu.rename]}" Command="{Binding RenameCommand}" />
                       <MenuItem Header="{Binding Loc[menu.download]}"
                                 Command="{Binding DownloadCommand}"
@@ -903,6 +914,11 @@
                       <MenuItem Header="{Binding Loc[menu.open]}" Command="{Binding ActivateCommand}" />
                       <MenuItem Header="{Binding Loc[menu.preview]}" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
                       <MenuItem Header="{Binding Loc[menu.copy]}" Command="{Binding CopyCommand}" />
+                      <MenuItem Header="{Binding Loc[menu.moveto]}"
+                                Command="{Binding MoveCommand}"
+                                IsEnabled="{Binding CanMove}"
+                                ToolTip.Tip="{Binding MoveTooltip}"
+                                ToolTip.ShowOnDisabled="True" />
                       <MenuItem Header="{Binding Loc[menu.rename]}" Command="{Binding RenameCommand}" />
                       <MenuItem Header="{Binding Loc[menu.download]}"
                                 Command="{Binding DownloadCommand}"

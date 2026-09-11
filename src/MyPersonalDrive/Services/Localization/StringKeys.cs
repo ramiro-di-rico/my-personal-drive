@@ -99,6 +99,7 @@ public static class StringKeys
         public const string SearchResults = "explorer.search.results";
         /// <summary>Plural prefix.</summary>
         public const string SelectionCount = "explorer.selection.count";
+        public const string MoveSelected = "explorer.move.selected";
         public const string SortLabel = "explorer.sort.label";
         public const string SplitterTooltip = "explorer.splitter.tooltip";
         public const string UploadTooltip = "explorer.upload.tooltip";
@@ -112,6 +113,8 @@ public static class StringKeys
     {
         public const string DownloadGoogleDoc = "node.download.googledoc";
         public const string DownloadTooltip = "node.download.tooltip";
+        public const string MoveTooltip = "node.move.tooltip";
+        public const string MoveUnsupported = "node.move.unsupported";
         public const string ShareLinkTooltip = "node.sharelink.tooltip";
         public const string ShareLinkUnsupported = "node.sharelink.unsupported";
     }
@@ -123,6 +126,7 @@ public static class StringKeys
         public const string CopyPath = "menu.copypath";
         public const string CopyShareLink = "menu.copysharelink";
         public const string Delete = "menu.delete";
+        public const string MoveTo = "menu.moveto";
         public const string Download = "menu.download";
         public const string DownloadHere = "menu.downloadhere";
         public const string Open = "menu.open";
@@ -210,6 +214,17 @@ public static class StringKeys
         public const string LoadDone = "status.load.done";
         public const string LoadGone = "status.load.gone";
         public const string LoadProgress = "status.load.progress";
+        /// <summary>Plural prefix.</summary>
+        public const string MoveDoneMany = "status.move.donemany";
+        public const string MoveDoneOne = "status.move.doneone";
+        public const string MoveIntoItself = "status.move.intoitself";
+        public const string MovePartial = "status.move.partial";
+        public const string MoveProgress = "status.move.progress";
+        /// <summary>Plural prefix.</summary>
+        public const string MoveProgressMany = "status.move.progressmany";
+        public const string MoveSameFolder = "status.move.samefolder";
+        public const string MoveUnavailable = "status.move.unavailable";
+        public const string MoveUnsupported = "status.move.unsupported";
         public const string NewFolderDone = "status.newfolder.done";
         public const string NewFolderProgress = "status.newfolder.progress";
         public const string NewFolderUnavailable = "status.newfolder.unavailable";
@@ -628,6 +643,8 @@ public static class StringKeys
         public const string PreviewWarning = "dialog.preview.warning";
         public const string PropertiesField = "dialog.properties.field";
         public const string PropertiesTitle = "dialog.properties.title";
+        public const string MoveTargetPrompt = "dialog.move.prompt";
+        public const string MoveTargetTitle = "dialog.move.title";
         public const string RemoteBrowserBack = "dialog.remotebrowser.back";
         public const string RemoteBrowserEmpty = "dialog.remotebrowser.empty";
         public const string RemoteBrowserError = "dialog.remotebrowser.error";

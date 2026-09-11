@@ -239,6 +239,7 @@ operation to a command line. **This is the catalog of what's currently known abo
 | `RenameItemAsync` | `filesystem rename "<path>" "<newName>"` |
 | `CreateFolderAsync` | `filesystem create-folder "<parent>" "<name>"` |
 | `CopyItemAsync` | `filesystem copy [-n "<newName>"] "<src>" "<targetParent>"` |
+| `MoveItemsAsync` | `filesystem move "<src1>" "<src2>"… "<targetParent>"` |
 | `UploadFilesAsync` | `filesystem upload [-f rename\|replace\|skip] [-d rename\|replace\|skip] "<f1>" "<f2>"… "<parent>"` |
 | `GetCliVersionAsync` | `--version` |
 
@@ -618,8 +619,16 @@ FetchFromCliAndUpdateCacheAsync
 
 `DisplayItems` sorts folders first, then by name, case-insensitively.
 
-Mutations (create folder, rename, trash) update the cache **optimistically** before firing off
-a background `RefreshAsync()`. `Upload` and `Copy` only refresh.
+Mutations (create folder, rename, trash, move) update the cache **optimistically** before firing
+off a background `RefreshAsync()`. `Upload` and `Copy` only refresh.
+
+"Move to..." (`MoveItemAsync` / `MoveSelectedAsync`) is gated on
+`ProviderCapabilities.SupportsServerSideMove` — true for all three providers today — and asks
+`RequestMoveTargetAsync` for the destination, which `MainWindow.axaml.cs` answers with
+`Views/Dialogs/RemoteFolderPickerDialog`, a listing-only browser over `ListRemoteFolderAsync`.
+Two refusals are made locally rather than paid for in a round trip: the folder the item is
+already in, and a folder's own subtree. A whole multi-selection goes out as one
+`MoveItemsAsync` call, not one per row.
 
 ### 7.4 Error handling
 

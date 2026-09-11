@@ -865,6 +865,11 @@ public partial class MainWindow : Window
         viewModel.RequestCopyToClipboardAsync = CopyToClipboardAsync;
         viewModel.RequestShowPropertiesAsync = (title, fields) => Dialogs.PropertiesDialog.ShowAsync(this, title, fields);
         viewModel.RequestPdfMergeAsync = (names, suggested) => Dialogs.PdfMergeDialog.ShowAsync(this, names, suggested);
+        viewModel.RequestMoveTargetAsync = (what, startPath) => Dialogs.RemoteFolderPickerDialog.ShowAsync(
+            this,
+            viewModel.ListRemoteFolderAsync,
+            Localizer.Instance.F(StringKeys.Dialog.MoveTargetPrompt, what),
+            startPath);
 
         viewModel.LocalExplorer.RequestConfirmationAsync = question => Dialogs.ConfirmDialog.ShowAsync(this, question);
         viewModel.LocalExplorer.RequestRenameAsync = PromptForRenameAsync;

@@ -1,7 +1,7 @@
 # MyPersonalDrive — Technical Reference
 
 > Reference document describing the current state of the application (branch
-> `feature/sync-visibility`, commit `7bd6c5c`).
+> `main`, commit `e7ade68`).
 > Meant to give full context to any future chat/session without having to re-read all the code.
 
 ---

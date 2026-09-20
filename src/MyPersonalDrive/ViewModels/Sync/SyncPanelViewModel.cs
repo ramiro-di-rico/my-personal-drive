@@ -723,7 +723,70 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// </summary>
     public IReadOnlyList<SyncStatusService> StatusServices => _slots.Select(slot => slot.StatusService).ToList();
 
-    /// <summary>The status service of the account the browser is currently showing.</summary>
+    /// <summary>
+    /// What every signed-in provider has to say about one item, for the Properties dialog
+    /// (docs/PLAN-SYNC-VISIBILITY.md S5). Either path may be null — a cloud row knows its remote
+    /// path and a local row its local one — and a provider with no pair covering the item still
+    /// gets a row, because "not synced with this one" is the answer the dialog is opened for.
+    ///
+    /// Reports the local side per pair rather than per account: one account can have several pairs
+    /// pointing at the same folder, and rolling them into one line would hide which pair the status
+    /// actually came from.
+    /// </summary>
+    public async Task<IReadOnlyList<SyncStatusRow>> DescribeSyncStatusAsync(string? remotePath, string? localPath)
+    {
+        var rows = new List<SyncStatusRow>();
+        foreach (var slot in _slots)
+        {
+            var lookups = new List<SyncStatusLookup>();
+            if (remotePath is not null && await slot.StatusService.LookupRemoteAsync(remotePath) is { } remote)
+            {
+                lookups.Add(remote);
+            }
+
+            if (localPath is not null)
+            {
+                // A local path can match several of this account's pairs; a remote one cannot match
+                // more than the single pair already added above (pairs never nest).
+                lookups.AddRange((await slot.StatusService.LookupLocalAsync(localPath))
+                    .Where(local => !lookups.Any(existing => existing.Index.Pair.Id == local.Index.Pair.Id)));
+            }
+
+            if (lookups.Count == 0)
+            {
+                rows.Add(new SyncStatusRow(
+                    slot.DisplayName,
+                    SyncNodeStatus.NotInPair,
+                    Loc.T(StringKeys.SyncStatus.SectionNoPair),
+                    null,
+                    null));
+                continue;
+            }
+
+            foreach (var lookup in lookups)
+            {
+                var pair = lookup.Index.Pair;
+
+                // No fingerprint is passed: the dialog is asking each provider about an item whose
+                // other side it has not listed, so the honest answer is what the last cycle left —
+                // and the wording says exactly that.
+                var status = lookup.Index.StatusAsOfLastCycle(lookup.RelativePath);
+
+                rows.Add(new SyncStatusRow(
+                    slot.DisplayName,
+                    status,
+                    SyncStatusPresenter.Describe(status),
+                    $"{pair.RemotePath} ↔ {pair.LocalPath}",
+                    pair.LastSyncAt is { } at
+                        ? Loc.F(StringKeys.SyncStatus.SectionLastSync, at.ToLocalTime().ToString("g", Loc.Culture))
+                        : Loc.T(StringKeys.SyncStatus.AsOfLastSync)));
+            }
+        }
+
+        return rows;
+    }
+
+    /// <summary>The status service of the account the browser is currently showing.</summary>    /// <summary>The status service of the account the browser is currently showing.</summary>
     public SyncStatusService ActiveStatusService => ActiveSlot.StatusService;
 
     /// <summary>

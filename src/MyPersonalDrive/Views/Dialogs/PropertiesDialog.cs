@@ -17,7 +17,14 @@ public static class PropertiesDialog
     private static Localizer Loc => Localizer.Instance;
 
     /// <summary>A read-only "Properties" info panel — "Propiedades" (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6).</summary>
-    public static async Task ShowAsync(Window owner, string title, IReadOnlyList<PropertyField> fields)
+    /// <param name="syncStatuses">
+    /// One row per signed-in provider, rendered as its own titled block below the fields
+    /// (docs/PLAN-SYNC-VISIBILITY.md S5). Optional and additive, the way
+    /// <see cref="PropertyField.IsCopyable"/> was: every existing call site is unaffected, and a
+    /// per-provider breakdown is a section rather than a label/value pair, which is the one thing
+    /// this dialog otherwise only knows how to draw.
+    /// </param>
+    public static async Task ShowAsync(Window owner, string title, IReadOnlyList<PropertyField> fields, IReadOnlyList<SyncStatusRow>? syncStatuses = null)
     {
         var children = new List<Control>
         {
@@ -63,6 +70,52 @@ public static class PropertiesDialog
             row.Children.Add(text);
             row.Children.Add(copyButton);
             children.Add(row);
+        }
+
+        if (syncStatuses is { Count: > 0 })
+        {
+            children.Add(new Border
+            {
+                BorderThickness = new Avalonia.Thickness(0, 1, 0, 0),
+                BorderBrush = owner.FindResource("StatusOfflineBrush") as Avalonia.Media.IBrush,
+                Margin = new Avalonia.Thickness(0, 6, 0, 0),
+            });
+            children.Add(new TextBlock
+            {
+                Text = Loc.T(StringKeys.SyncStatus.SectionTitle),
+                FontWeight = Avalonia.Media.FontWeight.Bold,
+                TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+            });
+
+            foreach (var row in syncStatuses)
+            {
+                var block = new StackPanel { Spacing = 2 };
+                block.Children.Add(new TextBlock
+                {
+                    Text = Loc.F(StringKeys.Dialog.PropertiesField, row.Account, row.StatusText),
+                    TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                });
+
+                // The pair, and when it last ran: a status with no "synced with what, and how long
+                // ago" leaves the user to go and find the sync panel to answer it.
+                foreach (var detail in new[] { row.Detail, row.LastSyncText })
+                {
+                    if (string.IsNullOrWhiteSpace(detail))
+                    {
+                        continue;
+                    }
+
+                    block.Children.Add(new TextBlock
+                    {
+                        Text = detail,
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                        FontSize = 11,
+                        Opacity = 0.75,
+                    });
+                }
+
+                children.Add(block);
+            }
         }
 
         var okButton = new Button { Content = Loc.T(StringKeys.Common.Ok), IsDefault = true, IsCancel = true, Width = 80 };

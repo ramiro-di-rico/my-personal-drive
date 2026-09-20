@@ -421,7 +421,7 @@ public class LocalExplorerViewModelTests : IDisposable
         var sut = Build(_root);
         await sut.NavigateAsync(_root);
         IReadOnlyList<PropertyField>? shownFields = null;
-        sut.RequestShowPropertiesAsync = (_, fields) => { shownFields = fields; return Task.CompletedTask; };
+        sut.RequestShowPropertiesAsync = (_, fields, _) => { shownFields = fields; return Task.CompletedTask; };
 
         await sut.Items.Single(i => i.DisplayName == "note.txt").PropertiesCommand.ExecuteAsync();
 

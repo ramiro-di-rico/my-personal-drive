@@ -863,7 +863,7 @@ public partial class MainWindow : Window
         viewModel.Console.RequestSaveActivityAsync = PickSaveActivityAsync;
         viewModel.RequestConfirmationAsync = question => Dialogs.ConfirmDialog.ShowAsync(this, question);
         viewModel.RequestCopyToClipboardAsync = CopyToClipboardAsync;
-        viewModel.RequestShowPropertiesAsync = (title, fields) => Dialogs.PropertiesDialog.ShowAsync(this, title, fields);
+        viewModel.RequestShowPropertiesAsync = (title, fields, syncStatuses) => Dialogs.PropertiesDialog.ShowAsync(this, title, fields, syncStatuses);
         viewModel.RequestPdfMergeAsync = (names, suggested) => Dialogs.PdfMergeDialog.ShowAsync(this, names, suggested);
         viewModel.RequestMoveTargetAsync = (what, startPath) => Dialogs.RemoteFolderPickerDialog.ShowAsync(
             this,
@@ -874,7 +874,7 @@ public partial class MainWindow : Window
         viewModel.LocalExplorer.RequestConfirmationAsync = question => Dialogs.ConfirmDialog.ShowAsync(this, question);
         viewModel.LocalExplorer.RequestRenameAsync = PromptForRenameAsync;
         viewModel.LocalExplorer.RequestCopyToClipboardAsync = CopyToClipboardAsync;
-        viewModel.LocalExplorer.RequestShowPropertiesAsync = (title, fields) => Dialogs.PropertiesDialog.ShowAsync(this, title, fields);
+        viewModel.LocalExplorer.RequestShowPropertiesAsync = (title, fields, syncStatuses) => Dialogs.PropertiesDialog.ShowAsync(this, title, fields, syncStatuses);
         viewModel.LocalExplorer.RequestPdfMergeAsync = (names, suggested) => Dialogs.PdfMergeDialog.ShowAsync(this, names, suggested);
 
 

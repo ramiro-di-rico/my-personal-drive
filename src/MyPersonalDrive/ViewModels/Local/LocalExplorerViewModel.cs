@@ -209,13 +209,26 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
     public Func<string, Task>? RequestCopyToClipboardAsync { get; set; }
 
-    public Func<string, IReadOnlyList<PropertyField>, Task>? RequestShowPropertiesAsync { get; set; }
+    /// <summary>
+    /// Shows the Properties dialog — see <c>MainWindowViewModel.RequestShowPropertiesAsync</c>.
+    /// The third argument is the per-provider sync section (docs/PLAN-SYNC-VISIBILITY.md S5), which
+    /// matters most here: a local folder can be mapped by several providers at once, and this is
+    /// the only place that says which.
+    /// </summary>
+    public Func<string, IReadOnlyList<PropertyField>, IReadOnlyList<SyncStatusRow>, Task>? RequestShowPropertiesAsync { get; set; }
 
     /// <summary>Opens the "Add sync pair" wizard pre-filled with this row's local path.</summary>
     public Func<string, Task>? RequestSyncSelectedPathAsync { get; set; }
 
     /// <summary>Looks up the configured sync pair (if any) whose local side is a given path.</summary>
     public Func<string, SyncPairViewModel?>? FindSyncPairByPath { get; set; }
+
+    /// <summary>
+    /// What every provider has to say about one item, for the Properties dialog
+    /// (docs/PLAN-SYNC-VISIBILITY.md S5). Supplied by <c>MainWindowViewModel</c> for the same
+    /// reason the lookup below is.
+    /// </summary>
+    public Func<string, Task<IReadOnlyList<SyncStatusRow>>>? DescribeSyncStatusAsync { get; set; }
 
     /// <summary>
     /// Every pair, on every account, covering a local path — the badges' source
@@ -834,6 +847,10 @@ public sealed class LocalExplorerViewModel : ObservableObject
             fields.Add(new PropertyField(Loc.T(StringKeys.Common.Modified), item.ModifiedAt.Value.ToLocalTime().ToString("g", Loc.Culture)));
         }
 
-        await show(item.Name, fields);
+        var statuses = DescribeSyncStatusAsync is null
+            ? []
+            : await DescribeSyncStatusAsync(item.Path);
+
+        await show(item.Name, fields, statuses);
     }
 }

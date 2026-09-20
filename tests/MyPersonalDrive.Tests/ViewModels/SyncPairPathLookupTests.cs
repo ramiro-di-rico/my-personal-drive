@@ -124,7 +124,7 @@ public class SyncPairPathLookupTests : IDisposable
     {
         var vm = await BuildViewModelAsync();
         IReadOnlyList<PropertyField> shown = [];
-        vm.RequestShowPropertiesAsync = (_, fields) => { shown = fields; return Task.CompletedTask; };
+        vm.RequestShowPropertiesAsync = (_, fields, _) => { shown = fields; return Task.CompletedTask; };
 
         await vm.ShowPropertiesAsync(new DriveItem("/my-files/Libros/tecnicos/refactoring.pdf", "refactoring.pdf", IsFolder: false));
 
@@ -142,7 +142,7 @@ public class SyncPairPathLookupTests : IDisposable
     {
         var vm = await BuildViewModelAsync();
         IReadOnlyList<PropertyField> shown = [];
-        vm.RequestShowPropertiesAsync = (_, fields) => { shown = fields; return Task.CompletedTask; };
+        vm.RequestShowPropertiesAsync = (_, fields, _) => { shown = fields; return Task.CompletedTask; };
 
         await vm.ShowPropertiesAsync(new DriveItem("/my-files/Fotos/vacaciones.jpg", "vacaciones.jpg", IsFolder: false));
 

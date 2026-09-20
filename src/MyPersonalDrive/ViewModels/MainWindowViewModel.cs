@@ -416,6 +416,7 @@ public sealed class MainWindowViewModel : ObservableObject
             // one local folder can be mapped by pairs on several providers at once, and only the
             // sync panel holds every account's store.
             LookupSyncStatusesAsync = LookupLocalSyncStatusesAsync,
+            DescribeSyncStatusAsync = localPath => SyncPanel.DescribeSyncStatusAsync(null, localPath),
             FindRemotePathFor = RemotePathFor,
         };
 
@@ -1071,7 +1072,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public Func<string, Task>? RequestCopyToClipboardAsync { get; set; }
 
-    public Func<string, IReadOnlyList<PropertyField>, Task>? RequestShowPropertiesAsync { get; set; }
+    /// <summary>
+    /// Shows the Properties dialog. The third argument is the per-provider sync section
+    /// (docs/PLAN-SYNC-VISIBILITY.md S5) — always passed, because a signed-in provider that does
+    /// not sync this item is itself the answer someone opens this dialog for.
+    /// </summary>
+    public Func<string, IReadOnlyList<PropertyField>, IReadOnlyList<SyncStatusRow>, Task>? RequestShowPropertiesAsync { get; set; }
 
     public string CliPath
     {
@@ -2604,7 +2610,12 @@ public sealed class MainWindowViewModel : ObservableObject
             fields.Add(new PropertyField(Loc.T(StringKeys.Common.Modified), item.ModifiedAt.Value.ToLocalTime().ToString("g", Loc.Culture)));
         }
 
-        await show(item.Name, fields);
+        // Awaited before the dialog opens, not filled in behind it: it is two cached reads per
+        // account, and a section that appears a moment after the dialog would be worse than a
+        // dialog that opens a moment later.
+        var statuses = await SyncPanel.DescribeSyncStatusAsync(item.Path, LocalPathFor(item.Path));
+
+        await show(item.Name, fields, statuses);
     }
 
     /// <summary>

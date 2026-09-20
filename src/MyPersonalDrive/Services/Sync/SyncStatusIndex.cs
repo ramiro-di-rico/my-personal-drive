@@ -148,8 +148,33 @@ public sealed class SyncStatusIndex
             return WithPause(worst);
         }
 
-        // Nothing listed. The one confident answer left: the pair has run a full cycle and left no
-        // baseline row under this folder at all, so it really has never been synced.
+        return StatusAsOfLastCycle(relativePath);
+    }
+
+    /// <summary>
+    /// What the last completed cycle left behind for a path, for a caller with no current
+    /// fingerprint to compare — a collapsed folder, or the Properties dialog asking a provider
+    /// about a file whose other side it cannot see.
+    ///
+    /// This is a statement about the last cycle, not about right now, and the wording that goes
+    /// with it says so (<c>syncstatus.asoflastsync</c>): anything that was unequal at that cycle
+    /// would have left a queue row, which the callers check first.
+    /// </summary>
+    public SyncNodeStatus StatusAsOfLastCycle(string relativePath)
+    {
+        if (QueueStatus(relativePath) is { } queued)
+        {
+            return queued;
+        }
+
+        var queuedBelow = SyncStatusPrecedence.Max(QueueStatusesUnder(relativePath), SyncNodeStatus.Unknown);
+        if (queuedBelow is not SyncNodeStatus.Unknown)
+        {
+            return queuedBelow;
+        }
+
+        // The pair has run a full cycle and left no baseline row at or under this path, so it
+        // really has never been synced.
         if (!HasAnyBaselineUnder(relativePath))
         {
             return HasSyncedOnce ? WithPause(SyncNodeStatus.NotSynced) : SyncNodeStatus.Unknown;
@@ -160,13 +185,10 @@ public sealed class SyncStatusIndex
             return SyncNodeStatus.Unknown;
         }
 
-        // Baselined, nothing queued, and a cycle has completed: as of that cycle everything under
-        // here was equal on both sides, and anything that had not been would have left a queue row
-        // (the branch above) — so this is a statement about the last cycle, not a guess, and the
-        // tooltip says so. A cycle that only partly succeeded cannot make that claim.
         // Refines docs/PLAN-SYNC-VISIBILITY.md §1.2, which left this case Unknown: in practice
         // every collapsed folder in a healthy pair fell into it, so the pane was a field of
-        // question marks that told the user nothing.
+        // question marks that told the user nothing. A cycle that only partly succeeded cannot
+        // make the claim.
         return _pair.LastStatus switch
         {
             SyncPairStatus.Ok => WithPause(SyncNodeStatus.Synced),

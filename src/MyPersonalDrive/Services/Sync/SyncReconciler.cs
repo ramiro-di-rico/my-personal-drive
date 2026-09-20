@@ -12,7 +12,8 @@ namespace MyPersonalDrive.Services.Sync;
 /// </summary>
 public static class SyncReconciler
 {
-    public static readonly TimeSpan DefaultMtimeTolerance = TimeSpan.FromSeconds(2);
+    /// <summary>Kept as the engine's public name for the tolerance; owned by <see cref="NodeFingerprintComparer"/>.</summary>
+    public static readonly TimeSpan DefaultMtimeTolerance = NodeFingerprintComparer.DefaultMtimeTolerance;
 
     // Execution bands from §5.3, spaced widely enough that per-item depth adjustments (used to
     // order creates shallow-first and deletes deep-first) never spill into a neighboring band
@@ -234,7 +235,7 @@ public static class SyncReconciler
             // algorithm-mismatch guard as `AreEquivalent`, not a bare string comparison.
             var matches = candidates
                 .Where(c => c.Value.Size == size
-                            && !IsAlgorithmMismatch(c.Value.HashAlgorithm, entry.LocalAtSync.HashAlgorithm)
+                            && !NodeFingerprintComparer.IsAlgorithmMismatch(c.Value.HashAlgorithm, entry.LocalAtSync.HashAlgorithm)
                             && string.Equals(c.Value.ContentHash, hash, StringComparison.Ordinal))
                 .ToList();
 
@@ -553,59 +554,16 @@ public static class SyncReconciler
         => new(SyncOperation.UpdateBaselineOnly, path, null, null, PriorityFor(SyncOperation.UpdateBaselineOnly, path));
 
     /// <summary>
-    /// "Unchanged" per §5.4: hash+size equality when both sides have a hash (exact, no
-    /// tolerance needed); otherwise size equality plus mtime within <paramref name="tolerance"/>.
-    /// A missing fingerprint on either side counts as changed — there's nothing to compare.
+    /// Delegates to <see cref="NodeFingerprintComparer"/>, which owns §5.4's comparison — the
+    /// badge layer (docs/PLAN-SYNC-VISIBILITY.md) needs the identical predicate, and two copies
+    /// of it would let a row's badge disagree with the plan the engine produced. Kept as private
+    /// wrappers so the call sites below read the same as they did before the extraction.
     /// </summary>
     private static bool IsChanged(NodeFingerprint? current, NodeFingerprint? baseline, TimeSpan tolerance)
-        => !AreEquivalent(current, baseline, tolerance);
+        => NodeFingerprintComparer.IsChanged(current, baseline, tolerance);
 
-    /// <summary>
-    /// Precondition on the hash branch below: <see cref="NodeFingerprint.ContentHash"/> strings
-    /// are only comparable when both sides' <see cref="NodeFingerprint.HashAlgorithm"/> are the
-    /// same algorithm. A provider whose remote hash isn't SHA-1 (docs/PLAN-CLOUD-PROVIDERS.md P6)
-    /// would otherwise have a locally-computed SHA-1 compared against a QuickXor digest — two
-    /// unrelated strings that will simply never match, silently reporting every file as changed.
-    /// <see cref="RemoteHashAlgorithm.None"/> or a missing tag is not treated as a mismatch: it
-    /// means "unknown", the honest state of every fingerprint before P4 persists the algorithm,
-    /// and today's only algorithm (Sha1) is correct on both sides regardless.
-    /// </summary>
     private static bool AreEquivalent(NodeFingerprint? a, NodeFingerprint? b, TimeSpan tolerance)
-    {
-        if (a is null || b is null)
-        {
-            return false;
-        }
-
-        if (a.Size != b.Size)
-        {
-            return false;
-        }
-
-        if (a.ContentHash is not null && b.ContentHash is not null && !IsAlgorithmMismatch(a.HashAlgorithm, b.HashAlgorithm))
-        {
-            return string.Equals(a.ContentHash, b.ContentHash, StringComparison.Ordinal);
-        }
-
-        if (a.ModifiedAt is null || b.ModifiedAt is null)
-        {
-            return a.ModifiedAt == b.ModifiedAt;
-        }
-
-        return (a.ModifiedAt.Value - b.ModifiedAt.Value).Duration() <= tolerance;
-    }
-
-    /// <summary>
-    /// True only when both sides name a <em>known</em> algorithm and they differ. Matches the doc
-    /// comment on <see cref="AreEquivalent"/>: <see cref="RemoteHashAlgorithm.None"/> is "no
-    /// algorithm", exactly as meaningless for this comparison as a missing (null) tag, so neither
-    /// one — alone or together — counts as a mismatch against anything.
-    /// </summary>
-    private static bool IsAlgorithmMismatch(RemoteHashAlgorithm? a, RemoteHashAlgorithm? b)
-        => IsKnownAlgorithm(a) && IsKnownAlgorithm(b) && a != b;
-
-    private static bool IsKnownAlgorithm(RemoteHashAlgorithm? algorithm)
-        => algorithm is not (null or RemoteHashAlgorithm.None);
+        => NodeFingerprintComparer.AreEquivalent(a, b, tolerance);
 
     private static int PriorityFor(SyncOperation operation, string relativePath)
     {

@@ -61,6 +61,39 @@ public sealed class LocalNodeViewModel : ObservableObject
 
     public bool IsSyncPairActive => HasSyncPair && !IsSyncPairPaused;
 
+    private SyncNodeStatus _syncStatus = SyncNodeStatus.NotInPair;
+
+    /// <summary>
+    /// This row's own sync state (docs/PLAN-SYNC-VISIBILITY.md S4). Unlike the cloud pane's, it is
+    /// an aggregate: several pairs — possibly on different providers — can be configured against
+    /// one local folder, and the row has to answer for all of them at once.
+    /// </summary>
+    public SyncNodeStatus SyncStatus
+    {
+        get => _syncStatus;
+        set
+        {
+            if (SetProperty(ref _syncStatus, value))
+            {
+                OnPropertyChanged(nameof(HasSyncStatus));
+                OnPropertyChanged(nameof(SyncStatusText));
+                OnPropertyChanged(nameof(SyncStatusTooltip));
+            }
+        }
+    }
+
+    /// <summary>Whether to draw a badge — a row under no pair at all gets none.</summary>
+    public bool HasSyncStatus => SyncStatusPresenter.IsVisible(SyncStatus);
+
+    /// <summary>The badge's accessible name: for a screen reader, the only carrier of what it says.</summary>
+    public string SyncStatusText => SyncStatusPresenter.Describe(SyncStatus);
+
+    /// <summary>The badge's tooltip — the status, then which providers it is about.</summary>
+    public string SyncStatusTooltip => SyncStatusPresenter.Describe(SyncStatus, SyncStatusContext);
+
+    /// <summary>The second half of the tooltip; null leaves the bare status label.</summary>
+    public string? SyncStatusContext { get; set; }
+
     public bool CanCreateSyncPair => IsFolder && !HasSyncPair;
 
     /// <summary>Opens: into the folder, or nothing for a file. Double click or Enter (docs/PLAN-UX-ROUND-3.md X2).</summary>

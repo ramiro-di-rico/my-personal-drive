@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Localization;
+using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.ViewModels.Sync;
 
 namespace MyPersonalDrive.ViewModels.Local;
@@ -217,6 +218,14 @@ public sealed class LocalExplorerViewModel : ObservableObject
     public Func<string, SyncPairViewModel?>? FindSyncPairByPath { get; set; }
 
     /// <summary>
+    /// Every pair, on every account, covering a local path — the badges' source
+    /// (docs/PLAN-SYNC-VISIBILITY.md S4). Supplied by <c>MainWindowViewModel</c> for the same
+    /// reason <see cref="FindSyncPairByPath"/> is: this pane holds no reference to the sync panel,
+    /// and the cross-account merge only exists there.
+    /// </summary>
+    public Func<string, Task<IReadOnlyList<SyncStatusLookup>>>? LookupSyncStatusesAsync { get; set; }
+
+    /// <summary>
     /// The remote path a local path maps to, or null when it is outside every sync pair. Supplied
     /// by <c>MainWindowViewModel</c> so this pane needs no reference to the sync panel or to
     /// <c>PathMapper</c> (docs/PLAN-UX-ROUND-2.md §12).
@@ -370,10 +379,98 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
         RaiseSelectionChanged();
         OnPropertyChanged(nameof(SearchResultText));
+
+        // Fire and forget, like the cloud pane's badges: two database reads per covering pair, and
+        // a row must paint without waiting on them.
+        _ = AnnotateSyncStatusesAsync(Items.ToList());
+
         // See MainWindowViewModel.RenderItems: not before the first paint.
         _hasRenderedListing = true;
         RaiseEmptyStateChanged();
     }
+
+    /// <summary>
+    /// Fills in each row's <see cref="LocalNodeViewModel.SyncStatus"/>
+    /// (docs/PLAN-SYNC-VISIBILITY.md S4). One lookup per row rather than one per pane, because a
+    /// local folder's children can each sit under a different set of pairs — the lookup itself is
+    /// a cached in-memory match, so the cost is the two reads per pair, once.
+    /// </summary>
+    private async Task AnnotateSyncStatusesAsync(IReadOnlyList<LocalNodeViewModel> rows)
+    {
+        var lookupAsync = LookupSyncStatusesAsync;
+        if (lookupAsync is null || rows.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var row in rows)
+        {
+            IReadOnlyList<SyncStatusLookup> lookups;
+            try
+            {
+                lookups = await lookupAsync(row.Item.Path);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Contention over cache.db, or a pane that went away mid-flight. A badge is never
+                // worth surfacing an error for.
+                return;
+            }
+
+            var statuses = lookups
+                .Select(lookup => (lookup.AccountLabel, Status: row.IsFolder
+                    ? lookup.Index.StatusForFolder(lookup.RelativePath, [], SyncSide.Local)
+                    : lookup.Index.StatusForFile(lookup.RelativePath, LocalFingerprintOf(row.Item, lookup.RelativePath), SyncSide.Local)))
+                .ToList();
+
+            var (status, context) = Aggregate(statuses);
+            row.SyncStatusContext = context;
+            row.SyncStatus = status;
+        }
+    }
+
+    /// <summary>
+    /// One badge for N providers (docs/PLAN-SYNC-VISIBILITY.md §4): all settled is settled, any
+    /// state demanding attention wins by <see cref="SyncStatusPrecedence"/>, and a mix of settled
+    /// and merely-unsynced reads as partially synced — with the counts in the tooltip, because
+    /// "partially" without "2 of 3" leaves the user to go looking.
+    /// </summary>
+    internal static (SyncNodeStatus Status, string? Context) Aggregate(IReadOnlyList<(string Account, SyncNodeStatus Status)> statuses)
+    {
+        if (statuses.Count == 0)
+        {
+            return (SyncNodeStatus.NotInPair, null);
+        }
+
+        if (statuses.Count == 1)
+        {
+            return (statuses[0].Status, statuses[0].Account);
+        }
+
+        var settled = statuses.Count(entry => SyncStatusPrecedence.IsSettled(entry.Status));
+        var localizer = Localizer.Instance;
+        var counts = localizer.F(StringKeys.SyncStatus.ProviderCounts, settled.ToString(localizer.Culture), statuses.Count.ToString(localizer.Culture));
+        if (settled == statuses.Count)
+        {
+            return (SyncNodeStatus.Synced, string.Join(", ", statuses.Select(entry => entry.Account)));
+        }
+
+        var worst = SyncStatusPrecedence.Max(statuses.Select(entry => entry.Status), SyncNodeStatus.Unknown);
+        if (settled > 0 && SyncStatusPrecedence.RankOf(worst) >= SyncStatusPrecedence.RankOf(SyncNodeStatus.PartiallySynced))
+        {
+            return (SyncNodeStatus.PartiallySynced, counts);
+        }
+
+        return (worst, counts);
+    }
+
+    /// <summary>
+    /// The local row as the engine sees it. No content hash: hashing a file to draw a badge is
+    /// exactly the kind of work docs/PLAN-SYNC-VISIBILITY.md §8 rules out, so the comparison falls
+    /// back to size and mtime — the same fallback the reconciler uses when a hash is missing.
+    /// </summary>
+    private static NodeFingerprint LocalFingerprintOf(DriveItem item, string relativePath)
+        => new(relativePath, item.IsFolder, item.Size, item.ModifiedAt, null, null);
 
     /// <summary>
     /// A plain click (no modifier): activates like before Task 2.2 existed — selects just this row,

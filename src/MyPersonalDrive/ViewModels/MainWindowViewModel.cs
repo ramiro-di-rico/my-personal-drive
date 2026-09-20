@@ -412,6 +412,10 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             RequestSyncSelectedPathAsync = localPath => SyncPanel.AddPairAsync(new SyncPairPrefill(null, localPath)),
             FindSyncPairByPath = SyncPanel.FindPairByLocalPath,
+            // The cross-account merge the local badges need (docs/PLAN-SYNC-VISIBILITY.md S4):
+            // one local folder can be mapped by pairs on several providers at once, and only the
+            // sync panel holds every account's store.
+            LookupSyncStatusesAsync = LookupLocalSyncStatusesAsync,
             FindRemotePathFor = RemotePathFor,
         };
 
@@ -3250,6 +3254,23 @@ public sealed class MainWindowViewModel : ObservableObject
                 rows[i].SyncStatus = statuses[i].Status;
             }
         });
+    }
+
+    /// <summary>
+    /// Every pair, on every signed-in account, that covers a local path
+    /// (docs/PLAN-SYNC-VISIBILITY.md S4/S5). Unlike the remote side this is legitimately plural:
+    /// two providers can be configured against the same local folder
+    /// (<c>SyncPair.SharesLocalFolder</c>, docs/PLAN-LOCAL-SYNC.md §12).
+    /// </summary>
+    private async Task<IReadOnlyList<SyncStatusLookup>> LookupLocalSyncStatusesAsync(string localPath)
+    {
+        var results = new List<SyncStatusLookup>();
+        foreach (var service in SyncPanel.StatusServices)
+        {
+            results.AddRange(await service.LookupLocalAsync(localPath));
+        }
+
+        return results;
     }
 
     /// <summary>

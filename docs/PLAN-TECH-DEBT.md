@@ -429,6 +429,30 @@ test, rather than at one call site.
 **What it blocks.** Nothing, but it will keep costing a random red run in CI, which is how test
 suites lose their authority.
 
+### B3.2 — `RemovingOneOfTwoSharingPairs_ClearsTheFlagOnTheSurvivor` fails in isolation
+
+**Where.** `tests/MyPersonalDrive.Tests/ViewModels/SyncSharedLocalFolderTests.cs:147`, against
+`ViewModels.Sync.SyncPanelViewModel.RemovePairViewModel`, which recomputes
+`SyncPair.SharesLocalFolder` through a deliberately fire-and-forget
+`RefreshSharedLocalFolderFlagsSafelyAsync()`.
+
+**What goes wrong.** The test awaits `RemoveCommand` and then reads the store, but the recompute it
+is asserting on was never awaited. Run with the rest of the suite it usually wins the race; run on
+its own (`--filter "FullyQualifiedName~RemovingOneOfTwoSharingPairs"`) it fails every time, with
+`SharesLocalFolder` still `true`. Confirmed on `main` at `294027d`, before and independently of the
+sync-visibility work — reproduced three times in a row, and the sibling
+`WithThreePairsSharing_RemovingOneLeavesTheOtherTwoMarked` passes because it asserts the value the
+stale row already has.
+
+**Why it wasn't fixed here.** The fix is a seam, not an assertion tweak: the panel needs a way for a
+test to await its outstanding background work (the same thing B3.1 wants for `FakeCliExecutor`), or
+`RemovePairViewModel` needs to expose the refresh task. Changing the production method to await
+inline would change real behavior — the comment there explains why the removal must not be held up
+by the flag recompute.
+
+**What it blocks.** Nothing, but it is a guaranteed red whenever someone runs that one test alone,
+which is exactly what someone touching shared-folder behavior would do first.
+
 ## 6. Batch B4 — Persistence and state (1.5 d) · TD-8
 
 ### B4.1 — Schema versioning (prerequisite for everything that touches the DB)

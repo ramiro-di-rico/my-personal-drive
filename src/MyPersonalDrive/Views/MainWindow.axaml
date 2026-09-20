@@ -1240,24 +1240,36 @@
                                  VerticalAlignment="Center"
                                  TextTrimming="CharacterEllipsis"
                                  Text="{Binding DisplayName}" />
-                      <Path Grid.Column="2"
-                            Classes="icon"
-                            Width="12"
-                            Height="12"
-                            Opacity="0.7"
-                            VerticalAlignment="Center"
-                            Data="{StaticResource IconRefresh}"
-                            IsVisible="{Binding IsSyncPairActive}"
-                            ToolTip.Tip="{Binding Loc[explorer.row.syncactive.tooltip]}" />
-                      <Path Grid.Column="2"
-                            Classes="icon"
-                            Width="12"
-                            Height="12"
-                            Opacity="0.7"
-                            VerticalAlignment="Center"
-                            Data="{StaticResource IconPause}"
-                            IsVisible="{Binding IsSyncPairPaused}"
-                            ToolTip.Tip="{Binding Loc[explorer.row.syncpaused.tooltip]}" />
+                      <!-- One stack, not three elements overlapping in the same cell: the pair
+                           badges answer "is this a pair, and is it running", the status badge
+                           answers "is this row's content up to date", and both can be true. -->
+                      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <Path Classes="icon"
+                              Width="12"
+                              Height="12"
+                              Opacity="0.7"
+                              Data="{StaticResource IconRefresh}"
+                              IsVisible="{Binding IsSyncPairActive}"
+                              ToolTip.Tip="{Binding Loc[explorer.row.syncactive.tooltip]}" />
+                        <Path Classes="icon"
+                              Width="12"
+                              Height="12"
+                              Opacity="0.7"
+                              Data="{StaticResource IconPause}"
+                              IsVisible="{Binding IsSyncPairPaused}"
+                              ToolTip.Tip="{Binding Loc[explorer.row.syncpaused.tooltip]}" />
+                        <!-- This row's own sync state across every provider that maps this folder
+                             (docs/PLAN-SYNC-VISIBILITY.md S4). Distinct shape per state, and an
+                             accessible name because for a screen reader the glyph is all there is. -->
+                        <Path Classes="icon"
+                              Width="13"
+                              Height="13"
+                              Data="{Binding SyncStatus, Converter={x:Static conv:SyncStatusIconConverter.Instance}}"
+                              Stroke="{Binding SyncStatus, Converter={x:Static conv:SyncStatusBrushConverter.Instance}}"
+                              IsVisible="{Binding HasSyncStatus}"
+                              ToolTip.Tip="{Binding SyncStatusTooltip}"
+                              AutomationProperties.Name="{Binding SyncStatusText}" />
+                      </StackPanel>
                       <TextBlock Grid.Column="3"
                                  VerticalAlignment="Center"
                                  FontSize="12"

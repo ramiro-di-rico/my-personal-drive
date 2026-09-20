@@ -404,6 +404,7 @@ public class NoHardcodedStringsTests
         or "sync.filter.label"
         or "sync.progress"
         or "sync.status.error"
+        or "syncstatus.tooltip.withpair"  // "{0} — {1}"
         or "transfer.failed"              // "Error" / "Error"
         or "viewer.note.bytes"
         or "viewer.zoom.label";           // "Zoom:" / "Zoom:"

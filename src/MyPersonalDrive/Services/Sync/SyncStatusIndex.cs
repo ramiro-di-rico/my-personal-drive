@@ -155,7 +155,24 @@ public sealed class SyncStatusIndex
             return HasSyncedOnce ? WithPause(SyncNodeStatus.NotSynced) : SyncNodeStatus.Unknown;
         }
 
-        return SyncNodeStatus.Unknown;
+        if (!HasSyncedOnce)
+        {
+            return SyncNodeStatus.Unknown;
+        }
+
+        // Baselined, nothing queued, and a cycle has completed: as of that cycle everything under
+        // here was equal on both sides, and anything that had not been would have left a queue row
+        // (the branch above) — so this is a statement about the last cycle, not a guess, and the
+        // tooltip says so. A cycle that only partly succeeded cannot make that claim.
+        // Refines docs/PLAN-SYNC-VISIBILITY.md §1.2, which left this case Unknown: in practice
+        // every collapsed folder in a healthy pair fell into it, so the pane was a field of
+        // question marks that told the user nothing.
+        return _pair.LastStatus switch
+        {
+            SyncPairStatus.Ok => WithPause(SyncNodeStatus.Synced),
+            SyncPairStatus.PartialFailure => WithPause(SyncNodeStatus.PartiallySynced),
+            _ => SyncNodeStatus.Unknown,
+        };
     }
 
     /// <summary>

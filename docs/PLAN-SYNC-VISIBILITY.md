@@ -93,7 +93,15 @@ pair itself and its `ExclusionMatcher`. Exposes:
 - `PartiallySynced` if those children disagree — some `Synced`, some not.
 
 If the folder has no baseline descendants *and* no queue rows *and* the caller listed no children
-(a collapsed folder in a tile view), the answer is `Unknown`, not `Synced`. `Unknown` renders as a
+(a collapsed folder in a tile view), the answer is `Unknown`, not `Synced`.
+
+> **Refined during S3.** As first written this left *every* collapsed folder in a healthy pair at
+> `Unknown`, which is most of what a cloud pane shows — a field of question marks that tells the
+> user nothing. A collapsed folder that is baselined, carries no queue row under it, and whose pair
+> completed its last cycle cleanly (`LastStatus == Ok`) now answers `Synced`: anything unequal at
+> that cycle would have left a queue row, so this is a statement about the last cycle rather than a
+> guess, and the tooltip says "as of the last sync". `PartialFailure` answers `PartiallySynced`,
+> `Error` stays `Unknown`. `Unknown` renders as a
 neutral hollow glyph with a tooltip saying so; it must never be styled like success. The one case
 where a folder with no listed children may still answer confidently is when the baseline has *no*
 entry under its prefix and the pair has completed at least one successful cycle

@@ -744,6 +744,18 @@
                             IsVisible="{Binding IsSyncPairActive}" ToolTip.Tip="{Binding Loc[explorer.row.syncactive.tooltip]}" />
                       <Path Classes="icon" Data="{StaticResource IconPause}" Width="12" Height="12" Opacity="0.7"
                             IsVisible="{Binding IsSyncPairPaused}" ToolTip.Tip="{Binding Loc[explorer.row.syncpaused.tooltip]}" />
+                      <!-- This row's own sync state (docs/PLAN-SYNC-VISIBILITY.md S3). Distinct shape per
+                           state, not just a distinct colour, and an accessible name because for a screen
+                           reader the glyph is the only thing saying it. -->
+                      <Path Classes="icon"
+                            Width="13"
+                            Height="13"
+                            VerticalAlignment="Center"
+                            Data="{Binding SyncStatus, Converter={x:Static conv:SyncStatusIconConverter.Instance}}"
+                            Stroke="{Binding SyncStatus, Converter={x:Static conv:SyncStatusBrushConverter.Instance}}"
+                            IsVisible="{Binding HasSyncStatus}"
+                            ToolTip.Tip="{Binding SyncStatusTooltip}"
+                            AutomationProperties.Name="{Binding SyncStatusText}" />
                     </StackPanel>
                   </Button>
 
@@ -885,6 +897,19 @@
                                  MaxLines="2"
                                  TextTrimming="CharacterEllipsis"
                                  FontSize="12" />
+                      <!-- This row's own sync state (docs/PLAN-SYNC-VISIBILITY.md S3). Distinct shape per
+                           state, not just a distinct colour, and an accessible name because for a screen
+                           reader the glyph is the only thing saying it. -->
+                      <Path Classes="icon"
+                            Width="13"
+                            Height="13"
+                            VerticalAlignment="Center"
+                      HorizontalAlignment="Center"
+                            Data="{Binding SyncStatus, Converter={x:Static conv:SyncStatusIconConverter.Instance}}"
+                            Stroke="{Binding SyncStatus, Converter={x:Static conv:SyncStatusBrushConverter.Instance}}"
+                            IsVisible="{Binding HasSyncStatus}"
+                            ToolTip.Tip="{Binding SyncStatusTooltip}"
+                            AutomationProperties.Name="{Binding SyncStatusText}" />
                     </StackPanel>
                   </Button>
                 </Border>
@@ -979,6 +1004,19 @@
                                  Opacity="0.7"
                                  FontSize="12"
                                  IsVisible="{Binding HasDeepSize}" />
+                      <!-- This row's own sync state (docs/PLAN-SYNC-VISIBILITY.md S3). Distinct shape per
+                           state, not just a distinct colour, and an accessible name because for a screen
+                           reader the glyph is the only thing saying it. -->
+                      <Path Classes="icon"
+                            Width="13"
+                            Height="13"
+                            VerticalAlignment="Center"
+                      HorizontalAlignment="Center"
+                            Data="{Binding SyncStatus, Converter={x:Static conv:SyncStatusIconConverter.Instance}}"
+                            Stroke="{Binding SyncStatus, Converter={x:Static conv:SyncStatusBrushConverter.Instance}}"
+                            IsVisible="{Binding HasSyncStatus}"
+                            ToolTip.Tip="{Binding SyncStatusTooltip}"
+                            AutomationProperties.Name="{Binding SyncStatusText}" />
                     </StackPanel>
                   </Button>
                 </Border>

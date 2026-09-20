@@ -122,6 +122,44 @@ public sealed class DriveNodeViewModel : ObservableObject
 
     public bool IsSyncPairActive => HasSyncPair && !IsSyncPairPaused;
 
+    private SyncNodeStatus _syncStatus = SyncNodeStatus.NotInPair;
+
+    /// <summary>
+    /// This row's own sync state (docs/PLAN-SYNC-VISIBILITY.md S3) — distinct from
+    /// <see cref="HasSyncPair"/>, which says the row *is* a pair's root. Settable so a sync event
+    /// can update a visible row in place: re-listing the pane instead would cost a provider round
+    /// trip every time the queue moves.
+    /// </summary>
+    public SyncNodeStatus SyncStatus
+    {
+        get => _syncStatus;
+        set
+        {
+            if (SetProperty(ref _syncStatus, value))
+            {
+                OnPropertyChanged(nameof(HasSyncStatus));
+                OnPropertyChanged(nameof(SyncStatusText));
+                OnPropertyChanged(nameof(SyncStatusTooltip));
+            }
+        }
+    }
+
+    /// <summary>Whether to draw a badge — rows outside every pair get none, which is most of them.</summary>
+    public bool HasSyncStatus => SyncStatusPresenter.IsVisible(SyncStatus);
+
+    /// <summary>The badge's accessible name: for a screen reader, the only carrier of what it says.</summary>
+    public string SyncStatusText => SyncStatusPresenter.Describe(SyncStatus);
+
+    /// <summary>
+    /// The badge's tooltip. <see cref="SyncStatusContext"/> is set alongside
+    /// <see cref="SyncStatus"/> by whoever computed it — the pair's remote folder for a cloud row,
+    /// the provider names for a local one.
+    /// </summary>
+    public string SyncStatusTooltip => SyncStatusPresenter.Describe(SyncStatus, SyncStatusContext);
+
+    /// <summary>The second half of the tooltip; null leaves the bare status label.</summary>
+    public string? SyncStatusContext { get; set; }
+
     /// <summary>Whether "Sync Selected Path..." makes sense here — a folder with no pair on it yet.</summary>
     public bool CanCreateSyncPair => IsFolder && !HasSyncPair;
 

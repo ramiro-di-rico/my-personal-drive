@@ -22,7 +22,7 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// ever appends, so nothing about the primary slot's behavior changes for callers that never
     /// call it (every existing test).
     /// </summary>
-    private sealed record AccountSlot(string DisplayName, SyncStateStore StateStore, SyncExecutor Executor, SyncCrashRecovery CrashRecovery, SyncScheduler? Scheduler);
+    private sealed record AccountSlot(string DisplayName, SyncStateStore StateStore, SyncExecutor Executor, SyncCrashRecovery CrashRecovery, SyncScheduler? Scheduler, SyncStatusService StatusService);
 
     private readonly List<AccountSlot> _slots = new();
     private LocalizedText _status = LocalizedText.None;
@@ -98,7 +98,7 @@ public sealed class SyncPanelViewModel : ObservableObject
         RefreshCommand = new AsyncCommand(LoadPairsAsync, () => !IsBusy, ReportError);
         ToggleAutomaticSyncCommand = new AsyncCommand(ToggleAutomaticSyncAsync, () => Primary.Scheduler is not null, ReportError);
 
-        AddSlot(new AccountSlot(providerDisplayName, stateStore, executor, crashRecovery, scheduler));
+        AddSlot(new AccountSlot(providerDisplayName, stateStore, executor, crashRecovery, scheduler, new SyncStatusService(stateStore, providerDisplayName)));
     }
 
     /// <summary>
@@ -120,7 +120,7 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// <see cref="RefreshCommand"/> itself.
     /// </summary>
     public void AddAccount(SyncStateStore stateStore, SyncExecutor executor, SyncCrashRecovery crashRecovery, SyncScheduler? scheduler, string providerDisplayName)
-        => AddSlot(new AccountSlot(providerDisplayName, stateStore, executor, crashRecovery, scheduler));
+        => AddSlot(new AccountSlot(providerDisplayName, stateStore, executor, crashRecovery, scheduler, new SyncStatusService(stateStore, providerDisplayName)));
 
     private void AddSlot(AccountSlot slot)
     {
@@ -131,7 +131,13 @@ public sealed class SyncPanelViewModel : ObservableObject
         {
             // A cycle the scheduler ran on its own still has to be reflected in the row the user
             // is looking at, or the panel would show stale "Up to date" times.
-            slot.Scheduler.PairSynced += (_, _) => Dispatcher.UIThread.Post(() => _ = LoadPairsAsync());
+            slot.Scheduler.PairSynced += (_, _) => Dispatcher.UIThread.Post(() =>
+            {
+                // The badges (docs/PLAN-SYNC-VISIBILITY.md S6) are derived from rows this cycle
+                // just rewrote, so the cached index has to go before anything re-reads it.
+                slot.StatusService.Invalidate();
+                _ = LoadPairsAsync();
+            });
             slot.Scheduler.WatcherDegraded += (_, reason) => Dispatcher.UIThread.Post(() => SetStatus(LocalizedText.Verbatim($"{slot.DisplayName}: {reason}")));
         }
     }
@@ -384,6 +390,12 @@ public sealed class SyncPanelViewModel : ObservableObject
 
     private async Task LoadPairsAsync()
     {
+        // Every path that changes a pair — adding, editing, pausing, removing, resolving a
+        // conflict, retrying a failure — reloads through here, so this is the one place the
+        // badges' cached indexes have to be dropped (docs/PLAN-SYNC-VISIBILITY.md S6). Doing it
+        // per call site would mean finding all of them, and the next one would be forgotten.
+        InvalidateStatuses();
+
         IsBusy = true;
         try
         {
@@ -703,6 +715,30 @@ public sealed class SyncPanelViewModel : ObservableObject
     }
 
     /// <summary>Looks up the configured pair (if any) whose remote side is <paramref name="remotePath"/> — for the cloud pane's sync badges (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6).</summary>
+    /// <summary>
+    /// Every account's status service, in registration order — the cross-account view the
+    /// Properties dialog needs (docs/PLAN-SYNC-VISIBILITY.md S5). This panel is the only object
+    /// that holds every account's <see cref="SyncStateStore"/>, which is why the merge lives here
+    /// and not inside a service that only ever sees one account.
+    /// </summary>
+    public IReadOnlyList<SyncStatusService> StatusServices => _slots.Select(slot => slot.StatusService).ToList();
+
+    /// <summary>The status service of the account the browser is currently showing.</summary>
+    public SyncStatusService ActiveStatusService => ActiveSlot.StatusService;
+
+    /// <summary>
+    /// Drops every cached index. Called after anything that changes what a badge should say but
+    /// does not come from a scheduler cycle — adding, editing, pausing or removing a pair, and
+    /// resolving a conflict or retrying a failure from the sync panel.
+    /// </summary>
+    public void InvalidateStatuses()
+    {
+        foreach (var slot in _slots)
+        {
+            slot.StatusService.Invalidate();
+        }
+    }
+
     public SyncPairViewModel? FindPairByRemotePath(string remotePath)
         => Pairs.FirstOrDefault(pair => PathsEqual(pair.RemotePath, remotePath));
 

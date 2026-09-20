@@ -202,8 +202,24 @@ public class SyncStatusIndexTests
         => Assert.Equal(SyncNodeStatus.Unknown, IndexOf(pair: PairFor(hasSynced: false)).StatusForFolder("Sub", [], SyncSide.Remote));
 
     [Fact]
-    public void Collapsed_folder_with_a_baseline_below_but_no_listing_is_unknown()
-        => Assert.Equal(SyncNodeStatus.Unknown, IndexOf(Baseline(("Sub/a.txt", FileFp("Sub/a.txt")))).StatusForFolder("Sub", [], SyncSide.Remote));
+    public void Collapsed_baselined_folder_with_a_clean_last_cycle_is_synced()
+        => Assert.Equal(SyncNodeStatus.Synced, IndexOf(Baseline(("Sub/a.txt", FileFp("Sub/a.txt")))).StatusForFolder("Sub", [], SyncSide.Remote));
+
+    [Fact]
+    public void Collapsed_baselined_folder_after_a_partial_cycle_is_partially_synced()
+    {
+        var pair = PairFor() with { LastStatus = SyncPairStatus.PartialFailure };
+        var index = IndexOf(Baseline(("Sub/a.txt", FileFp("Sub/a.txt"))), pair: pair);
+        Assert.Equal(SyncNodeStatus.PartiallySynced, index.StatusForFolder("Sub", [], SyncSide.Remote));
+    }
+
+    [Fact]
+    public void Collapsed_baselined_folder_after_a_failed_cycle_is_unknown()
+    {
+        var pair = PairFor() with { LastStatus = SyncPairStatus.Error };
+        var index = IndexOf(Baseline(("Sub/a.txt", FileFp("Sub/a.txt"))), pair: pair);
+        Assert.Equal(SyncNodeStatus.Unknown, index.StatusForFolder("Sub", [], SyncSide.Remote));
+    }
 
     [Fact]
     public void Excluded_children_count_as_settled()

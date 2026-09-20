@@ -3149,6 +3149,8 @@ public sealed class MainWindowViewModel : ObservableObject
             var node = new DriveNodeViewModel(item, HandleRowClickAsync, SelectRowAsync, DownloadItemAsync, TrashItemAsync, RenameItemAsync, CopyItemAsync, Preview.PreviewItemAsync, HandleUnexpectedError, new DriveNodeSyncActions
             {
                 FindSyncPair = i => SyncPanel.FindPairByRemotePath(i.Path),
+                // The per-row status itself is filled in afterwards by AnnotateSyncStatusesAsync:
+                // it needs a database read, and a row template must not block on one.
                 SyncSelectedPathAsync = SyncSelectedRemotePathAsync,
                 CopyPathAsync = CopyPathAsync,
                 UploadToFolderAsync = UploadToFolderAsync,
@@ -3198,7 +3200,99 @@ public sealed class MainWindowViewModel : ObservableObject
         // Fire and forget: a stored folder size is a nice-to-have annotation, and the rows must
         // paint without waiting on the database.
         _ = AnnotateFolderSizesAsync(CurrentPath, RootItems.Where(node => node.IsFolder).ToList());
+
+        // Same shape, same reason (docs/PLAN-SYNC-VISIBILITY.md S3): the badges come from two
+        // whole-pair reads of cache.db, and a row must never wait on a database to appear.
+        _ = AnnotateSyncStatusesAsync(CurrentPath, RootItems.ToList());
     }
+
+    /// <summary>
+    /// Fills in <see cref="DriveNodeViewModel.SyncStatus"/> for the rows on screen
+    /// (docs/PLAN-SYNC-VISIBILITY.md S3). One lookup for the folder, then a pure per-row question
+    /// answered from the index it returns — no query per row, and no remote call at all.
+    ///
+    /// Pairs cannot nest (docs/PLAN-LOCAL-SYNC.md §12 makes that a hard validation error), so at
+    /// most one pair covers this folder and every row in it has exactly one status.
+    /// </summary>
+    private async Task AnnotateSyncStatusesAsync(string path, IReadOnlyList<DriveNodeViewModel> rows)
+    {
+        if (rows.Count == 0)
+        {
+            return;
+        }
+
+        SyncStatusLookup? lookup;
+        try
+        {
+            lookup = await SyncPanel.ActiveStatusService.LookupRemoteAsync(path);
+        }
+        catch (DbException)
+        {
+            // Contention with the sync engine over cache.db. A badge is not worth a warning.
+            return;
+        }
+
+        if (lookup is null)
+        {
+            return;
+        }
+
+        var context = lookup.Index.Pair.RemotePath;
+        var statuses = ComputeRemoteStatuses(lookup, rows.Select(row => row.Item).ToList());
+
+        // Posted, not awaited, for the same reason AnnotateFolderSizesAsync posts: nothing waits
+        // on this, and awaiting a dispatcher hop would hang wherever no dispatcher loop runs.
+        Dispatcher.UIThread.Post(() =>
+        {
+            for (var i = 0; i < rows.Count && i < statuses.Count; i++)
+            {
+                rows[i].SyncStatusContext = context;
+                rows[i].SyncStatus = statuses[i].Status;
+            }
+        });
+    }
+
+    /// <summary>
+    /// The per-row statuses for one listing, in the order the items came in. Separated from the
+    /// annotation above — and internal — because everything interesting about S3 is here, while
+    /// the caller is a database read and a dispatcher hop that no unit test can observe.
+    ///
+    /// A folder row is rolled up with no listed children: the pane has listed this folder, not its
+    /// subfolders' contents, and inventing an answer for what it cannot see is exactly what
+    /// <c>SyncStatusIndex</c> refuses to do.
+    /// </summary>
+    internal static IReadOnlyList<(DriveItem Item, SyncNodeStatus Status)> ComputeRemoteStatuses(
+        SyncStatusLookup lookup,
+        IReadOnlyList<DriveItem> items)
+    {
+        var index = lookup.Index;
+        var statuses = new List<(DriveItem, SyncNodeStatus)>(items.Count);
+        foreach (var item in items)
+        {
+            var relative = lookup.RelativePath.Length == 0 ? item.Name : $"{lookup.RelativePath}/{item.Name}";
+            statuses.Add((item, item.IsFolder
+                ? index.StatusForFolder(relative, [], SyncSide.Remote)
+                : index.StatusForFile(relative, FingerprintOf(item, relative), SyncSide.Remote)));
+        }
+
+        return statuses;
+    }
+
+    /// <summary>
+    /// The listing row as the engine's own vocabulary sees it. The remote hash is SHA-1 for every
+    /// provider that reports one today (docs/PLAN-CLOUD-PROVIDERS.md P6); tagging it lets
+    /// <c>NodeFingerprintComparer</c> apply P3's algorithm guard rather than comparing two digests
+    /// that were never comparable.
+    /// </summary>
+    private static NodeFingerprint FingerprintOf(DriveItem item, string relativePath)
+        => new(
+            relativePath,
+            item.IsFolder,
+            item.Size,
+            item.ModifiedAt,
+            item.NodeId,
+            item.ContentHash,
+            item.ContentHash is null ? null : RemoteHashAlgorithm.Sha1);
 
     /// <summary>
     /// Fills in <see cref="DriveNodeViewModel.DeepSizeText"/> for the folders on screen that someone

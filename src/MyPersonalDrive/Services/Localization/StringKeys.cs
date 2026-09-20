@@ -811,6 +811,45 @@ public static class StringKeys
         public const string Video = "filekind.video";
     }
 
+    /// <summary>
+    /// The per-row sync badge's label and tooltip, one pair of keys per
+    /// <c>Models.SyncNodeStatus</c> (docs/PLAN-SYNC-VISIBILITY.md S3). The label is also the
+    /// badge's accessible name: for a screen reader it is the only carrier of what the glyph says.
+    /// </summary>
+    public static class SyncStatus
+    {
+        public const string Conflict = "syncstatus.conflict";
+        public const string Excluded = "syncstatus.excluded";
+        public const string Failed = "syncstatus.failed";
+        public const string NotInPair = "syncstatus.notinpair";
+        public const string NotSynced = "syncstatus.notsynced";
+        public const string OutOfDate = "syncstatus.outofdate";
+        public const string PartiallySynced = "syncstatus.partiallysynced";
+        public const string Paused = "syncstatus.paused";
+        public const string Pending = "syncstatus.pending";
+        public const string Synced = "syncstatus.synced";
+        public const string Syncing = "syncstatus.syncing";
+        public const string Unknown = "syncstatus.unknown";
+
+        /// <summary>"{0} — {1}": the status, then the pair it is about. Used by every tooltip.</summary>
+        public const string TooltipWithPair = "syncstatus.tooltip.withpair";
+
+        /// <summary>"{0} of {1} providers up to date" — the local pane's multi-pair summary.</summary>
+        public const string ProviderCounts = "syncstatus.providercounts";
+
+        /// <summary>Qualifies a collapsed folder's answer, which describes the last cycle.</summary>
+        public const string AsOfLastSync = "syncstatus.asoflastsync";
+
+        /// <summary>The Properties dialog's per-provider section heading.</summary>
+        public const string SectionTitle = "syncstatus.section.title";
+
+        /// <summary>Shown in that section for a provider with no pair covering the item.</summary>
+        public const string SectionNoPair = "syncstatus.section.nopair";
+
+        /// <summary>"Last sync: {0}" inside that section.</summary>
+        public const string SectionLastSync = "syncstatus.section.lastsync";
+    }
+
     /// <summary>Provider session labels shown by the picker and the connection cards.</summary>
     public static class Provider
     {

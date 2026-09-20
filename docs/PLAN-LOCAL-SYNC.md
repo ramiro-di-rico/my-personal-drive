@@ -1107,6 +1107,10 @@ Cross-cutting safety rule: **never delete locally without a trash**. Move to
 
 ## 12. Proposed UI
 
+> Per-node sync status on the browser rows (and per-provider status in Properties) is planned
+> separately in [PLAN-SYNC-VISIBILITY.md](PLAN-SYNC-VISIBILITY.md) — this section covers the sync
+> panel itself, which is about *pairs*, not about individual files and folders.
+
 New **"Sync"** tab next to the current browser (or a side panel).
 
 - **Pair list**: for each one — remote folder, local folder, direction (icon),

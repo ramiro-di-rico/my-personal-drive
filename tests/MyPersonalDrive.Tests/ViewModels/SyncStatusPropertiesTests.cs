@@ -96,6 +96,25 @@ public class SyncStatusPropertiesTests : IDisposable
     }
 
     [Fact]
+    public async Task A_file_is_never_reported_as_partially_synced()
+    {
+        // "Partially synced" is a folder's answer — some of what is under it made it across. A file
+        // has no "partly", so a cycle that only half succeeded leaves it genuinely unknown. The
+        // dialog was calling a 2 KB text file partially synced until this was pinned.
+        var store = new SyncStateStore(_dbPath);
+        var panel = PanelWith(store, "Proton Drive");
+        var pair = await store.CreatePairAsync("/my-files/Docs", "/home/user/Docs", SyncDirection.TwoWay, ConflictPolicy.KeepBoth);
+        await store.UpsertBaselineAsync(pair.Id, new SyncBaselineEntry("a.txt", false, null, null), T0);
+        await store.UpdatePairStatusAsync(pair.Id, T0, SyncPairStatus.PartialFailure, null);
+
+        var asFile = await panel.DescribeSyncStatusAsync("/my-files/Docs/a.txt", null, isFolder: false);
+        var asFolder = await panel.DescribeSyncStatusAsync("/my-files/Docs/a.txt", null, isFolder: true);
+
+        Assert.Equal(SyncNodeStatus.Unknown, Assert.Single(asFile).Status);
+        Assert.Equal(SyncNodeStatus.PartiallySynced, Assert.Single(asFolder).Status);
+    }
+
+    [Fact]
     public async Task Two_pairs_sharing_one_local_folder_each_get_their_own_row()
     {
         var store = new SyncStateStore(_dbPath);

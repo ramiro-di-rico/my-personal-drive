@@ -148,7 +148,7 @@ public sealed class SyncStatusIndex
             return WithPause(worst);
         }
 
-        return StatusAsOfLastCycle(relativePath);
+        return StatusAsOfLastCycle(relativePath, isFolder: true);
     }
 
     /// <summary>
@@ -160,7 +160,14 @@ public sealed class SyncStatusIndex
     /// with it says so (<c>syncstatus.asoflastsync</c>): anything that was unequal at that cycle
     /// would have left a queue row, which the callers check first.
     /// </summary>
-    public SyncNodeStatus StatusAsOfLastCycle(string relativePath)
+    /// <param name="isFolder">
+    /// Whether the path is a folder. It decides what a partly-failed cycle means: for a folder,
+    /// "some of what is under here made it" — <see cref="SyncNodeStatus.PartiallySynced"/>; for a
+    /// file there is no "partly", so the honest answer is <see cref="SyncNodeStatus.Unknown"/>.
+    /// Found by looking at the Properties dialog, which was reporting a 2 KB text file as
+    /// "partially synced".
+    /// </param>
+    public SyncNodeStatus StatusAsOfLastCycle(string relativePath, bool isFolder = true)
     {
         if (QueueStatus(relativePath) is { } queued)
         {
@@ -192,7 +199,7 @@ public sealed class SyncStatusIndex
         return _pair.LastStatus switch
         {
             SyncPairStatus.Ok => WithPause(SyncNodeStatus.Synced),
-            SyncPairStatus.PartialFailure => WithPause(SyncNodeStatus.PartiallySynced),
+            SyncPairStatus.PartialFailure when isFolder => WithPause(SyncNodeStatus.PartiallySynced),
             _ => SyncNodeStatus.Unknown,
         };
     }

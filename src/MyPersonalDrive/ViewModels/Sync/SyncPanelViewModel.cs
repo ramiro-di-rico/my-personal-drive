@@ -743,7 +743,7 @@ public sealed class SyncPanelViewModel : ObservableObject
     /// pointing at the same folder, and rolling them into one line would hide which pair the status
     /// actually came from.
     /// </summary>
-    public async Task<IReadOnlyList<SyncStatusRow>> DescribeSyncStatusAsync(string? remotePath, string? localPath)
+    public async Task<IReadOnlyList<SyncStatusRow>> DescribeSyncStatusAsync(string? remotePath, string? localPath, bool isFolder = true)
     {
         var rows = new List<SyncStatusRow>();
         foreach (var slot in _slots)
@@ -780,7 +780,7 @@ public sealed class SyncPanelViewModel : ObservableObject
                 // No fingerprint is passed: the dialog is asking each provider about an item whose
                 // other side it has not listed, so the honest answer is what the last cycle left —
                 // and the wording says exactly that.
-                var status = lookup.Index.StatusAsOfLastCycle(lookup.RelativePath);
+                var status = lookup.Index.StatusAsOfLastCycle(lookup.RelativePath, isFolder);
 
                 rows.Add(new SyncStatusRow(
                     slot.DisplayName,

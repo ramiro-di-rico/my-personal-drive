@@ -54,12 +54,25 @@
   column. That button's content is a horizontal `StackPanel`, so the name is never actually
   trimmed and a long one pushed the badge off the pane; the narrow-window UI test measures it.
 
+### Found by looking at it
+
+Two defects the tests could not have caught, both fixed and pinned:
+
+- **The Properties dialog called a 2 KB text file "partially synced."** That state is a folder's
+  answer — some of what is under it made it across — and a file has no "partly".
+  `StatusAsOfLastCycle` now takes `isFolder`, and a file after a partly-failed cycle is `Unknown`.
+- **The dialog's section divider drew nothing.** Twice: first as an empty `Border` with only a top
+  `BorderThickness`, which measures zero, and then because `FindResource` without the theme variant
+  returned null for the brush.
+
 ### Not done, on purpose
 
 Everything in §8, unchanged. Plus: the real-CLI integration pass
-(`MYPERSONALDRIVE_INTEGRATION=1`) was **not** run for this work, and neither was a by-hand pass in
-the running app — no part of this touches the CLI boundary or moves bytes, but the badges have
-therefore never been looked at on screen.
+(`MYPERSONALDRIVE_INTEGRATION=1`) was **not** run for this work — no part of this touches the CLI
+boundary or moves bytes. The UI *was* looked at: the app was launched against a stub CLI with a
+seeded pair covering every badge state, and the real `MainWindow` was rendered and captured through
+Avalonia's headless Skia backend (list mode, icons mode, and the Properties dialog), which is where
+the two defects above came from.
 
 ---
 

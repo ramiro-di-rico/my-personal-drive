@@ -228,7 +228,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
     /// (docs/PLAN-SYNC-VISIBILITY.md S5). Supplied by <c>MainWindowViewModel</c> for the same
     /// reason the lookup below is.
     /// </summary>
-    public Func<string, Task<IReadOnlyList<SyncStatusRow>>>? DescribeSyncStatusAsync { get; set; }
+    public Func<string, bool, Task<IReadOnlyList<SyncStatusRow>>>? DescribeSyncStatusAsync { get; set; }
 
     /// <summary>
     /// Every pair, on every account, covering a local path — the badges' source
@@ -855,7 +855,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
         var statuses = DescribeSyncStatusAsync is null
             ? []
-            : await DescribeSyncStatusAsync(item.Path);
+            : await DescribeSyncStatusAsync(item.Path, item.IsFolder);
 
         await show(item.Name, fields, statuses);
     }

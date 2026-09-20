@@ -74,10 +74,16 @@ public static class PropertiesDialog
 
         if (syncStatuses is { Count: > 0 })
         {
+            // An explicit height: an empty Border with only a top BorderThickness measures zero
+            // and draws nothing, which is exactly what the first version of this did — the section
+            // ran straight on from the fields with no rule between them.
             children.Add(new Border
             {
-                BorderThickness = new Avalonia.Thickness(0, 1, 0, 0),
-                BorderBrush = owner.FindResource("StatusOfflineBrush") as Avalonia.Media.IBrush,
+                Height = 1,
+                Background = owner.TryFindResource("StatusOfflineBrush", owner.ActualThemeVariant, out var rule)
+                    ? rule as Avalonia.Media.IBrush
+                    : null,
+                Opacity = 0.5,
                 Margin = new Avalonia.Thickness(0, 6, 0, 0),
             });
             children.Add(new TextBlock

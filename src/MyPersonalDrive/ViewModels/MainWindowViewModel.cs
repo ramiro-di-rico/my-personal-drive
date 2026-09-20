@@ -416,7 +416,7 @@ public sealed class MainWindowViewModel : ObservableObject
             // one local folder can be mapped by pairs on several providers at once, and only the
             // sync panel holds every account's store.
             LookupSyncStatusesAsync = LookupLocalSyncStatusesAsync,
-            DescribeSyncStatusAsync = localPath => SyncPanel.DescribeSyncStatusAsync(null, localPath),
+            DescribeSyncStatusAsync = (localPath, isFolder) => SyncPanel.DescribeSyncStatusAsync(null, localPath, isFolder),
             FindRemotePathFor = RemotePathFor,
         };
 
@@ -2644,7 +2644,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // Awaited before the dialog opens, not filled in behind it: it is two cached reads per
         // account, and a section that appears a moment after the dialog would be worse than a
         // dialog that opens a moment later.
-        var statuses = await SyncPanel.DescribeSyncStatusAsync(item.Path, LocalPathFor(item.Path));
+        var statuses = await SyncPanel.DescribeSyncStatusAsync(item.Path, LocalPathFor(item.Path), item.IsFolder);
 
         await show(item.Name, fields, statuses);
     }

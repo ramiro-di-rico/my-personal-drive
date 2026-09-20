@@ -246,5 +246,13 @@ public static class DriveDatabaseMigrations
         new SqliteMigration(8, """
             ALTER TABLE SyncPairs ADD COLUMN SharesLocalFolder INTEGER NOT NULL DEFAULT 0;
             """),
+        // The per-row sync badges (docs/PLAN-SYNC-VISIBILITY.md S2) read the queue by relative
+        // path, for every unfinished row of a pair at once. idx_SyncQueue_Pending leads with
+        // (PairId, State) and can't serve that without a scan of the pair's rows; this one can.
+        // Index only — the feature needs no new column, because everything it shows is already
+        // recorded.
+        new SqliteMigration(9, """
+            CREATE INDEX IF NOT EXISTS idx_SyncQueue_Path ON SyncQueue(PairId, RelativePath);
+            """),
     ];
 }

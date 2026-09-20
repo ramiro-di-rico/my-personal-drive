@@ -785,6 +785,62 @@ public sealed class SyncStateStore
         return actions;
     });
 
+    /// <summary>
+    /// Every unfinished queue row of a pair, collapsed to one <see cref="SyncQueueState"/> per
+    /// relative path by <see cref="SyncStatusPrecedence"/> — a path can legitimately carry more
+    /// than one row (a failed attempt and a fresh pending one), and the badge must show the one
+    /// that demands attention, not whichever the database happened to return last.
+    ///
+    /// <c>Done</c> and <c>Skipped</c> rows are excluded in SQL rather than filtered afterwards:
+    /// they say nothing about the node's current state (the baseline answers that better) and on
+    /// a long-lived pair they are most of the table.
+    /// Feeds <see cref="SyncStatusIndex"/> — docs/PLAN-SYNC-VISIBILITY.md S2.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, SyncQueueState>> GetQueueStatesByPathAsync(int pairId, CancellationToken ct = default)
+        => SqliteOffThread.RunAsync<IReadOnlyDictionary<string, SyncQueueState>>(async () =>
+    {
+        using var connection = OpenConnection();
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT RelativePath, State FROM SyncQueue
+            WHERE PairId = @PairId AND State NOT IN ('Done', 'Skipped')
+            """;
+        command.Parameters.AddWithValue("@PairId", pairId);
+
+        var states = new Dictionary<string, SyncQueueState>(StringComparer.Ordinal);
+        using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var path = reader.GetString(0);
+            if (!Enum.TryParse<SyncQueueState>(reader.GetString(1), out var state))
+            {
+                continue;
+            }
+
+            states[path] = states.TryGetValue(path, out var existing)
+                ? MoreUrgentOf(existing, state)
+                : state;
+        }
+
+        return states;
+    });
+
+    /// <summary>
+    /// Collapses two queue states for one path, by the same order the badges use — mapped through
+    /// <see cref="SyncStatusIndex"/>'s vocabulary so there is one ordering in the app, not two.
+    /// </summary>
+    private static SyncQueueState MoreUrgentOf(SyncQueueState a, SyncQueueState b)
+        => SyncStatusPrecedence.RankOf(StatusOf(a)) <= SyncStatusPrecedence.RankOf(StatusOf(b)) ? a : b;
+
+    private static SyncNodeStatus StatusOf(SyncQueueState state) => state switch
+    {
+        SyncQueueState.Pending => SyncNodeStatus.Pending,
+        SyncQueueState.Running => SyncNodeStatus.Syncing,
+        SyncQueueState.Failed => SyncNodeStatus.Failed,
+        SyncQueueState.Conflict => SyncNodeStatus.Conflict,
+        _ => SyncNodeStatus.Unknown,
+    };
+
     public Task<IReadOnlyList<QueuedSyncAction>> GetConflictActionsAsync(int pairId, CancellationToken ct = default)
         => SqliteOffThread.RunAsync<IReadOnlyList<QueuedSyncAction>>(async () =>
     {

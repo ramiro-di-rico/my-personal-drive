@@ -17,15 +17,49 @@
 
 ## Status
 
-> **Nothing here is implemented.** Six phases; S1–S3 are the feature as the user will first
-> recognise it, S4–S6 complete it.
+> **All six phases landed** on `feature/sync-visibility`, one commit each.
 
-- [ ] **S1 — The status vocabulary and the pure rollup.** `SyncNodeStatus`, `SyncStatusIndex`.
-- [ ] **S2 — Reading it out of SQLite.** The queue-state query and the per-pair index cache.
-- [ ] **S3 — Badges on the cloud pane.** `DriveNodeViewModel.SyncStatus` + icon/colour/tooltip.
-- [ ] **S4 — Badges on the local pane.** Same rows, but N pairs can cover one local folder.
-- [ ] **S5 — The per-provider section in Properties.** Cross-account, both panes.
-- [ ] **S6 — Keeping it live.** Refresh on sync events, plus the UI and a11y tests.
+- [x] **S1 — The status vocabulary and the pure rollup.** `Models/SyncNodeStatus`,
+      `Services/Sync/SyncStatusPrecedence`, `Services/Sync/SyncStatusIndex`, and
+      `Services/Sync/NodeFingerprintComparer` — §5.4's comparison extracted out of
+      `SyncReconciler`, which now delegates to it, so a badge cannot disagree with the plan the
+      engine produced. `SyncStatusIndexTests`, 32 cases.
+- [x] **S2 — Reading it out of SQLite.** `SyncStateStore.GetQueueStatesByPathAsync` (+ migration 9,
+      `idx_SyncQueue_Path`) and `Services/Sync/SyncStatusService`, which caches one index per pair
+      and raises `Changed` on `Invalidate`. `SyncStatusServiceTests`.
+- [x] **S3 — Badges on the cloud pane.** `DriveNodeViewModel.SyncStatus`/`SyncStatusText`/
+      `SyncStatusTooltip`, `ViewModels/SyncStatusPresenter`, `SyncStatusIconConverter` and
+      `SyncStatusBrushConverter`, ten new glyphs in `Assets/Icons.axaml`, and eighteen string keys
+      in all three locales. Filled in by `MainWindowViewModel.AnnotateSyncStatusesAsync`, on the
+      same fire-and-forget path as the folder sizes. `SyncStatusBadgeTests`.
+- [x] **S4 — Badges on the local pane.** `LocalNodeViewModel.SyncStatus` and
+      `LocalExplorerViewModel.Aggregate` — one badge for N providers, with the counts in the
+      tooltip. `LocalSyncStatusTests`.
+- [x] **S5 — The per-provider section in Properties.** `Models/SyncStatusRow`,
+      `PropertiesDialog.ShowAsync`'s optional `syncStatuses`, and
+      `SyncPanelViewModel.DescribeSyncStatusAsync` for the cross-account merge. With no fingerprint
+      to compare, `SyncStatusIndex.StatusAsOfLastCycle` answers from the last completed cycle
+      instead of guessing. `SyncStatusPropertiesTests`.
+- [x] **S6 — Keeping it live.** `MainWindowViewModel.SubscribeToSyncStatusChanges` and
+      `LocalExplorerViewModel.RefreshSyncStatusesAsync`: a finished cycle re-asks for the rows on
+      screen and never re-lists. Two new `MyPersonalDrive.UiTests` cases (the badge fits at 640px;
+      it announces its state), and a view-model test that the row object survives the update.
+
+### Two things that moved while building it
+
+- **The collapsed-folder answer** was `Unknown` in §1.2 as first written, which is what every
+  folder in a healthy pair would have shown. It now answers from the last completed cycle — see the
+  note in §1.2.
+- **The list-mode badge** started inside the row's name button and moved out to its own grid
+  column. That button's content is a horizontal `StackPanel`, so the name is never actually
+  trimmed and a long one pushed the badge off the pane; the narrow-window UI test measures it.
+
+### Not done, on purpose
+
+Everything in §8, unchanged. Plus: the real-CLI integration pass
+(`MYPERSONALDRIVE_INTEGRATION=1`) was **not** run for this work, and neither was a by-hand pass in
+the running app — no part of this touches the CLI boundary or moves bytes, but the badges have
+therefore never been looked at on screen.
 
 ---
 

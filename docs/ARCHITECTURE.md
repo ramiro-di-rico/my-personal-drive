@@ -1,7 +1,7 @@
 # MyPersonalDrive — Technical Reference
 
 > Reference document describing the current state of the application (branch
-> `main`, commit `66e3827`).
+> `feature/sync-visibility`, commit `7bd6c5c`).
 > Meant to give full context to any future chat/session without having to re-read all the code.
 
 ---
@@ -31,6 +31,16 @@ pair sharing it is two-way and no two download pairs sharing it mirror deletes �
 marked `SyncPair.SharesLocalFolder`, which is what makes it keep a baseline despite being one-way
 and refuse to overwrite a file it did not write (PLAN-LOCAL-SYNC.md §5.2/§12).
 See [PLAN-LOCAL-SYNC.md](PLAN-LOCAL-SYNC.md) for the design.
+
+That state is **visible per file and per folder**, on both panes: every row carries a badge saying
+whether it is up to date, changed since the last sync, queued, syncing, failed, in conflict,
+excluded, paused — or unknown, which is drawn as its own thing and never as success. A local row
+aggregates across every provider mapping its folder, and the Properties dialog lists each signed-in
+provider separately, including the ones not syncing the item at all. Nothing about it costs a
+provider call or a scan: `Services/Sync/SyncStatusIndex` answers from the `SyncState` baseline, the
+`SyncQueue` rows and the listing already on screen, and `SyncStatusService` caches one index per
+pair, dropping it whenever a cycle finishes or a pair changes. See
+[PLAN-SYNC-VISIBILITY.md](PLAN-SYNC-VISIBILITY.md).
 
 Proton is currently the only supported provider, but the app no longer talks to
 `ProtonDriveService` directly anywhere outside `Services/Providers/Proton/` — every consumer goes
@@ -402,7 +412,7 @@ session with real credentials (docs/PLAN-CLOUD-PROVIDERS.md P10's own status ent
 
 ### 6.2 SQLite cache
 
-`<BaseFolder>/cache.db`. The schema below is migration 1's; six migrations have landed since
+`<BaseFolder>/cache.db`. The schema below is migration 1's; eight migrations have landed since
 (see [`DriveDatabaseMigrations.cs`](../src/MyPersonalDrive/Services/DriveDatabaseMigrations.cs)
 for the current, authoritative shape). Notably, migration 6
 (docs/PLAN-CLOUD-PROVIDERS.md P4) added an `AccountKey` column to `DriveItems`, `FolderMetrics`

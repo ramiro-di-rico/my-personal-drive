@@ -161,6 +161,11 @@ public class SyncSharedLocalFolderTests : IDisposable
         var doomed = panel.Pairs.First(p => p.RemotePath == "/my-files/Other");
         await doomed.RemoveCommand.ExecuteAsync();
 
+        // The recompute is deliberately fire-and-forget in production (see RemovePairViewModel);
+        // joined here rather than raced, which is what made this test fail whenever it ran on its
+        // own (docs/PLAN-TECH-DEBT.md B3.2).
+        await panel.PendingSharedFolderFlagRefresh;
+
         var survivor = Assert.Single(await store.GetPairsAsync());
         Assert.Equal("/my-files/Docs", survivor.RemotePath);
         Assert.False(survivor.SharesLocalFolder);

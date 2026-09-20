@@ -1409,8 +1409,39 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private bool _syncStatusSubscribed;
+
+    /// <summary>
+    /// Keeps the badges honest while a sync runs (docs/PLAN-SYNC-VISIBILITY.md S6). Subscribed at
+    /// initialization rather than in the constructor because the composition root registers the
+    /// other accounts on the sync panel after this view model is built.
+    ///
+    /// Re-asks for the rows already on screen; it deliberately does not call
+    /// <see cref="RefreshAsync"/>, which would mean a provider round trip every time the queue
+    /// moves — several per second during a large transfer.
+    /// </summary>
+    private void SubscribeToSyncStatusChanges()
+    {
+        if (_syncStatusSubscribed)
+        {
+            return;
+        }
+
+        _syncStatusSubscribed = true;
+        foreach (var service in SyncPanel.StatusServices)
+        {
+            service.Changed += (_, _) => Dispatcher.UIThread.Post(() =>
+            {
+                _ = AnnotateSyncStatusesAsync(CurrentPath, RootItems.ToList());
+                _ = LocalExplorer.RefreshSyncStatusesAsync();
+            });
+        }
+    }
+
     public async Task InitializeAsync()
     {
+        SubscribeToSyncStatusChanges();
+
         // Sync's crash recovery (docs/PLAN-LOCAL-SYNC.md §7) belongs at app startup, before the
         // user can trigger a sync — but it must never keep the browser from loading, so a
         // failure here is reported and swallowed rather than propagated.

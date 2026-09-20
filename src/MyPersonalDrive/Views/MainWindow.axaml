@@ -683,7 +683,7 @@
               <DataTemplate x:DataType="vm:DriveNodeViewModel">
                 <Grid Classes="hoverGroup"
                       Classes.selected="{Binding IsSelected}"
-                      ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto"
+                      ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                       Margin="0,0,0,6">
                   <Grid.ContextMenu>
                     <ContextMenu>
@@ -744,24 +744,30 @@
                             IsVisible="{Binding IsSyncPairActive}" ToolTip.Tip="{Binding Loc[explorer.row.syncactive.tooltip]}" />
                       <Path Classes="icon" Data="{StaticResource IconPause}" Width="12" Height="12" Opacity="0.7"
                             IsVisible="{Binding IsSyncPairPaused}" ToolTip.Tip="{Binding Loc[explorer.row.syncpaused.tooltip]}" />
-                      <!-- This row's own sync state (docs/PLAN-SYNC-VISIBILITY.md S3). Distinct shape per
-                           state, not just a distinct colour, and an accessible name because for a screen
-                           reader the glyph is the only thing saying it. -->
-                      <Path Classes="icon"
-                            Width="13"
-                            Height="13"
-                            VerticalAlignment="Center"
-                            Data="{Binding SyncStatus, Converter={x:Static conv:SyncStatusIconConverter.Instance}}"
-                            Stroke="{Binding SyncStatus, Converter={x:Static conv:SyncStatusBrushConverter.Instance}}"
-                            IsVisible="{Binding HasSyncStatus}"
-                            ToolTip.Tip="{Binding SyncStatusTooltip}"
-                            AutomationProperties.Name="{Binding SyncStatusText}" />
                     </StackPanel>
                   </Button>
 
+                  <!-- This row's own sync state (docs/PLAN-SYNC-VISIBILITY.md S3). Its own column,
+                       deliberately not inside the name button: that button's content is a
+                       horizontal StackPanel, so the name is never actually trimmed and a long one
+                       pushes anything after it off the pane — measured, in the narrow-window UI
+                       test. Distinct shape per state, not just a distinct colour, and an accessible
+                       name because for a screen reader the glyph is all there is. -->
+                  <Path Grid.Column="1"
+                        Classes="icon"
+                        Width="13"
+                        Height="13"
+                        Margin="6,0,0,0"
+                        VerticalAlignment="Center"
+                        Data="{Binding SyncStatus, Converter={x:Static conv:SyncStatusIconConverter.Instance}}"
+                        Stroke="{Binding SyncStatus, Converter={x:Static conv:SyncStatusBrushConverter.Instance}}"
+                        IsVisible="{Binding HasSyncStatus}"
+                        ToolTip.Tip="{Binding SyncStatusTooltip}"
+                        AutomationProperties.Name="{Binding SyncStatusText}" />
+
                   <!-- The folder's recursive size, when someone has already scanned it. Files show
                        nothing here: their size is already in the details panel. -->
-                  <TextBlock Grid.Column="1"
+                  <TextBlock Grid.Column="2"
                              Text="{Binding DeepSizeText}"
                              IsVisible="{Binding HasDeepSize}"
                              VerticalAlignment="Center"
@@ -769,7 +775,7 @@
                              FontSize="12"
                              Opacity="0.7" />
 
-                  <Button Grid.Column="2"
+                  <Button Grid.Column="3"
                           Classes="rowAction"
                           ToolTip.Tip="{Binding Loc[menu.preview]}"
                           AutomationProperties.Name="{Binding Loc[menu.preview]}"
@@ -779,7 +785,7 @@
                     <Path Classes="icon" Data="{StaticResource IconEye}" />
                   </Button>
 
-                  <Button Grid.Column="3"
+                  <Button Grid.Column="4"
                           Classes="rowAction"
                           ToolTip.Tip="{Binding Loc[menu.copy]}"
                           AutomationProperties.Name="{Binding Loc[menu.copy]}"
@@ -788,7 +794,7 @@
                     <Path Classes="icon" Data="{StaticResource IconCopy}" />
                   </Button>
 
-                  <Button Grid.Column="4"
+                  <Button Grid.Column="5"
                           Classes="rowAction"
                           ToolTip.Tip="{Binding Loc[explorer.row.rename.tooltip]}"
                           AutomationProperties.Name="{Binding Loc[explorer.row.rename.tooltip]}"
@@ -797,7 +803,7 @@
                     <Path Classes="icon" Data="{StaticResource IconPencil}" />
                   </Button>
 
-                  <Button Grid.Column="5"
+                  <Button Grid.Column="6"
                           Classes="rowAction"
                           ToolTip.Tip="{Binding DownloadTooltip}"
                           AutomationProperties.Name="{Binding DownloadTooltip}"
@@ -807,7 +813,7 @@
                     <Path Classes="icon" Data="{StaticResource IconDownload}" />
                   </Button>
 
-                  <Button Grid.Column="6"
+                  <Button Grid.Column="7"
                           Classes="rowAction"
                           ToolTip.Tip="{Binding Loc[menu.trash]}"
                           AutomationProperties.Name="{Binding Loc[menu.trash]}"

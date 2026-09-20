@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.VisualTree;
@@ -117,10 +118,17 @@ public class WindowLayoutTests : IDisposable
         return (window, viewModel);
     }
 
-    protected static void Layout(Window window)
+    protected static void Layout(Window window) => Layout(window, WindowWidth);
+
+    /// <summary>
+    /// Lays the window out at an explicit width. Setting <c>Window.Width</c> alone is not enough
+    /// here: these tests measure and arrange by hand, so the size they pass is the size that
+    /// counts, and a narrow-window test that only set the property was still arranged at 1280.
+    /// </summary>
+    protected static void Layout(Window window, double width)
     {
-        window.Measure(new Avalonia.Size(WindowWidth, WindowHeight));
-        window.Arrange(new Avalonia.Rect(0, 0, WindowWidth, WindowHeight));
+        window.Measure(new Avalonia.Size(width, WindowHeight));
+        window.Arrange(new Avalonia.Rect(0, 0, width, WindowHeight));
         window.UpdateLayout();
     }
 
@@ -240,5 +248,64 @@ public class WindowLayoutTests : IDisposable
         // The name button stops short of the row, and that is the reserved strip.
         var nameButton = row.GetVisualDescendants().OfType<Button>().First();
         Assert.True(nameButton.Bounds.Width < row.Bounds.Width);
+    }
+
+    /// <summary>
+    /// docs/PLAN-SYNC-VISIBILITY.md S6. The badge sits inside the name button, beside a name that
+    /// is already trimmed to fit (docs/PLAN-UX-ROUND-4.md Y5) — so the thing to check is that at a
+    /// narrow width the badge is still fully on screen and the name still has room, rather than the
+    /// badge being pushed out of the pane or squeezing the name to nothing. Only this project can
+    /// see that: a view-model test knows the badge exists, not where it landed.
+    /// </summary>
+    [AvaloniaFact]
+    public void ASyncBadge_FitsBesideTheName_EvenInANarrowWindow()
+    {
+        var (window, viewModel) = Show();
+        viewModel.DisplayItems([RemoteItem("a-very-long-file-name-that-will-certainly-be-trimmed.txt")]);
+        foreach (var node in viewModel.RootItems)
+        {
+            node.SyncStatus = SyncNodeStatus.Syncing;
+        }
+
+        Layout(window, 640);
+
+        var listing = Named<ListBox>(window, "ListModeListing");
+        var row = listing.GetVisualDescendants().OfType<Grid>().First(grid => grid.Classes.Contains("hoverGroup"));
+        var badge = row.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>()
+            .Single(path => path.GetValue(Avalonia.Automation.AutomationProperties.NameProperty) is { Length: > 0 });
+        var name = row.GetVisualDescendants().OfType<TextBlock>().First();
+
+        Assert.True(badge.Bounds.Width > 0 && badge.Bounds.Height > 0, "The badge has no size, so it is not being drawn.");
+        Assert.True(name.Bounds.Width > 40, $"The name is down to {name.Bounds.Width:0}px, so the badge is eating the row.");
+
+        var badgeRight = ((Visual)badge).TranslatePoint(new Avalonia.Point(badge.Bounds.Width, 0), listing)!.Value.X;
+        Assert.True(
+            badgeRight <= listing.Bounds.Width,
+            $"The badge ends {badgeRight:0}px into a {listing.Bounds.Width:0}px listing, so it is off the pane.");
+    }
+
+    /// <summary>
+    /// The badge's meaning reaches a screen reader (the a11y-theming skill): a glyph with no
+    /// accessible name says nothing, and here it is the only carrier of the information.
+    /// </summary>
+    [AvaloniaFact]
+    public void ASyncBadge_AnnouncesItsState()
+    {
+        var (window, viewModel) = Show();
+        viewModel.DisplayItems([RemoteItem("notes.txt")]);
+        foreach (var node in viewModel.RootItems)
+        {
+            node.SyncStatus = SyncNodeStatus.Failed;
+        }
+
+        Layout(window);
+
+        var listing = Named<ListBox>(window, "ListModeListing");
+        var named = listing.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>()
+            .Select(path => path.GetValue(Avalonia.Automation.AutomationProperties.NameProperty))
+            .Where(name => !string.IsNullOrEmpty(name))
+            .ToList();
+
+        Assert.Contains(SyncStatusPresenter.Describe(SyncNodeStatus.Failed), named);
     }
 }

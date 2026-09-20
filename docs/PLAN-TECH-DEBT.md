@@ -429,7 +429,15 @@ test, rather than at one call site.
 **What it blocks.** Nothing, but it will keep costing a random red run in CI, which is how test
 suites lose their authority.
 
-### B3.2 — `RemovingOneOfTwoSharingPairs_ClearsTheFlagOnTheSurvivor` fails in isolation
+### B3.2 — `RemovingOneOfTwoSharingPairs_ClearsTheFlagOnTheSurvivor` fails in isolation — **done**
+
+**Fixed** while landing docs/PLAN-SYNC-VISIBILITY.md S6, because the extra work that change put on
+the same path made the race lose far more often. `SyncPanelViewModel` now keeps the fire-and-forget
+recompute's task in `PendingSharedFolderFlagRefresh` (internal, read-only) and the test awaits it.
+Production behaviour is unchanged: the removal still does not wait on the recompute — the task is
+merely observable now. The original write-up follows.
+
+
 
 **Where.** `tests/MyPersonalDrive.Tests/ViewModels/SyncSharedLocalFolderTests.cs:147`, against
 `ViewModels.Sync.SyncPanelViewModel.RemovePairViewModel`, which recomputes

@@ -450,8 +450,18 @@ public sealed class SyncPanelViewModel : ObservableObject
         // conflicts forever. Fire-and-forget with its own error routing: the removal itself already
         // succeeded, and a failure to clear a now-stale flag is not worth undoing it over — the next
         // add or remove recomputes from scratch anyway.
-        _ = RefreshSharedLocalFolderFlagsSafelyAsync();
+        _sharedFolderFlagRefresh = RefreshSharedLocalFolderFlagsSafelyAsync();
     }
+
+    private Task _sharedFolderFlagRefresh = Task.CompletedTask;
+
+    /// <summary>
+    /// The fire-and-forget recompute started by the last pair removal, so a test can join it
+    /// instead of racing it (docs/PLAN-TECH-DEBT.md B3.2). Internal and read-only: production code
+    /// must keep not waiting on it — the comment above says why the removal is not held up by the
+    /// flag recompute — and this only makes the work observable, it does not change when it runs.
+    /// </summary>
+    internal Task PendingSharedFolderFlagRefresh => _sharedFolderFlagRefresh;
 
     private async Task RefreshSharedLocalFolderFlagsSafelyAsync()
     {

@@ -403,6 +403,12 @@ public sealed class LocalExplorerViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Re-asks for the badges of the rows already on screen, without re-listing the folder — what a
+    /// sync cycle's completion triggers (docs/PLAN-SYNC-VISIBILITY.md S6).
+    /// </summary>
+    public Task RefreshSyncStatusesAsync() => AnnotateSyncStatusesAsync(Items.ToList());
+
+    /// <summary>
     /// Fills in each row's <see cref="LocalNodeViewModel.SyncStatus"/>
     /// (docs/PLAN-SYNC-VISIBILITY.md S4). One lookup per row rather than one per pane, because a
     /// local folder's children can each sit under a different set of pairs — the lookup itself is

@@ -1,4 +1,8 @@
+using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
+using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Sync;
+using MyPersonalDrive.Tests;
 using MyPersonalDrive.ViewModels.Local;
 using Xunit;
 
@@ -8,8 +12,35 @@ namespace MyPersonalDrive.Tests.ViewModels.Local;
 /// S4 of docs/PLAN-SYNC-VISIBILITY.md: one badge for N providers. The aggregation is the whole of
 /// what the local pane adds over the cloud pane's single-pair case, so it is what is pinned here.
 /// </summary>
-public class LocalSyncStatusTests
+[Collection(AppDataCollection.Name)]
+public class LocalSyncStatusTests : IDisposable
 {
+    private readonly string _tempAppData = Directory.CreateTempSubdirectory("MyPersonalDrive.Tests.LocalStatus.AppData").FullName;
+    private readonly string _root = Directory.CreateTempSubdirectory("MyPersonalDrive.Tests.LocalStatus.Root").FullName;
+    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"mypersonaldrive-localstatus-{Guid.NewGuid():N}.db");
+    private readonly string? _originalAppData;
+
+    public LocalSyncStatusTests()
+    {
+        _originalAppData = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", _tempAppData);
+    }
+
+    public void Dispose()
+    {
+        Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", _originalAppData);
+        SqliteConnection.ClearAllPools();
+        try
+        {
+            Directory.Delete(_tempAppData, recursive: true);
+            Directory.Delete(_root, recursive: true);
+            File.Delete(_dbPath);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
     private static (SyncNodeStatus Status, string? Context) Aggregate(params (string Account, SyncNodeStatus Status)[] statuses)
         => LocalExplorerViewModel.Aggregate(statuses);
 
@@ -85,5 +116,55 @@ public class LocalSyncStatusTests
 
         Assert.Equal(SyncNodeStatus.NotInPair, row.SyncStatus);
         Assert.False(row.HasSyncStatus);
+    }
+
+    /// <summary>
+    /// S6: a finished sync cycle has to reach the rows already on screen, and it must do it without
+    /// re-listing the folder — the point of the invalidate-and-re-ask path.
+    /// </summary>
+    [Fact]
+    public async Task A_sync_event_updates_the_rows_already_on_screen_without_re_listing()
+    {
+        var file = Path.Combine(_root, "a.txt");
+        await File.WriteAllTextAsync(file, "hello");
+
+        var store = new SyncStateStore(_dbPath);
+        var pair = await store.CreatePairAsync("/my-files/Docs", _root, SyncDirection.TwoWay, ConflictPolicy.KeepBoth);
+        var service = new SyncStatusService(store, "Proton Drive");
+
+        var listings = 0;
+        var sut = new LocalExplorerViewModel(new CountingLocalFileSystemService(_root, () => listings++), new AppSettingsService())
+        {
+            LookupSyncStatusesAsync = path => service.LookupLocalAsync(path),
+        };
+
+        await sut.NavigateAsync(_root);
+
+        // The annotation the listing kicks off is fire-and-forget, so this awaits the same work
+        // rather than racing it.
+        await sut.RefreshSyncStatusesAsync();
+        var row = sut.Items.Single(item => item.Item.Name == "a.txt");
+        Assert.Equal(SyncNodeStatus.NotSynced, row.SyncStatus);
+
+        // What a completed cycle leaves behind, then the invalidation the scheduler's event causes.
+        await store.EnqueueActionsAsync(pair.Id, [new SyncAction(SyncOperation.UploadFile, "a.txt", null, 5, 1000)], DateTimeOffset.UnixEpoch);
+        var listingsBefore = listings;
+        service.Invalidate();
+        await sut.RefreshSyncStatusesAsync();
+
+        Assert.Equal(SyncNodeStatus.Pending, row.SyncStatus);
+        Assert.Equal(listingsBefore, listings);
+        Assert.Same(row, sut.Items.Single(item => item.Item.Name == "a.txt"));
+    }
+
+    private sealed class CountingLocalFileSystemService(string home, Action onList) : LocalFileSystemService
+    {
+        public override string GetHomeDirectory() => home;
+
+        public override IReadOnlyList<DriveItem> ListDirectory(string path, bool includeHidden)
+        {
+            onList();
+            return base.ListDirectory(path, includeHidden);
+        }
     }
 }

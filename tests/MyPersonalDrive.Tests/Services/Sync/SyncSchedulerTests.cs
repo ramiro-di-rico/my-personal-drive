@@ -58,6 +58,50 @@ public class SyncSchedulerTests : IDisposable
         return new Harness(scheduler, cli, store, clock);
     }
 
+    /// <summary>
+    /// Shutdown blocks the UI thread waiting on <see cref="SyncScheduler.StopAsync"/>
+    /// (<c>App.OnFrameworkInitializationCompleted</c>), so <see cref="SyncScheduler.StopAsync"/>
+    /// must not need that thread to finish. It did: its awaits captured the caller's
+    /// synchronization context, so closing the window deadlocked until the ten-second bound gave
+    /// up — once per configured account, which with five providers is nearly a minute of a frozen
+    /// window that looks like an app refusing to exit.
+    ///
+    /// Reproduced with a context that never pumps, which is exactly what a blocked UI thread is.
+    /// Before the fix this test hangs until its own timeout; after it, it returns immediately.
+    /// </summary>
+    [Fact]
+    public async Task StopAsync_CompletesEvenWhenTheCallersContextNeverPumps()
+    {
+        var harness = await BuildAsync();
+        harness.Scheduler.Start();
+        Assert.True(harness.Scheduler.IsRunning);
+
+        var stopped = false;
+        var thread = new Thread(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(new NeverPumpingSynchronizationContext());
+            stopped = harness.Scheduler.StopAsync().Wait(TimeSpan.FromSeconds(5));
+        });
+
+        thread.IsBackground = true;
+        thread.Start();
+        thread.Join(TimeSpan.FromSeconds(10));
+
+        Assert.True(stopped, "StopAsync needed the calling thread to finish, so shutdown deadlocks against it.");
+        Assert.False(harness.Scheduler.IsRunning);
+    }
+
+    /// <summary>A UI thread that is blocked inside <c>Wait</c>: posts are accepted and never run.</summary>
+    private sealed class NeverPumpingSynchronizationContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+        }
+
+        public override void Send(SendOrPostCallback d, object? state)
+            => throw new InvalidOperationException("A blocked UI thread cannot run work synchronously.");
+    }
+
     private static int ListCalls(FakeCliExecutor cli) => cli.Calls.Count(c => c.Arguments.Contains("list"));
 
     [Fact]

@@ -101,12 +101,19 @@ public partial class App : Application
             // queue rows on the next startup.
             desktop.ShutdownRequested += (_, _) =>
             {
-                foreach (var context in contexts)
+                // All of them at once, and ten seconds for the set rather than ten seconds each:
+                // a session exists per provider *type* whether or not it is signed in, so the
+                // serial version spent up to fifty seconds — five accounts, four of them with
+                // nothing to stop — with the UI thread blocked and the window still on screen.
+                //
+                // Task.Run so the wait happens on a pool thread: SyncScheduler.StopAsync is careful
+                // not to capture this context, and this is the second half of that — nothing in the
+                // stop path should need the very thread the line below is blocking.
+                var stopping = Task.Run(() => Task.WhenAll(contexts.Select(context => context.Scheduler.StopAsync())));
+                if (!stopping.Wait(TimeSpan.FromSeconds(10)))
                 {
-                    if (!context.Scheduler.StopAsync().Wait(TimeSpan.FromSeconds(10)))
-                    {
-                        CrashLog.Write($"{context.DisplayName} sync scheduler did not stop within 10s of shutdown; exiting anyway.");
-                    }
+                    var stillRunning = contexts.Where(context => context.Scheduler.IsRunning).Select(context => context.DisplayName);
+                    CrashLog.Write($"Sync schedulers did not stop within 10s of shutdown ({string.Join(", ", stillRunning)}); exiting anyway.");
                 }
             };
         }

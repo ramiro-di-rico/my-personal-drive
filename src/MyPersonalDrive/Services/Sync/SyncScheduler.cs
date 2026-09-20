@@ -89,6 +89,20 @@ public sealed class SyncScheduler : IAsyncDisposable
         _loop = Task.Run(() => RunLoopAsync(_cts.Token));
     }
 
+    /// <summary>
+    /// Stops the loop and disposes every pair's watcher.
+    ///
+    /// Every await here is <c>ConfigureAwait(false)</c>, and that is load-bearing rather than
+    /// hygiene. <see cref="Start"/> already keeps the loop <em>body</em> off the UI thread, but
+    /// this method is called <em>from</em> the UI thread at shutdown, so without it the
+    /// continuation after <c>await _loop</c> is posted back to that thread — which
+    /// <c>App.OnFrameworkInitializationCompleted</c>'s <c>ShutdownRequested</c> handler is at that
+    /// moment blocking inside <c>Wait</c>. The result was a guaranteed deadlock until the ten-second
+    /// bound expired, once per configured account: with five providers built at startup, closing the
+    /// window froze it for the better part of a minute and looked like an app that would not exit.
+    /// The `crash.log` line "sync scheduler did not stop within 10s of shutdown" is that deadlock,
+    /// not a slow cycle.
+    /// </summary>
     public async Task StopAsync()
     {
         if (_cts is null)
@@ -96,12 +110,12 @@ public sealed class SyncScheduler : IAsyncDisposable
             return;
         }
 
-        await _cts.CancelAsync();
+        await _cts.CancelAsync().ConfigureAwait(false);
         try
         {
             if (_loop is not null)
             {
-                await _loop;
+                await _loop.ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)

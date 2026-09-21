@@ -371,10 +371,40 @@ public class SyncReconcilerTests
     }
 
     [Fact]
-    public void RemoteToLocal_Unchanged_NoAction()
+    public void RemoteToLocal_Unchanged_TransfersNothing_ButRecordsTheBaselineItIsMissing()
     {
+        // Was `Assert.Empty`. Equal sides with no baseline row now emit UpdateBaselineOnly, the
+        // same as the two-way table's `✓ ✓ ✗` row: without it a pair that predates
+        // SyncExecutor.KeepsBaseline would never write a row for a tree it has nothing left to
+        // transfer in, and every item in it would keep drawing the NotSynced badge. Still no
+        // transfer, which is what this row of the table is really about.
         var fp = FileFp("a.txt");
         var plan = Reconcile(SyncDirection.RemoteToLocal, Map(fp), Map(fp));
+
+        Assert.Equal(SyncOperation.UpdateBaselineOnly, Assert.Single(plan.Actions).Operation);
+    }
+
+    [Fact]
+    public void RemoteToLocal_Unchanged_WithTheBaselineAlreadyRecorded_DoesNothingAtAll()
+    {
+        // The other half: the backfill above is a one-off, not a per-run item. Once the row exists
+        // a settled pair plans nothing.
+        var fp = FileFp("a.txt");
+        var plan = Reconcile(SyncDirection.RemoteToLocal, Map(fp), Map(fp),
+            BaselineMap(BaselineOf("a.txt", false, fp, fp)));
+
+        Assert.Empty(plan.Actions);
+    }
+
+    [Fact]
+    public void RemoteToLocal_Unchanged_OnAProtectedPair_LeavesTheForeignFileUnclaimed()
+    {
+        // A shared pair reads "no baseline row" as "another pair put this here". Recording one
+        // because the file currently happens to be byte-identical would hand ownership over and
+        // silently drop the protection the next time it diverges, so the backfill skips these
+        // pairs — they are not the ones that were missing rows anyway.
+        var fp = FileFp("a.txt");
+        var plan = Reconcile(SyncDirection.RemoteToLocal, Map(fp), Map(fp), protectForeignDestinationFiles: true);
 
         Assert.Empty(plan.Actions);
     }
@@ -403,6 +433,42 @@ public class SyncReconcilerTests
         var plan = Reconcile(SyncDirection.RemoteToLocal, local: Map(FileFp("a.txt")), mirrorDeletes: false);
 
         Assert.Empty(plan.Actions);
+    }
+
+    [Fact]
+    public void RemoteToLocal_GoneFromBothSides_ClearsTheBaselineRow()
+    {
+        // One-way pairs keep a baseline now (SyncExecutor.KeepsBaseline), so they need the last row
+        // of §5.2's table as much as TwoWay does. Without it the row for a path deleted everywhere
+        // would outlive the file for the life of the pair, and SyncStatusIndex would keep answering
+        // about it.
+        var plan = Reconcile(SyncDirection.RemoteToLocal,
+            baseline: BaselineMap(BaselineOf("a.txt", false, FileFp("a.txt"), FileFp("a.txt"))));
+
+        var action = Assert.Single(plan.Actions);
+        Assert.Equal(SyncOperation.ClearBaseline, action.Operation);
+        Assert.Equal("a.txt", action.RelativePath);
+    }
+
+    [Fact]
+    public void RemoteToLocal_WithABaselineButNoProtection_DecidesExactlyAsItDidWithout()
+    {
+        // The guarantee that made giving every pair a baseline safe: outside the
+        // protectForeignDestinationFiles branch, ReconcileOneWay never reads the baseline, so an
+        // unshared pair's plan must not shift now that the rows exist. A stale baseline claiming
+        // the local copy is current does not stop the authoritative remote from overwriting it.
+        var remote = FileFp("a.txt", hash: "hash-new", modifiedAt: T1);
+        var local = FileFp("a.txt", hash: "hash-old");
+
+        var withBaseline = Reconcile(SyncDirection.RemoteToLocal, Map(local), Map(remote),
+            BaselineMap(BaselineOf("a.txt", false, local, local)));
+        var without = Reconcile(SyncDirection.RemoteToLocal, Map(local), Map(remote));
+
+        Assert.Equal(SyncOperation.DownloadFile, Assert.Single(withBaseline.Actions).Operation);
+        Assert.Equal(
+            without.Actions.Select(a => (a.Operation, a.RelativePath)),
+            withBaseline.Actions.Select(a => (a.Operation, a.RelativePath)));
+        Assert.Empty(withBaseline.Conflicts);
     }
 
     [Fact]

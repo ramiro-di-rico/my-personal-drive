@@ -44,12 +44,11 @@ public static class SyncReconciler
         // claims are excluded from the main loop, which otherwise sees the source as "deleted
         // remotely" and the destination as "new remotely" and answers with a needless
         // delete-plus-download of content that never changed. §11, resolved by Appendix A #3.
-        // TwoWay only, and not by omission: detection correlates the CLI's `uid` against the one
-        // recorded in the baseline, and a one-way mirror deliberately keeps no baseline (its source
-        // side is authoritative, so it never needed one). A `RemoteToLocal` pair therefore still
-        // answers a remote move with delete+download — correct, just not free. Making it cheap there
-        // would mean matching on (size, mtime) with no identity to confirm it, which is the guess
-        // §11.3 says to refuse.
+        // TwoWay only. Detection correlates the CLI's `uid` against the one recorded in the
+        // baseline, and one-way pairs kept no baseline when this was written. They do now
+        // (SyncExecutor.KeepsBaseline), which removes the obstacle but not the work: turning it on
+        // for a one-way pair is backlog B5, and until it is exercised a `RemoteToLocal` pair still
+        // answers a remote move with delete+download — correct, just not free.
         var handledByMove = new HashSet<string>(StringComparer.Ordinal);
         if (direction == SyncDirection.TwoWay)
         {
@@ -265,10 +264,11 @@ public static class SyncReconciler
     }
 
     /// <summary>
-    /// RemoteToLocal / LocalToRemote: the source side is always authoritative. No baseline is
-    /// consulted — a one-way mirror doesn't need one, and diverging destination-side changes
-    /// are simply overwritten (per §5.2's note on one-way modes), which is exactly why F1
-    /// starts with RemoteToLocal: it's the direction that can't destroy cloud data.
+    /// RemoteToLocal / LocalToRemote: the source side is always authoritative. The baseline is
+    /// consulted for one question only (see <paramref name="protectForeignDestinationFiles"/>);
+    /// otherwise diverging destination-side changes are simply overwritten (per §5.2's note on
+    /// one-way modes), which is exactly why F1 starts with RemoteToLocal: it's the direction that
+    /// can't destroy cloud data.
     ///
     /// <paramref name="mirrorDeletes"/> is the opt-out from the "mirror" half of that: when
     /// false, a destination-only item is left alone instead of deleted, turning the pair into an
@@ -285,10 +285,11 @@ public static class SyncReconciler
     /// same-named file on every single run, each one seeing the other's file as a stale
     /// destination.
     ///
-    /// This is the one place a one-way pair consults the baseline, and the reason such a pair keeps
-    /// one at all. The baseline answers exactly one question here — "did I write this?" — and
-    /// nothing else about it is read: the source side stays authoritative for everything this pair
-    /// does own.
+    /// This is the one place a one-way pair consults the baseline. It answers exactly one question
+    /// — "did I write this?" — and nothing else about it is read: the source side stays
+    /// authoritative for everything this pair does own. A one-way pair keeps a baseline whether or
+    /// not this is set (SyncExecutor.KeepsBaseline), so turning the flag off changes what is read,
+    /// never what is recorded.
     /// </summary>
     private static void ReconcileOneWay(
         string path, bool isFolder, NodeFingerprint? source, NodeFingerprint? destination,
@@ -302,7 +303,22 @@ public static class SyncReconciler
     {
         if (source is null)
         {
-            if (destination is not null && mirrorDeletes)
+            if (destination is null)
+            {
+                // Gone from both sides with a baseline row still naming it: forget the row, exactly
+                // as the two-way table's last line does. One-way pairs only started keeping a
+                // baseline when the status badges needed one, and without this the rows for deleted
+                // paths would accumulate for the life of the pair — and keep `SyncStatusIndex`
+                // answering about paths that no longer exist anywhere.
+                if (baseline is not null)
+                {
+                    actions.Add(new SyncAction(SyncOperation.ClearBaseline, path, null, null, PriorityFor(SyncOperation.ClearBaseline, path)));
+                }
+
+                return;
+            }
+
+            if (mirrorDeletes)
             {
                 actions.Add(new SyncAction(deleteDestination, path, null, null, PriorityFor(deleteDestination, path)));
             }
@@ -316,6 +332,12 @@ public static class SyncReconciler
             {
                 actions.Add(new SyncAction(createDestinationFolder, path, null, null, PriorityFor(createDestinationFolder, path)));
             }
+            else if (baseline is null && !protectForeignDestinationFiles)
+            {
+                // Backfill, same as the equal-files case below. Folders are compared by presence,
+                // so one that exists on both sides is settled by definition.
+                actions.Add(UpdateBaselineOnly(path));
+            }
 
             return;
         }
@@ -328,6 +350,22 @@ public static class SyncReconciler
 
         if (!IsChanged(source, destination, tolerance))
         {
+            // Already equal, and no row saying so. The two-way table's `✓ ✓ ✗` row answers this with
+            // `UpdateBaselineOnly` and one-way now needs the same answer, for two reasons that
+            // arrive together: a pair that predates SyncExecutor.KeepsBaseline has a whole tree in
+            // this state and would otherwise never write a single row — it has nothing left to
+            // transfer, so nothing would ever call RecordAsync — and until it does, every one of
+            // those rows draws the `NotSynced` badge. It costs one pass of baseline-only items, once.
+            //
+            // Not for a protected pair, though: there "no baseline row" means "someone else put
+            // this here", and recording a row would quietly transfer ownership of a foreign file to
+            // this pair on the grounds that it currently happens to be identical. Identical is the
+            // one case where the protection costs nothing to keep.
+            if (baseline is null && !protectForeignDestinationFiles)
+            {
+                actions.Add(UpdateBaselineOnly(path));
+            }
+
             return;
         }
 

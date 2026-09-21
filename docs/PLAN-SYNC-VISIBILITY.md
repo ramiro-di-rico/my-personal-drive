@@ -154,6 +154,16 @@ where a folder with no listed children may still answer confidently is when the 
 entry under its prefix and the pair has completed at least one successful cycle
 (`SyncPair.LastStatus == Success`) — then `NotSynced` is a fact, not a guess.
 
+> **Corrected after shipping.** Everything below, and the whole table above, rests on an assumption
+> this document never stated: that the covering pair *has* a baseline. One-way pairs did not keep
+> one, so every rule here read their empty `SyncState` as "nothing was ever transferred" and drew
+> `NotSynced` on every row of a folder that had just mirrored down in full. The fix is in the
+> engine, not here — `SyncExecutor.KeepsBaseline` is now unconditional
+> (docs/PLAN-LOCAL-SYNC.md §5.2.1) — and the rules below are correct again as written, for every
+> direction. The lesson worth keeping: `NotSynced` is an assertion, and an index that cannot tell
+> "no rows because nothing synced" from "no rows because nobody writes any" has no business making
+> it.
+
 **The file rule.** No baseline → `NotSynced`. Baseline present → compare the current fingerprint for
 *this side* against the baseline's side (`LocalAtSync` in the local pane, `RemoteAtSync` in the
 cloud pane) with the same comparison `SyncReconciler` uses, honouring the `HashAlgorithm` guard

@@ -9,9 +9,8 @@ namespace MyPersonalDrive.Services.Sync;
 /// <summary>
 /// Scans both sides of a pair, reconciles, enqueues the plan durably, and executes it against
 /// the local filesystem and the CLI, updating the three-way baseline as it goes. All three
-/// directions are supported (docs/PLAN-LOCAL-SYNC.md F2); only <see cref="SyncDirection.TwoWay"/>
-/// consults and maintains a baseline, since a one-way mirror doesn't need one — its source side
-/// is authoritative by definition.
+/// directions are supported (docs/PLAN-LOCAL-SYNC.md F2) and all three maintain a baseline — see
+/// <see cref="KeepsBaseline"/> for why a one-way pair keeps one it barely reads.
 /// </summary>
 public sealed class SyncExecutor
 {
@@ -51,10 +50,13 @@ public sealed class SyncExecutor
     /// <param name="deltaScanner">
     /// A delta-based scanner (<see cref="DeltaRemoteScanner"/>) for providers whose
     /// <c>Capabilities.SupportsDelta</c> is true, used only for <see cref="SyncDirection.TwoWay"/>
-    /// pairs — a one-way pair never populates a baseline (<see cref="LoadBaselineAsync"/> returns an
-    /// empty dictionary for it), so a delta scanner has nothing to merge onto and would be unsound.
-    /// Null falls back to <paramref name="remoteScanner"/> for every pair, same as before P8
-    /// (docs/PLAN-CLOUD-PROVIDERS.md P8).
+    /// pairs. One-way pairs now keep a baseline too (<see cref="KeepsBaseline"/>), so the original
+    /// reason for the restriction — no merge base to apply a delta onto — no longer holds; the
+    /// restriction stays because a one-way baseline has never been exercised as a merge base, and
+    /// a delta scan that silently misses a path shows up as a file that never downloads. Widening
+    /// it is a change to make deliberately, with its own integration pass, not a side effect of
+    /// this one. Null falls back to <paramref name="remoteScanner"/> for every pair, same as
+    /// before P8 (docs/PLAN-CLOUD-PROVIDERS.md P8).
     /// </param>
     public SyncExecutor(
         IDriveOperations operations,
@@ -279,16 +281,16 @@ public sealed class SyncExecutor
             : new Dictionary<string, SyncBaselineEntry>();
 
     /// <summary>
-    /// Whether this pair needs protecting from files it did not write — and therefore whether it
-    /// keeps a baseline, which is the only thing that can tell it which those are.
+    /// Whether this pair needs protecting from files it did not write. The baseline is what tells
+    /// it which those are; every pair keeps one now (<see cref="KeepsBaseline"/>), so this flag no
+    /// longer decides that, only whether the protection branch reads it.
     ///
     /// Deliberately narrower than <see cref="SyncPair.SharesLocalFolder"/> alone: only a
     /// <see cref="SyncDirection.RemoteToLocal"/> pair writes into the shared local folder, so only
     /// it can be surprised by what another pair put there. An upload-only pair sharing the folder
     /// merely reads it — the shape that was already supported before sharing was generalised — and
-    /// switching it on would start it keeping a baseline and raising conflicts about pre-existing
-    /// *remote* files, which is a different problem, not this one, and not one its owner asked to
-    /// have solved. <see cref="SyncReconciler"/> implements the protection symmetrically all the
+    /// switching it on would start it raising conflicts about pre-existing *remote* files, which is
+    /// a different problem, not this one, and not one its owner asked to have solved. <see cref="SyncReconciler"/> implements the protection symmetrically all the
     /// same, since it is a pure function and the symmetry costs nothing; this is the seam that
     /// decides where it actually applies.
     ///
@@ -298,18 +300,30 @@ public sealed class SyncExecutor
         => pair.SharesLocalFolder && pair.Direction == SyncDirection.RemoteToLocal;
 
     /// <summary>
-    /// Which pairs maintain a baseline. TwoWay always has: the whole decision table is three-way.
-    /// A one-way pair normally does not — its source side is authoritative, so there is nothing a
-    /// baseline could tell it — with the one exception
-    /// <see cref="NeedsForeignFileProtection"/> describes, which needs it to answer "did I write
-    /// this file?".
+    /// Every pair maintains a baseline. TwoWay needs one to decide anything at all: the whole
+    /// decision table is three-way. A one-way pair barely reads its own — the source side is
+    /// authoritative, so <see cref="SyncReconciler"/> consults it only for the "did I write this
+    /// file?" question <see cref="NeedsForeignFileProtection"/> describes — and for a long time it
+    /// therefore kept none.
+    ///
+    /// That was right while the baseline was only a merge base, and wrong once it also became the
+    /// record of what a pair has transferred: <see cref="SyncStatusIndex"/> reads exactly these
+    /// rows to answer "is this file synced?", and a pair with no rows made every item under it
+    /// report <c>NotSynced</c> — a confident claim, drawn on every row, about a folder that had in
+    /// fact just downloaded in full (docs/PLAN-SYNC-VISIBILITY.md §1.2 assumed a baseline and never
+    /// said what to do without one). There is no cheaper source for that answer: the queue is
+    /// pruned, and a <c>Done</c> row says what happened once, not what is true now.
+    ///
+    /// Writing it costs a one-way pair one local hash per action, plus the remote re-read the
+    /// per-folder cache in <see cref="SyncBaselineWriter"/> already amortises. Reading it does not
+    /// change a single one-way decision: <see cref="NeedsForeignFileProtection"/> still gates the
+    /// only branch that looks, so an unshared pair's plans are exactly what they were.
     ///
     /// The rows come from <see cref="SyncBaselineWriter.RecordAsync"/>, which runs after each
     /// action this pair actually carried out — so the baseline means "what this pair touched", not
     /// "what this pair saw", which is precisely the distinction the protection rests on.
     /// </summary>
-    private static bool KeepsBaseline(SyncPair pair)
-        => pair.Direction == SyncDirection.TwoWay || NeedsForeignFileProtection(pair);
+    private static bool KeepsBaseline(SyncPair pair) => true;
 
     /// <summary>
     /// Carries out one parked conflict's resolution (§5.6's manual path) and marks the row done.
@@ -415,9 +429,9 @@ public sealed class SyncExecutor
         Directory.CreateDirectory(pair.LocalPath);
         var local = await _localScanner.ScanAsync(pair.LocalPath, exclusions, cancellationToken);
 
-        // A one-way pair never populates a baseline (LoadBaselineAsync returns an empty dictionary
-        // for it), so a delta scanner has no merge base and would be unsound — it always falls back
-        // to the full-walk scanner regardless of what the provider supports.
+        // TwoWay only — see the deltaScanner constructor parameter. A one-way pair does have a
+        // baseline to merge onto now, but it falls back to the full-walk scanner until that has
+        // been proven against real deltas.
         var scanner = pair.Direction == SyncDirection.TwoWay ? _deltaScanner ?? _remoteScanner : _remoteScanner;
 
         // Subscribed per scan: a node the scanner had to leave out is only discoverable here, and a

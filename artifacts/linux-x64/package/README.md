@@ -66,14 +66,27 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
   automatically with the on/off choice persisted across restarts. Every provider syncs
   independently — pausing one doesn't affect the others. A one-way pair can mirror the destination
   exactly (deleting whatever isn't at the source, the historical behavior) or, unchecked, sync
-  additively — never deleting files the destination already had. The same local folder can be
-  synced to several providers at once as long as every pair sharing it is upload-only, since none
-  of them ever writes back to that folder — any other combination (a pair that downloads or
-  mirrors into a shared folder) is rejected
+  additively — never deleting files the destination already had
+- Share one local folder between several providers, in either direction. Uploading it to several
+  providers at once works with no conditions, since none of those pairs ever writes back to the
+  folder. Downloading into a shared folder works too, as long as every download pair sharing it is
+  additive: otherwise the first run would trash everything the other provider put there, all of
+  which is missing from this one's cloud. Mixing directions is allowed — fetch from one provider
+  and replicate to others. Two-way pairs can never share a folder: a two-way pair would upload the
+  other provider's files as if they were yours, then delete them from its own cloud when they go.
+  When two providers hold a different file under the same name, the second pair does **not**
+  overwrite the first one's copy — it reports a conflict and applies that pair's conflict policy,
+  so neither version is lost. Nested folders (one pair inside another's) stay rejected: that
+  breaks at the folder-scan level, which no per-file rule can fix
 - Right-click a row in either pane for a context menu: copy its path, upload into or download a
   cloud folder, start a sync pair pre-filled with that path, pause/resume/run-now an existing pair,
   rename or delete a local item, and view its properties. Folders with an active sync pair show a
   small badge (paused pairs show a different one) — see badge in list view and the local pane
+- Move a cloud item into another folder of the same provider, server-side: pick the destination in
+  a folder browser and the provider relocates it — nothing is downloaded and re-uploaded. Works on
+  one row ("Move to..." in the context menu) or on a whole multi-selection ("Move selected" in the
+  selection bar). Moving something into the folder it is already in, or a folder into its own
+  subtree, is refused before any call is made
 - Copy a share link for a cloud item to the clipboard (OneDrive and Google Drive — Proton Drive's
   CLI has no such command, so the menu entry stays disabled there, with a tooltip explaining why)
 - Live console with realtime output from the CLI (Proton) and HTTP requests (OneDrive, Google

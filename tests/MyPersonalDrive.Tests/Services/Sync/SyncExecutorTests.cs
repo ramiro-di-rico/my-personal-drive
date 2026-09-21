@@ -94,10 +94,12 @@ public class SyncExecutorTests : IDisposable
     }
 
     [Fact]
-    public async Task AnUnsharedOneWayPair_StillRecordsNoBaseline()
+    public async Task AnUnsharedOneWayPair_AlsoRecordsABaseline_SoItsRowsCanReportTheirStatus()
     {
-        // The other half of the same guarantee: the flag is opt-in, and a pair that owns its folder
-        // alone must not start paying for a baseline it has no use for.
+        // This used to assert the opposite — an unshared one-way pair "must not start paying for a
+        // baseline it has no use for". It had one: SyncStatusIndex reads exactly these rows, and
+        // with none of them every file the pair had just downloaded drew the NotSynced badge, which
+        // is a confident claim rather than a missing one. See SyncExecutor.KeepsBaseline.
         var executor = new FakeCliExecutor();
         executor.RespondForPath(RemoteRoot, $"[{FileEntry("a.txt", "hello")}]");
         executor.EnqueueOutput(args =>
@@ -113,17 +115,22 @@ public class SyncExecutorTests : IDisposable
 
         await sut.RunAsync(pair);
 
-        Assert.Empty(await stateStore.GetBaselineAsync(pair.Id));
+        var entry = Assert.Single(await stateStore.GetBaselineAsync(pair.Id)).Value;
+        Assert.Equal("a.txt", entry.RelativePath);
+        Assert.NotNull(entry.LocalAtSync);
+        Assert.NotNull(entry.RemoteAtSync);
     }
 
     [Fact]
-    public async Task ASharedUploadOnlyPair_KeepsNoBaseline_BecauseItWritesNothingLocally()
+    public async Task ASharedUploadOnlyPair_RaisesNoConflicts_EvenThoughItNowKeepsABaseline()
     {
         // The deliberate asymmetry (SyncExecutor.NeedsForeignFileProtection). Uploading one folder
         // to several providers was already supported and is unaffected by sharing: those pairs only
-        // read the folder. Switching protection on for them would start them keeping a baseline and
-        // raising conflicts about pre-existing remote files — a different problem, and a silent
-        // behavior change for every fan-out pair that already exists.
+        // read the folder. Switching protection on for them would start them raising conflicts
+        // about pre-existing remote files — a different problem, and a silent behavior change for
+        // every fan-out pair that already exists. Keeping a baseline is not what does that: the
+        // pair records rows now (KeepsBaseline is unconditional) and the reconciler still never
+        // looks at them, which is the separation this asserts.
         var executor = new FakeCliExecutor();
         executor.RespondForPath(RemoteRoot, "[]");
         for (var i = 0; i < 6; i++)
@@ -141,10 +148,136 @@ public class SyncExecutorTests : IDisposable
 
         var plan = await sut.RunAsync(pair);
 
-        // Assert the upload actually happened first: an empty baseline proves nothing if the run
-        // simply had nothing to do, or failed before recording anything.
+        // Assert the upload actually happened first: no conflicts proves nothing if the run simply
+        // had nothing to do, or failed before doing it.
         Assert.Equal(1, plan.Stats.FilesToUpload);
         Assert.Contains(executor.Calls, c => c.Arguments is ["filesystem", "upload", ..]);
+        Assert.Empty(plan.Conflicts);
+        Assert.NotEmpty(await stateStore.GetBaselineAsync(pair.Id));
+    }
+
+    [Fact]
+    public async Task AfterAOneWayRun_EveryDownloadedRowReadsAsSynced_NotAsNeverTransferred()
+    {
+        // The defect that made one-way pairs keep a baseline at all. A RemoteToLocal pair mirrored a
+        // whole folder down, every queue row reached Done — and both panes drew the "not synced"
+        // badge on every single item, because SyncStatusIndex had no baseline row to find and
+        // NotSynced is what it reports in that case. This asserts the badge the user actually sees,
+        // through the same two calls the panes make.
+        var cli = new FakeCliExecutor();
+        cli.RespondForPath(RemoteRoot, $"[{FolderEntry("Fotos")}]");
+        cli.RespondForPath($"{RemoteRoot}/Fotos", $"[{FileEntry("a.txt", "hello")}]");
+        cli.EnqueueOutput(args =>
+        {
+            File.WriteAllText(Path.Combine(args[3], "a.txt"), "hello");
+            return "";
+        });
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.RemoteToLocal);
+        var provider = new ProtonDriveProvider(new ProtonDriveService(cli));
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
+
+        await sut.RunAsync(pair);
+        Assert.True(File.Exists(Path.Combine(_localRoot, "Fotos", "a.txt")), "The run did not download the file, so the badge proves nothing.");
+
+        var status = new SyncStatusService(stateStore, "Proton Drive");
+
+        // The local pane: one row per file, with the stat-only fingerprint LocalExplorerViewModel
+        // builds from the listing it already holds — no hash, so the comparison falls back to
+        // size+mtime, which is exactly the path that has to work.
+        var file = new FileInfo(Path.Combine(_localRoot, "Fotos", "a.txt"));
+        var localLookup = Assert.Single(await status.LookupLocalAsync(file.FullName));
+        Assert.Equal(SyncNodeStatus.Synced, localLookup.Index.StatusForFile(
+            localLookup.RelativePath,
+            new NodeFingerprint(localLookup.RelativePath, false, file.Length, new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero), null, null),
+            SyncSide.Local));
+
+        // The collapsed folder above it rolls up with no listed children, which is the case that
+        // falls through to StatusAsOfLastCycle and needs a baseline row underneath to answer at all.
+        var folderLookup = Assert.Single(await status.LookupLocalAsync(Path.Combine(_localRoot, "Fotos")));
+        Assert.Equal(SyncNodeStatus.Synced, folderLookup.Index.StatusForFolder(folderLookup.RelativePath, [], SyncSide.Local));
+
+        // And the cloud pane, which reads the other side of the same rows.
+        var remoteLookup = await status.LookupRemoteAsync($"{RemoteRoot}/Fotos/a.txt");
+        Assert.NotNull(remoteLookup);
+        Assert.Equal(SyncNodeStatus.Synced, remoteLookup.Index.StatusForFile(
+            remoteLookup.RelativePath,
+            new NodeFingerprint(remoteLookup.RelativePath, false, 5, DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture), "uid-a.txt", "hash-a.txt", RemoteHashAlgorithm.Sha1),
+            SyncSide.Remote));
+    }
+
+    [Fact]
+    public async Task AOneWayPairThatAlreadyMirroredEverything_BackfillsItsMissingBaseline_InOneRun()
+    {
+        // The upgrade path, and the shape of the pair this defect was found on: everything already
+        // downloaded, nothing left to transfer, and an empty SyncState because the pair predates
+        // SyncExecutor.KeepsBaseline. Without the UpdateBaselineOnly backfill in ReconcileOneWay
+        // nothing would ever call RecordAsync for it — no actions, no rows, badges wrong forever —
+        // so the fix would only have helped pairs created after it.
+        WriteSettledLocalFile("Fotos/a.txt", "hello");
+
+        var cli = new FakeCliExecutor();
+        cli.RespondForPath(RemoteRoot, $"[{FolderEntry("Fotos")}]");
+        cli.RespondForPath($"{RemoteRoot}/Fotos", $"[{FileEntry("a.txt", "hello", modifiedAt: LocalMtimeOf("Fotos/a.txt"))}]");
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.RemoteToLocal);
+        var provider = new ProtonDriveProvider(new ProtonDriveService(cli));
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
+
+        var plan = await sut.RunAsync(pair);
+
+        // Nothing was transferred — the tree really was already in sync.
+        Assert.Equal(0, plan.Stats.FilesToDownload);
+        Assert.DoesNotContain(cli.Calls, c => c.Arguments is ["filesystem", "download", ..]);
+
+        var status = new SyncStatusService(stateStore, "Proton Drive");
+        var file = new FileInfo(Path.Combine(_localRoot, "Fotos", "a.txt"));
+        var lookup = Assert.Single(await status.LookupLocalAsync(file.FullName));
+        Assert.Equal(SyncNodeStatus.Synced, lookup.Index.StatusForFile(
+            lookup.RelativePath,
+            new NodeFingerprint(lookup.RelativePath, false, file.Length, new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero), null, null),
+            SyncSide.Local));
+
+        // And it is a one-off: the second run has nothing at all to do.
+        Assert.Empty((await sut.RunAsync(pair)).Actions);
+    }
+
+    /// <summary>The local file's mtime in the CLI's own format, so a fixture can claim the two sides match.</summary>
+    private string LocalMtimeOf(string relativePath)
+        => new DateTimeOffset(File.GetLastWriteTimeUtc(Path.Combine(_localRoot, relativePath.Replace('/', Path.DirectorySeparatorChar))), TimeSpan.Zero)
+            .ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+
+    [Fact]
+    public async Task AOneWayPair_ClearsTheBaselineRowForAPathThatVanishedFromBothSides()
+    {
+        // The other end of keeping a baseline: the rows have to be able to go away again, or a
+        // long-lived mirror accumulates one per file it has ever deleted. Covered in the reconciler
+        // as a table row; covered here as the queue item actually running.
+        var cli = new FakeCliExecutor();
+        cli.RespondForPath(RemoteRoot, $"[{FileEntry("a.txt", "hello")}]");
+        cli.EnqueueOutput(args =>
+        {
+            File.WriteAllText(Path.Combine(args[3], "a.txt"), "hello");
+            return "";
+        });
+
+        var stateStore = new SyncStateStore(_dbPath);
+        var pair = await CreatePairAsync(stateStore, SyncDirection.RemoteToLocal);
+        var provider = new ProtonDriveProvider(new ProtonDriveService(cli));
+        var sut = new SyncExecutor(provider.Operations, stateStore, new LocalScanner(), new RemoteScanner(provider));
+
+        await sut.RunAsync(pair);
+        Assert.NotEmpty(await stateStore.GetBaselineAsync(pair.Id));
+
+        // Gone from both sides before the next run: nothing left to transfer or delete, only a row
+        // to forget.
+        cli.RespondForPath(RemoteRoot, "[]");
+        File.Delete(Path.Combine(_localRoot, "a.txt"));
+
+        await sut.RunAsync(pair);
+
         Assert.Empty(await stateStore.GetBaselineAsync(pair.Id));
     }
 
@@ -318,7 +451,9 @@ public class SyncExecutorTests : IDisposable
         var plan = await sut.PreviewAsync(pair);
 
         Assert.Equal(0, plan.Stats.FilesToUpload);
-        Assert.Empty(plan.Actions);
+        // The only thing planned is the baseline row the pair is missing for a file it can see is
+        // already in place — never a transfer, which is what this test is about.
+        Assert.All(plan.Actions, a => Assert.Equal(SyncOperation.UpdateBaselineOnly, a.Operation));
     }
 
     /// <summary>A genuinely different file must still upload — the hash check isn't a blanket "never re-upload".</summary>

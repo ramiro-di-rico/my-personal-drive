@@ -405,9 +405,9 @@
       workable alternative is §11.3's content-hash match — a path that vanished locally and one that
       appeared with the baseline's recorded SHA-1, with exactly one candidate — which needs no native
       code and would then use the already-written-but-still-uncalled `MoveItemsAsync`. Also still
-      absent for `RemoteToLocal` pairs, which keep no baseline by design and so have no identity to
-      correlate against; making it work there would mean matching on (size, mtime) alone, which is
-      the guess §11.3 says to refuse.
+      absent for `RemoteToLocal` pairs, which kept no baseline at the time and so had no identity to
+      correlate against. They keep one now (§5.2.1), which removes the blocker but not the work —
+      see backlog B5.
 - [x] **F4 (remainder) — done. F4 complete.** 336 unit tests, four real-account integration tests,
       AOT clean.
 
@@ -813,15 +813,57 @@ neither behaves exactly as described above:
 - **`SharesLocalFolder = true`** drops the *authoritative* half, for one case only. A destination
   file that differs from the source **and has no baseline row for this pair** is not overwritten;
   it raises `ConflictReason.ForeignDestinationFile` and is resolved by the pair's
-  `ConflictPolicy`. This is the only circumstance in which a one-way pair consults a baseline —
-  and the only reason it keeps one (§12). The baseline answers exactly one question here, "did I
-  write this?", so the source stays authoritative for everything the pair does own.
+  `ConflictPolicy`. This is the only circumstance in which a one-way pair *consults* a baseline
+  (§12). The baseline answers exactly one question here, "did I write this?", so the source stays
+  authoritative for everything the pair does own. It is no longer the reason a one-way pair
+  *keeps* one — see §5.2.1.
 
   The policy is read as a statement about *sides*, not source and destination: `PreferLocal` keeps
   the local file whether local is the pair's source or its destination. `KeepBoth` moves the
   foreign file aside and lets the source's copy take the original path. `Ask` leaves the file
   untouched and records the conflict. No branch ever writes to the pair's source side, so a
   `RemoteToLocal` pair still cannot touch the cloud.
+
+#### 5.2.1 Every pair keeps a baseline
+
+`SyncExecutor.KeepsBaseline` is unconditional. It did not start that way: a one-way pair was given
+a baseline only when `SharesLocalFolder` made it need one, on the reasoning that its source side is
+authoritative and so a merge base tells it nothing.
+
+That reasoning was sound while the baseline was *only* a merge base. It stopped being true when
+`SyncStatusIndex` (docs/PLAN-SYNC-VISIBILITY.md) started reading the same rows to answer "is this
+item synced?" for every row in both panes. A pair with no rows made that index report `NotSynced`
+for everything under it — not "unknown", but the confident claim that nothing had ever been
+transferred, drawn on a folder that had in fact just mirrored down in full. Found in the app: a
+`RemoteToLocal` Google Drive pair with 518 completed queue rows and an empty `SyncState`.
+
+There is no cheaper source for that answer. The queue is pruned on a retention window, and a `Done`
+row records that something happened once, not that it is still true — which is exactly why
+`SyncStatusIndex` ignores `Done` rows.
+
+What it costs a one-way pair: one local content hash per action, plus the remote re-read that
+`SyncBaselineWriter`'s per-folder cache already amortises. What it does **not** change is any
+decision. `ReconcileOneWay` reads the baseline in one branch only, gated on
+`protectForeignDestinationFiles`, so an unshared pair plans exactly what it planned before; the
+rows are written and, apart from the badges, never read.
+
+**The backfill.** Making the rule unconditional is not enough on its own: a pair that had already
+mirrored its tree down has nothing left to transfer, so no action runs, so `RecordAsync` is never
+called and the rows never appear. `ReconcileOneWay` therefore answers "equal on both sides, no
+baseline row" with `UpdateBaselineOnly` — the same answer the two-way table's `✓ ✓ ✗` row gives —
+which costs one pass of baseline-only items the first time such a pair runs, and nothing after
+that. It is skipped for a pair with `protectForeignDestinationFiles`: there, a missing row means
+"another pair put this here", and claiming a foreign file because it currently happens to be
+byte-identical would drop the protection the moment it diverged.
+
+Two things follow that are not yet done, listed here so they are not mistaken for oversights:
+
+- The delta scanner stays `TwoWay`-only (`SyncExecutor.ScanBothSidesAsync`). The obstacle was the
+  missing merge base and it is gone, but a one-way baseline has never been exercised as one, and a
+  delta scan that quietly misses a path shows up as a file that never downloads. Widening it needs
+  its own integration pass.
+- Backlog B5 (rename detection for `RemoteToLocal`) named "would require giving one-way pairs a
+  baseline" as its blocker. That prerequisite now exists; the work does not.
 
 ### 5.3 Plan execution order
 
@@ -1080,7 +1122,8 @@ and that `filesystem move` exists as a direct operation (not just rename+copy+tr
 **Status**: implemented for `TwoWay` pairs in both directions. Mechanism 1 (the `uid`) drives remote
 moves; mechanism 3 (content match) drives local ones, because mechanism 2's `st_ino` isn't reachable
 from .NET without a platform P/Invoke — so 3 turned out to be the *primary* local mechanism rather
-than a fallback. One-way pairs still transfer, since they keep no baseline to correlate against.
+than a fallback. One-way pairs still transfer: they keep a baseline now (§5.2.1), but detection has
+not been turned on for them — backlog B5.
 
 1. **Primary mechanism (verified, use this)**: `SyncState.RemoteNodeId` = the CLI's `uid`.
    Reconciliation on the remote side is indexed by `uid`, not path. When a `uid` known from the
@@ -1169,16 +1212,18 @@ the folder alone.
 What the validator does **not** decide is what happens when two pairs disagree about a same-named
 file. Left alone, each would see the other's file as a stale destination and overwrite it on every
 run, forever, losing a version each time. That is handled per file at sync time: a pair sharing a
-folder is marked `SharesLocalFolder`, which makes `SyncExecutor` keep a baseline for it even though
-it is one-way, and makes `SyncReconciler` raise `ForeignDestinationFile` instead of overwriting
-(§5.2).
+folder is marked `SharesLocalFolder`, which makes `SyncReconciler` raise `ForeignDestinationFile`
+instead of overwriting (§5.2). It used to be what made `SyncExecutor` keep a baseline for such a
+pair as well; every pair keeps one now (§5.2.1), so the flag decides only whether the rows are
+read.
 
 `SyncExecutor.NeedsForeignFileProtection` narrows that to **download pairs only**: they are the
 only ones that write into the shared local folder, so only they can be surprised by what another
 pair left there. An upload-only pair sharing the folder just reads it — the shape that already
-worked before sharing was generalised — and switching protection on for it would make it keep a
-baseline and raise conflicts about pre-existing *remote* files, which is a separate problem and a
-silent behavior change for every fan-out pair already configured. The reconciler implements the
+worked before sharing was generalised — and switching protection on for it would make it raise
+conflicts about pre-existing *remote* files, which is a separate problem and a silent behavior
+change for every fan-out pair already configured. (Keeping a baseline is not what does that: such a
+pair records rows today and the reconciler still never looks at them.) The reconciler implements the
 protection symmetrically anyway, since it is a pure function and the symmetry is free; the executor
 is the seam that decides where it applies. The flag is maintained by `SyncPanelViewModel` as pairs are added and removed — not derived
 at sync time, because the executor only ever sees one account's store while a shared folder is
@@ -1263,7 +1308,7 @@ actionable as a set. Roughly in the order worth doing.
 | # | Item | Why it was deferred, and what to do |
 |---|---|---|
 | ~~B4~~ | ~~**Local→remote rename detection** (§11's other half).~~ **Done** — see the B4 entry in Status. `MoveItemsAsync` is finally called. |
-| B5 | **Rename detection for `RemoteToLocal` pairs.** | They keep no baseline by design, so there's no identity to correlate and a remote move still costs a delete+download. Making it work would mean matching on `(size, mtime)` with nothing to confirm it — the guess §11.3 says to refuse. Would require giving one-way pairs a baseline purely for identity. |
+| B5 | **Rename detection for `RemoteToLocal` pairs.** | A remote move still costs a delete+download: `DetectRemoteMoves` runs for `TwoWay` only. The stated blocker — "would require giving one-way pairs a baseline" — is gone as of §5.2.1, which gives every pair one with the `uid` in it. What is left is turning detection on for the direction and covering it, including what a `uid` recorded by a pair that only ever downloads is worth. |
 | B6 | **Fine-grained transfer progress.** | Appendix A #12 was never tested: whether `upload`/`download` emit parseable progress on stdout is still unknown. `CliCommandOutputEventArgs` already streams lines, so the plumbing exists. Per-*action* progress ("12 of 48") needs none of that and is the bigger win — see §12. |
 | B7 | **Interactive priority over the CLI gate.** | §9 wants the browser's requests served ahead of sync's. Not built because the semaphore is held per *invocation* (~3.5s), so the worst case is already a short wait. Revisit only if that proves annoying in practice. |
 

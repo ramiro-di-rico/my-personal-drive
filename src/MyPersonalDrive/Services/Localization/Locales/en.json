@@ -47,6 +47,8 @@
   "common.type": "Type",
   "common.unknown": "Unknown",
   "common.yes": "Yes",
+  "compact.enter.tooltip": "Shrink the window to the activity strip",
+  "compact.exit.tooltip": "Back to the full window",
   "connection.desc.connected": "Connected to {0}.",
   "connection.desc.degraded": "The last operation against {0} failed: {1}",
   "connection.desc.disconnected": "Disconnected — no session signed in on {0}.",

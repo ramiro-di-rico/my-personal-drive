@@ -42,6 +42,13 @@ provider call or a scan: `Services/Sync/SyncStatusIndex` answers from the `SyncS
 pair, dropping it whenever a cycle finishes or a pair changes. See
 [PLAN-SYNC-VISIBILITY.md](PLAN-SYNC-VISIBILITY.md).
 
+The window has a **second shape**: it collapses to a single always-on-top row carrying the active
+provider, the connection state, anything transferring and a failure dot — an alternative to
+minimising, for leaving the app visible while it syncs. Deliberately not a tray icon. Everything
+below the strip binds its visibility to `MainWindowViewModel.IsCompactMode`, while the window's own
+size, minimum, topmost and placement are `MainWindow.ApplyCompactMode`'s, since none of them have a
+view-model equivalent. See [PLAN-COMPACT-VIEW.md](PLAN-COMPACT-VIEW.md).
+
 Proton is currently the only supported provider, but the app no longer talks to
 `ProtonDriveService` directly anywhere outside `Services/Providers/Proton/` — every consumer goes
 through `ICloudDriveProvider` (§4, §5). See [PLAN-CLOUD-PROVIDERS.md](PLAN-CLOUD-PROVIDERS.md) for

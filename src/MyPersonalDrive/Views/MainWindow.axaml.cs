@@ -30,6 +30,12 @@ public partial class MainWindow : Window
         DataContextChanged += OnDataContextChanged;
         Opened += OnOpened;
 
+        // Read before anything narrows them, so compact mode has something to put back and the
+        // two numbers live in exactly one place — the XAML attributes.
+        _fullMinWidth = MinWidth;
+        _fullMinHeight = MinHeight;
+        Closing += OnClosingRememberCompactPosition;
+
         // Tunnel, not the plain bubble subscription a XAML PointerPressed/PointerMoved attribute
         // on the row Button itself would give: ButtonBase marks these events Handled as part of
         // its own click tracking (RoutingStrategies.Bubble), so a same-strategy handler attached
@@ -390,6 +396,100 @@ public partial class MainWindow : Window
         if (e.PropertyName == nameof(MainWindowViewModel.IsLocalExplorerPanelVisible) && sender is MainWindowViewModel viewModel)
         {
             ApplyLocalExplorerPanelColumnWidth(viewModel.IsLocalExplorerPanelVisible);
+        }
+
+        if (e.PropertyName == nameof(MainWindowViewModel.IsCompactMode) && sender is MainWindowViewModel compactViewModel)
+        {
+            ApplyCompactMode(compactViewModel, compactViewModel.IsCompactMode);
+        }
+    }
+
+    private readonly double _fullMinWidth;
+    private readonly double _fullMinHeight;
+
+    /// <summary>
+    /// What the window chrome is currently set up for, or <c>null</c> before the first apply. The
+    /// null state is what keeps the initial apply from counting as a transition: entering compact
+    /// records the size to restore, and leaving it records where the strip sat, but doing either
+    /// on launch would overwrite last session's values with this session's defaults.
+    /// </summary>
+    private bool? _compactChromeApplied;
+
+    /// <summary>The strip's own width and its floor. Height is left to the content.</summary>
+    private const double CompactWindowWidth = 420;
+    private const double CompactMinWidth = 280;
+    private const double CompactMinHeight = 32;
+
+    /// <summary>
+    /// Resizes, pins and places the window for the compact strip, or puts it back
+    /// (docs/PLAN-COMPACT-VIEW.md). Not business logic living in code-behind: `MinWidth`,
+    /// `SizeToContent`, `Topmost` and `Position` are window properties with no view-model
+    /// equivalent, and the view model deliberately owns none of them.
+    ///
+    /// Order matters on the way in — the XAML minimums are 960x600, so `Width` has to be narrowed
+    /// *after* `MinWidth` drops or the assignment is silently clamped straight back up.
+    /// </summary>
+    private void ApplyCompactMode(MainWindowViewModel viewModel, bool compact)
+    {
+        if (_compactChromeApplied == compact)
+        {
+            return;
+        }
+
+        var isTransition = _compactChromeApplied is not null;
+
+        if (compact)
+        {
+            if (isTransition)
+            {
+                viewModel.SaveRestoreWindowSize(Width, Height);
+            }
+
+            MinWidth = CompactMinWidth;
+            MinHeight = CompactMinHeight;
+            // Height follows the strip rather than a constant: the row's own padding, font size
+            // and DPI decide how tall one line of it is, and a hard-coded number would clip it on
+            // any machine that disagrees.
+            SizeToContent = SizeToContent.Height;
+            Width = CompactWindowWidth;
+            Topmost = true;
+
+            if (viewModel.CompactWindowPosition is { } position)
+            {
+                Position = new PixelPoint(position.Left, position.Top);
+            }
+        }
+        else
+        {
+            if (isTransition)
+            {
+                viewModel.SaveCompactWindowPosition(Position.X, Position.Y);
+            }
+
+            Topmost = false;
+            SizeToContent = SizeToContent.Manual;
+            MinWidth = _fullMinWidth;
+            MinHeight = _fullMinHeight;
+
+            if (viewModel.RestoreWindowSize is { } size)
+            {
+                Width = size.Width;
+                Height = size.Height;
+            }
+        }
+
+        _compactChromeApplied = compact;
+    }
+
+    /// <summary>
+    /// The strip's position is saved when it is expanded, which never happens if the app is closed
+    /// while still compact — so it is saved on the way out too.
+    /// </summary>
+    private void OnClosingRememberCompactPosition(object? sender, WindowClosingEventArgs e)
+    {
+        if (_compactChromeApplied == true && DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.SaveCompactWindowPosition(Position.X, Position.Y);
         }
     }
 
@@ -884,6 +984,7 @@ public partial class MainWindow : Window
         viewModel.PropertyChanged -= OnMainWindowViewModelPropertyChanged;
         viewModel.PropertyChanged += OnMainWindowViewModelPropertyChanged;
         ApplyLocalExplorerPanelColumnWidth(viewModel.IsLocalExplorerPanelVisible);
+        ApplyCompactMode(viewModel, viewModel.IsCompactMode);
 
         viewModel.SyncPanel.RequestNewPairAsync = prefill => Dialogs.SyncPairDialog.ShowAddAsync(this, viewModel.SyncPanel, viewModel.RootPath, prefill);
         viewModel.SyncPanel.RequestPreviewConfirmationAsync = (plan, warnings) => Dialogs.SyncPreviewDialog.ShowAsync(this, plan, warnings);

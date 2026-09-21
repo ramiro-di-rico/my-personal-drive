@@ -60,6 +60,13 @@ public static class StringKeys
         public const string ThemeSystemTooltip = "header.theme.system.tooltip";
     }
 
+    /// <summary>The compact strip the window collapses to (docs/PLAN-COMPACT-VIEW.md).</summary>
+    public static class Compact
+    {
+        public const string EnterTooltip = "compact.enter.tooltip";
+        public const string ExitTooltip = "compact.exit.tooltip";
+    }
+
     /// <summary>The three view tabs plus Settings.</summary>
     public static class Nav
     {

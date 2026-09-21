@@ -47,6 +47,8 @@
   "common.type": "Tipo",
   "common.unknown": "Sconosciuta",
   "common.yes": "Sì",
+  "compact.enter.tooltip": "Riduci la finestra alla striscia di attività",
+  "compact.exit.tooltip": "Torna alla finestra intera",
   "connection.desc.connected": "Connesso a {0}.",
   "connection.desc.degraded": "L'ultima operazione su {0} non è riuscita: {1}",
   "connection.desc.disconnected": "Disconnesso — nessuna sessione attiva su {0}.",

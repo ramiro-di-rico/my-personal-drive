@@ -5,6 +5,7 @@ using Avalonia.VisualTree;
 using Microsoft.Data.Sqlite;
 using MyPersonalDrive.Models;
 using MyPersonalDrive.Services;
+using MyPersonalDrive.Services.Localization;
 using MyPersonalDrive.Services.Providers.Proton;
 using MyPersonalDrive.Services.Sync;
 using MyPersonalDrive.Tests.Fakes;
@@ -283,6 +284,68 @@ public class WindowLayoutTests : IDisposable
             badgeRight <= listing.Bounds.Width,
             $"The badge ends {badgeRight:0}px into a {listing.Bounds.Width:0}px listing, so it is off the pane.");
     }
+
+    /// <summary>
+    /// docs/PLAN-COMPACT-VIEW.md. The strip replaces the window rather than joining it, so the
+    /// thing worth measuring is that the rest is genuinely gone — the header, the view tabs and the
+    /// active view. A view-model test can only see the bool.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task CompactMode_LeavesTheStripAndNothingElse()
+    {
+        var (window, viewModel) = Show();
+        var tab = window.GetVisualDescendants().OfType<TextBlock>()
+            .First(block => block.Text == Localizer.Instance.T(StringKeys.Nav.Explorer));
+        Assert.True(tab.IsEffectivelyVisible);
+
+        await viewModel.ToggleCompactModeCommand.ExecuteAsync();
+        Layout(window, CompactWidth);
+
+        Assert.False(tab.IsEffectivelyVisible, "The view tabs are still on screen, so the window did not collapse.");
+        Assert.NotNull(ExpandButton(window));
+    }
+
+    /// <summary>
+    /// The strip has to survive its own minimum width: this is the one layout in the app whose
+    /// width is set by the feature rather than by the user, and the way out of compact mode is the
+    /// only control on it. A clipped expand button would strand the window as a strip.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task TheWayOutOfCompactMode_IsOnScreenAtTheNarrowestWidth()
+    {
+        var (window, viewModel) = Show();
+        await viewModel.ToggleCompactModeCommand.ExecuteAsync();
+        Layout(window);
+
+        var expand = ExpandButton(window)!;
+        Assert.True(expand.Bounds.Width > 0 && expand.Bounds.Height > 0, "The expand button has no size, so it is not being drawn.");
+
+        // The strip is squeezed directly rather than through the window. Compact mode turns on
+        // SizeToContent, and UpdateLayout then re-arranges the window from its own Width — so
+        // Layout(window, 280) is undone before it can be read, and the strip measures 1280 wide,
+        // which is the one width that needs no checking.
+        var strip = expand.GetVisualAncestors().OfType<Border>().First();
+        strip.Measure(new Avalonia.Size(CompactWidth, double.PositiveInfinity));
+        strip.Arrange(new Avalonia.Rect(0, 0, CompactWidth, strip.DesiredSize.Height));
+
+        var right = ((Visual)expand).TranslatePoint(new Avalonia.Point(expand.Bounds.Width, 0), strip)!.Value.X;
+        Assert.True(
+            right <= CompactWidth,
+            $"The expand button ends {right:0}px into a {CompactWidth:0}px strip, so the only way back to the full window is off screen.");
+
+        // The strip is one row: taller than that means something wrapped instead of trimming.
+        Assert.True(strip.Bounds.Height < 48, $"The strip is {strip.Bounds.Height:0}px tall, so its contents wrapped.");
+    }
+
+    /// <summary>The strip's floor, mirroring <c>MainWindow.CompactMinWidth</c>.</summary>
+    private const double CompactWidth = 280;
+
+    /// <summary>Found by its accessible name, which is the same thing a screen reader would use.</summary>
+    private static Button? ExpandButton(Window window)
+        => window.GetVisualDescendants().OfType<Button>().FirstOrDefault(button =>
+            button.IsEffectivelyVisible
+            && (string?)button.GetValue(Avalonia.Automation.AutomationProperties.NameProperty)
+                == Localizer.Instance.T(StringKeys.Compact.ExitTooltip));
 
     /// <summary>
     /// The badge's meaning reaches a screen reader (the a11y-theming skill): a glyph with no

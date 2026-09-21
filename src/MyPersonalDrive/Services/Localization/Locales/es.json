@@ -47,6 +47,8 @@
   "common.type": "Tipo",
   "common.unknown": "Desconocida",
   "common.yes": "Sí",
+  "compact.enter.tooltip": "Reducir la ventana a la franja de actividad",
+  "compact.exit.tooltip": "Volver a la ventana completa",
   "connection.desc.connected": "Conectado a {0}.",
   "connection.desc.degraded": "La última operación contra {0} falló: {1}",
   "connection.desc.disconnected": "Desconectado — no hay sesión iniciada en {0}.",

@@ -28,6 +28,10 @@ Avalonia desktop app for browsing Proton Drive through the Proton Drive CLI.
 - Show or hide the local pane from the header, and the Status/Metrics sidebar from a "User
   Settings" checkbox in settings — each choice is remembered and is also what the next launch
   starts with
+- Collapse the whole window to a compact strip that stays on top of your other windows, showing the
+  active provider, what the connection is doing, anything transferring, and a dot if a sync pair is
+  failing — an alternative to minimising, for leaving the app in a corner while it works; the mode,
+  the strip's position and the size to expand back to are all remembered
 - Click a row to select it and double-click to open it, in both panes and in all three view modes
   (list, icons, gallery)
 - Select several rows at once in either pane — Ctrl/Cmd+Click adds or removes one row,

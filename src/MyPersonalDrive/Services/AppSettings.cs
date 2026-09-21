@@ -122,6 +122,43 @@ public sealed class AppSettings
     public bool ShowCommandConsole { get; set; } = true;
 
     /// <summary>
+    /// Whether the window is collapsed to the compact strip (docs/PLAN-COMPACT-VIEW.md). Persisted
+    /// for the same reason the panel toggles are: leaving the app parked as a strip and finding a
+    /// full window on the next launch is not what "minimal" was asked for.
+    /// </summary>
+    public bool CompactMode { get; set; }
+
+    /// <summary>
+    /// Where the strip sat when it was last used, in screen pixels. <see cref="UnsetWindowCoordinate"/>
+    /// means "never placed by hand" and leaves the position to the window manager — a real 0,0 is a
+    /// legitimate corner, so it cannot double as the sentinel.
+    /// </summary>
+    public int CompactWindowLeft { get; set; } = UnsetWindowCoordinate;
+
+    /// <inheritdoc cref="CompactWindowLeft" />
+    public int CompactWindowTop { get; set; } = UnsetWindowCoordinate;
+
+    public const int UnsetWindowCoordinate = int.MinValue;
+
+    /// <summary>
+    /// The window size to come back to when the strip is expanded again. Written on the way into
+    /// compact mode rather than continuously: this is a restore target, not general window-geometry
+    /// persistence, which the app still does not do. Zero or non-finite means "no size recorded",
+    /// and the restore falls back to the XAML defaults.
+    /// </summary>
+    public double RestoreWindowWidth { get; set; }
+
+    /// <inheritdoc cref="RestoreWindowWidth" />
+    public double RestoreWindowHeight { get; set; }
+
+    public bool HasRestoreWindowSize()
+        => double.IsFinite(RestoreWindowWidth) && RestoreWindowWidth > 0
+        && double.IsFinite(RestoreWindowHeight) && RestoreWindowHeight > 0;
+
+    public bool HasCompactWindowPosition()
+        => CompactWindowLeft != UnsetWindowCoordinate && CompactWindowTop != UnsetWindowCoordinate;
+
+    /// <summary>
     /// The in-app viewer's display scale for images and PDF pages (1.0 = the decoded bitmap's own
     /// pixel size). Defaults to 0.5 rather than 1.0: a PDF page or a modern photo is routinely
     /// bigger than the viewer panel, and showing it at full resolution meant scrolling to see any

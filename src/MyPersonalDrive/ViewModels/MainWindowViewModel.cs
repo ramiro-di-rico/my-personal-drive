@@ -116,6 +116,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private bool _isStatusPanelVisible;
     private bool _isLocalExplorerPanelVisible;
+    private bool _isCompactMode;
 
     /// <summary>
     /// What the settings view's provider picker and header dropdown list — see docs/PLAN-CLOUD-PROVIDERS.md P5/P6.
@@ -441,6 +442,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _defaultSyncFolder = appSettings.DefaultSyncFolder;
         _isStatusPanelVisible = appSettings.ShowStatusPanel;
         _isLocalExplorerPanelVisible = appSettings.ShowLocalExplorerPanel;
+        _isCompactMode = appSettings.CompactMode;
         // The browsed provider's own activity is tagged like any other session's, so interleaved
         // lines from ObserveAdditionalProviderActivity (P7, both providers active at once) read
         // consistently regardless of which one happens to be on screen.
@@ -463,6 +465,7 @@ public sealed class MainWindowViewModel : ObservableObject
         UploadCommand = new AsyncCommand(UploadAsync, CanUpload, HandleUnexpectedError);
         CreateFolderCommand = new AsyncCommand(CreateFolderAsync, CanCreateFolder, HandleUnexpectedError);
         ToggleLocalExplorerPanelCommand = new AsyncCommand(ToggleLocalExplorerPanelAsync, onError: HandleUnexpectedError);
+        ToggleCompactModeCommand = new AsyncCommand(ToggleCompactModeAsync, onError: HandleUnexpectedError);
         ShowExplorerCommand = new AsyncCommand(ShowExplorerAsync, onError: HandleUnexpectedError);
         ClearSearchCommand = new AsyncCommand(ClearSearchAsync, () => HasSearchText, HandleUnexpectedError);
         ClearFiltersCommand = new AsyncCommand(ClearFiltersAsync, () => HasActiveFilters, HandleUnexpectedError);
@@ -593,6 +596,9 @@ public sealed class MainWindowViewModel : ObservableObject
     public AsyncCommand CreateFolderCommand { get; }
 
     public AsyncCommand ToggleLocalExplorerPanelCommand { get; }
+
+    /// <summary>Collapses the window to the compact strip, or expands it back (docs/PLAN-COMPACT-VIEW.md).</summary>
+    public AsyncCommand ToggleCompactModeCommand { get; }
 
     public AsyncCommand ShowExplorerCommand { get; }
 
@@ -1407,6 +1413,88 @@ public sealed class MainWindowViewModel : ObservableObject
                 _settings.Update(s => s.ShowLocalExplorerPanel = value);
             }
         }
+    }
+
+    /// <summary>
+    /// Whether the window is collapsed to the compact strip (docs/PLAN-COMPACT-VIEW.md). Everything
+    /// below the strip — the header, the view tabs, the alert banner and whichever view is active —
+    /// binds its visibility to the negation of this, so the strip is not a fourth view but the
+    /// absence of all of them.
+    ///
+    /// The window-level consequences (size, minimum size, topmost, placement) are the view's, not
+    /// this view model's: they need the visual tree, and a view model that touched Avalonia types
+    /// could not be tested without a UI thread.
+    /// </summary>
+    public bool IsCompactMode
+    {
+        get => _isCompactMode;
+        private set
+        {
+            if (SetProperty(ref _isCompactMode, value))
+            {
+                _settings.Update(s => s.CompactMode = value);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The window size to restore when the strip is expanded, or <c>null</c> if none was recorded —
+    /// in which case the view keeps whatever the XAML defaults gave it.
+    /// </summary>
+    public (double Width, double Height)? RestoreWindowSize
+    {
+        get
+        {
+            var settings = _settings.Load();
+            return settings.HasRestoreWindowSize()
+                ? (settings.RestoreWindowWidth, settings.RestoreWindowHeight)
+                : null;
+        }
+    }
+
+    /// <summary>Where the strip last sat, or <c>null</c> to let the window manager place it.</summary>
+    public (int Left, int Top)? CompactWindowPosition
+    {
+        get
+        {
+            var settings = _settings.Load();
+            return settings.HasCompactWindowPosition()
+                ? (settings.CompactWindowLeft, settings.CompactWindowTop)
+                : null;
+        }
+    }
+
+    /// <summary>Records the size to come back to. Called by the view on the way into compact mode.</summary>
+    public void SaveRestoreWindowSize(double width, double height)
+    {
+        if (!double.IsFinite(width) || width <= 0 || !double.IsFinite(height) || height <= 0)
+        {
+            return;
+        }
+
+        _settings.Update(s =>
+        {
+            s.RestoreWindowWidth = width;
+            s.RestoreWindowHeight = height;
+        });
+    }
+
+    /// <summary>
+    /// Records where the strip was left. Called when leaving compact mode and on shutdown, not on
+    /// every <c>PositionChanged</c> — dragging a window raises that continuously, and each one
+    /// would be a settings.json rewrite.
+    /// </summary>
+    public void SaveCompactWindowPosition(int left, int top)
+        => _settings.Update(s =>
+        {
+            s.CompactWindowLeft = left;
+            s.CompactWindowTop = top;
+        });
+
+    private async Task ToggleCompactModeAsync()
+    {
+        IsCompactMode = !IsCompactMode;
+        await Task.CompletedTask;
     }
 
     private bool _syncStatusSubscribed;

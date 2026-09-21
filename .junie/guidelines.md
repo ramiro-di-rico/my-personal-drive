@@ -29,6 +29,7 @@ plain Markdown procedures, not Claude-specific — they apply to you unchanged.
 | UI review of a visual change | [`.claude/skills/ui-review/SKILL.md`](../.claude/skills/ui-review/SKILL.md) |
 | Accessibility and theming | [`.claude/skills/a11y-theming/SKILL.md`](../.claude/skills/a11y-theming/SKILL.md) |
 | Write/update a plan doc | [`.claude/skills/plan-doc/SKILL.md`](../.claude/skills/plan-doc/SKILL.md) |
+| Decide whether existing code deserves a refactor | [`.claude/skills/refactor-judgment/SKILL.md`](../.claude/skills/refactor-judgment/SKILL.md) |
 | Park an out-of-scope finding | [`.claude/skills/debt/SKILL.md`](../.claude/skills/debt/SKILL.md) |
 | Create a git commit | [`.claude/skills/commit/SKILL.md`](../.claude/skills/commit/SKILL.md) |
 

@@ -40,6 +40,7 @@ one-line description.
 | [`ui-review`](.claude/skills/ui-review/SKILL.md) | Reviewing a visual change against the UX plans, with real screenshots |
 | [`a11y-theming`](.claude/skills/a11y-theming/SKILL.md) | Adding or restyling a control: theme brushes, keyboard reach, accessible names |
 | [`plan-doc`](.claude/skills/plan-doc/SKILL.md) | Writing or refreshing a `docs/PLAN-*.md` or `ARCHITECTURE.md` |
+| [`refactor-judgment`](.claude/skills/refactor-judgment/SKILL.md) | Deciding if existing code deserves a refactor, and its shape — fix it, leave it, or park it |
 | [`debt`](.claude/skills/debt/SKILL.md) | Parking an out-of-scope finding instead of widening the diff |
 | [`commit`](.claude/skills/commit/SKILL.md) | Creating a git commit — no AI co-author trailer in this repo |
 

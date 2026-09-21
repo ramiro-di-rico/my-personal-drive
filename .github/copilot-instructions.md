@@ -30,6 +30,7 @@ are pointers to these same files.
 | UI review of a visual change | [`ui-review`](../.claude/skills/ui-review/SKILL.md) |
 | Accessibility and theming | [`a11y-theming`](../.claude/skills/a11y-theming/SKILL.md) |
 | Write/update a plan doc | [`plan-doc`](../.claude/skills/plan-doc/SKILL.md) |
+| Decide whether existing code deserves a refactor | [`refactor-judgment`](../.claude/skills/refactor-judgment/SKILL.md) |
 | Park an out-of-scope finding | [`debt`](../.claude/skills/debt/SKILL.md) |
 | Create a git commit | [`commit`](../.claude/skills/commit/SKILL.md) |
 

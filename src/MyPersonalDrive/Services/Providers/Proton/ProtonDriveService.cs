@@ -335,19 +335,38 @@ public sealed class ProtonDriveService
         return null;
     }
 
-    /// <summary>Unwraps the CLI's `{ ok, value }` pattern where `value` is itself an object (e.g. `activeRevision`).</summary>
+    /// <summary>
+    /// Reads an object field that the CLI may or may not wrap in its `{ ok, value }` envelope
+    /// (`activeRevision`) — Appendix A #1a. Both shapes are attested from real accounts: the
+    /// wrapped one in Appendix A #1's original capture, the bare one in every listing taken since.
+    ///
+    /// Accepting only the wrapped form was a silent, expensive failure rather than an error.
+    /// `claimedSize`, `claimedModificationTime` and `claimedDigests.sha1` all live inside this
+    /// object, so a bare revision produced a <see cref="DriveItem"/> with no size, no hash and an
+    /// mtime fallen back to the server's `modificationTime` — and the sync engine compares size
+    /// first, so every already-uploaded file measured as changed and was uploaded again, on every
+    /// run, forever.
+    ///
+    /// An `ok: false` envelope still means "undecryptable", which is genuinely no value: only a
+    /// missing envelope is treated as a bare object.
+    /// </summary>
     private static bool TryGetOkObject(JsonElement element, string propertyName, out JsonElement value)
     {
-        if (element.TryGetProperty(propertyName, out var property)
-            && property.ValueKind == JsonValueKind.Object
-            && property.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True
-            && property.TryGetProperty("value", out value) && value.ValueKind == JsonValueKind.Object)
+        value = default;
+        if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Object)
         {
-            return true;
+            return false;
         }
 
-        value = default;
-        return false;
+        if (property.TryGetProperty("ok", out var ok))
+        {
+            return ok.ValueKind == JsonValueKind.True
+                && property.TryGetProperty("value", out value)
+                && value.ValueKind == JsonValueKind.Object;
+        }
+
+        value = property;
+        return true;
     }
 
     private static string? ReadPlainString(JsonElement element, string propertyName)

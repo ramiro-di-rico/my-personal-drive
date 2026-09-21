@@ -1389,6 +1389,42 @@ Consequences for the code:
   in this CLI version. The wrapper-key branches in `TryParseJsonListing` are dead code for this
   CLI version; kept for now since a future CLI version could still wrap (defensive, not harmful).
 
+### #1a — `activeRevision` is **not always** `{ ok, value }`-wrapped ⚠️ regression source
+
+Captured 2026-09-21 from `filesystem list --json "/my-files/google-take-out-test-2/Graciosas"`,
+against a real account, on a folder this app had uploaded to minutes earlier:
+
+```json
+"name": { "ok": true, "value": "globant dealer.png" },
+"modificationTime": "2026-09-21T15:36:01.000Z",
+"totalStorageSize": 87029,
+"activeRevision": {
+  "uid": "rHChrZ...", "state": "active", "storageSize": 87029,
+  "claimedSize": 49991,
+  "claimedModificationTime": "2019-01-10T13:58:52.864Z",
+  "claimedDigests": { "sha1": "8f246d6d...", "sha1Verified": false }
+}
+```
+
+`name` still carries the envelope. `activeRevision` does not — the fields sit directly on the
+object, unlike #1's capture above. **Both shapes are real**, so the parser accepts either: an
+envelope is unwrapped, a bare object is read as-is, and `ok: false` still means "undecryptable,
+no value" rather than a bare object.
+
+**Why this mattered so much.** Rejecting the bare shape was not a parse error — it produced a
+perfectly well-formed `DriveItem` with `Size = null`, `ContentHash = null`, and `ModifiedAt`
+quietly fallen back to the top-level `modificationTime`, which #2 records as the server's
+revision event time (the upload clock: `2026-09-21T15:36:01`, not the file's own
+`2019-01-10T13:58:52`). `NodeFingerprintComparer.AreEquivalent` compares size first and a null
+never equals a number, so **every file already uploaded measured as changed and was queued for
+upload again on every run** — reported as a `LocalToRemote` pair re-planning all 513 of its files
+immediately after a successful sync, and visible in `SyncState` as 513 rows with
+`RemoteSize IS NULL`, `RemoteHash IS NULL` and `RemoteModifiedAt` equal to the upload time.
+
+The lesson for this parser generally: a field this one reads through an envelope helper is a
+silent-degradation risk, because "absent" and "present in an unexpected shape" produce the same
+`null` and nothing downstream distinguishes them from a genuinely size-less node.
+
 ### #2 — `ModifiedAt`: format and meaning ✅ resolved, and it's better than expected
 
 ~~Guessed alias: `modifiedAt`/`updatedAt`/`lastModified`~~ — **none of these exist.** There are

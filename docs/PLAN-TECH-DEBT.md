@@ -461,6 +461,31 @@ by the flag recompute.
 **What it blocks.** Nothing, but it is a guaranteed red whenever someone runs that one test alone,
 which is exactly what someone touching shared-folder behavior would do first.
 
+### B3.3 — `KeyboardTests.TheKeyboardMapDoesWhatItClaims` fails about once in eight full runs
+
+**Where.** `tests/MyPersonalDrive.UiTests/KeyboardTests.cs`, which derives from
+`WindowLayoutTests` and therefore re-runs every one of that class's tests in its own fixture,
+sharing one Avalonia headless dispatcher across all of them.
+
+**What goes wrong.** One failure in eight consecutive `scripts/run-tests.sh` runs; the same test
+passes 7/7 when the UI project is run on its own, and 3/3 when run alone. The class doc on
+`WindowLayoutTests` already names the mechanism: a window keeps posting fire-and-forget refreshes
+to the shared dispatcher after its own test ends, and the next test's `RunJobs` pump runs them.
+`Dispose` closing the window was enough to hold the line until now.
+
+Noticed while adding the two compact-view tests (docs/PLAN-COMPACT-VIEW.md §4), which almost
+certainly raised the odds rather than caused the problem: they are two more windows on the shared
+dispatcher, and compact mode additionally flips `SizeToContent` and `Topmost` on one of them. They
+are not, however, what makes the mechanism possible.
+
+**Why it wasn't fixed here.** The real fix is the seam B3.1 and B3.2 both ask for — a way for a
+test to await a view model's outstanding background work — applied to the window this time. The
+cheap alternatives are worse: stopping `KeyboardTests` from inheriting the layout tests removes
+six duplicate runs but not the shared dispatcher, and a retry attribute hides it.
+
+**What it blocks.** Nothing yet, but it is a red build roughly every eighth run for a reason
+unrelated to whatever is being changed, which is how a suite stops being trusted.
+
 ## 6. Batch B4 — Persistence and state (1.5 d) · TD-8
 
 ### B4.1 — Schema versioning (prerequisite for everything that touches the DB)

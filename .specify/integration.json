@@ -1,0 +1,34 @@
+{
+  "version": "1.0.10",
+  "integration_state_schema": 1,
+  "installed_integrations": [
+    "claude",
+    "opencode",
+    "junie",
+    "copilot"
+  ],
+  "integration_settings": {
+    "claude": {
+      "script": "sh",
+      "invoke_separator": "-"
+    },
+    "opencode": {
+      "script": "sh",
+      "invoke_separator": "."
+    },
+    "junie": {
+      "script": "sh",
+      "invoke_separator": "-"
+    },
+    "copilot": {
+      "script": "sh",
+      "raw_options": "--commands",
+      "parsed_options": {
+        "commands": true
+      },
+      "invoke_separator": "."
+    }
+  },
+  "integration": "claude",
+  "default_integration": "claude"
+}

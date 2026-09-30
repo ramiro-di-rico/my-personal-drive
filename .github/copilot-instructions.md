@@ -67,3 +67,17 @@ In VS Code these are also available as prompt files: `/cli-command`, `/add-featu
 dotnet run --project src/MyPersonalDrive
 ./scripts/publish-linux.sh
 ```
+
+## Spec Kit
+
+For a feature big enough that starting from code would be guessing, this repo has
+[Spec Kit](https://github.com/github/spec-kit). Your commands are the `speckit.*` prompt files in
+this directory — `/speckit.specify`, `/speckit.plan`, `/speckit.tasks`, `/speckit.implement`, with
+`clarify`, `analyze` and `checklist` as optional quality passes. They write `specs/<nnn>-<slug>/`,
+and those artifacts are committed.
+
+It does not replace the skills above: skills say *how* a change is made here, Spec Kit says *what*
+is being built and in what order. A bug fix or a locale refresh needs the skill, not a spec.
+
+`.specify/memory/constitution.md` holds the rules a plan is checked against — a restatement of
+`AGENTS.md` § Non-negotiables, which stays the source of truth. See `AGENTS.md` § Spec Kit.

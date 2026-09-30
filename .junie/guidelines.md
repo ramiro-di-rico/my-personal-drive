@@ -58,3 +58,17 @@ plain Markdown procedures, not Claude-specific — they apply to you unchanged.
 ```
 
 Plus the relevant skill's checklist. Report skipped steps explicitly instead of omitting them.
+
+## Spec Kit
+
+For a feature big enough that starting from code would be guessing, this repo has
+[Spec Kit](https://github.com/github/spec-kit). Your commands live in `.junie/commands/` —
+`/speckit-specify`, `/speckit-plan`, `/speckit-tasks`, `/speckit-implement`, with `clarify`,
+`analyze` and `checklist` as optional quality passes. They write `specs/<nnn>-<slug>/`, and those
+artifacts are committed.
+
+It does not replace the skills above: skills say *how* a change is made here, Spec Kit says *what*
+is being built and in what order. A bug fix or a locale refresh needs the skill, not a spec.
+
+`.specify/memory/constitution.md` holds the rules a plan is checked against — a restatement of
+`AGENTS.md` § Non-negotiables, which stays the source of truth. See `AGENTS.md` § Spec Kit.

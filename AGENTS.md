@@ -44,6 +44,49 @@ one-line description.
 | [`debt`](.claude/skills/debt/SKILL.md) | Parking an out-of-scope finding instead of widening the diff |
 | [`commit`](.claude/skills/commit/SKILL.md) | Creating a git commit — no AI co-author trailer in this repo |
 
+## Spec Kit — for work that deserves a spec first
+
+[GitHub Spec Kit](https://github.com/github/spec-kit) v1.0.10 is installed for **all four**
+assistants in this repo. It is a second, separate thing from the skills above, and the two do not
+compete:
+
+- **Skills** answer *how* a kind of change is made here (the MVVM shape, the CLI boundary, the sync
+  decision table). They are the source of truth for procedure.
+- **Spec Kit** answers *what* is being built and in what order, for a feature big enough that
+  starting from code would be guessing. It writes `specs/<nnn>-<slug>/` — spec, plan, tasks — and
+  those artifacts are committed.
+
+Small changes do not need it. A bug fix, a locale refresh, a dependency bump: open the skill and go.
+
+### The commands, per assistant
+
+| Assistant | How they appear |
+|---|---|
+| Claude Code | `/speckit-specify`, `/speckit-plan`, … (`.claude/skills/speckit-*/SKILL.md`) |
+| GitHub Copilot | `/speckit.specify`, … (`.github/prompts/*.prompt.md`, agents in `.github/agents/`) |
+| Junie | `/speckit-specify`, … (`.junie/commands/*.md`) |
+| opencode | `/speckit.specify`, … (`.opencode/commands/*.md`) |
+
+The naming differs (`-` vs `.`) because each host's own command syntax does; the underlying
+procedure is identical in all four.
+
+The usual order is `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`.
+`clarify`, `analyze` and `checklist` are optional quality passes; `converge` re-checks a
+half-finished feature against its own spec.
+
+### Shared state
+
+- `.specify/memory/constitution.md` — the rules a plan is checked against. It is a **restatement**
+  of this file's Non-negotiables, not a second source of truth. Change them here first.
+- `.specify/templates/`, `.specify/scripts/bash/` — the templates and helper scripts the commands
+  run. Managed by the Specify CLI; don't hand-edit unless you mean to diverge.
+- `specs/` — where features land. Committed.
+
+To update Spec Kit, or to add a fifth assistant, use the CLI rather than editing the generated
+files: `specify integration install <agent>`, `specify integration upgrade`. The
+[dependency publish-date rule](.claude/skills/upgrade-deps/SKILL.md) applies to the Spec Kit
+release you pin, which is why v1.0.10 is installed and not the newest tag.
+
 ## Non-negotiables
 
 - **CLI arguments are lists.** `IProtonDriveCliExecutor.ExecuteAsync` takes

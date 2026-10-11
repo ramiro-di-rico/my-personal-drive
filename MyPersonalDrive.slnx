@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/MyPersonalDrive/MyPersonalDrive.csproj" />
+  <Project Path="tests/MyPersonalDrive.Tests/MyPersonalDrive.Tests.csproj" />
+</Solution>

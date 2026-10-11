@@ -115,4 +115,13 @@ internal static class RowGestures
         var lastSeparator = trimmed.LastIndexOf('/');
         return lastSeparator >= 0 && lastSeparator < trimmed.Length - 1 ? trimmed[(lastSeparator + 1)..] : trimmed;
     }
+
+    /// <summary>A drag that could not start or finish, surfaced in the status panel.</summary>
+    internal static void ReportDragFailure(object? dataContext, Exception exception)
+    {
+        if (dataContext is MyPersonalDrive.ViewModels.MainWindowViewModel viewModel)
+        {
+            viewModel.StatusMessage = Loc.F(StringKeys.Drop.Error, exception.Message);
+        }
+    }
 }

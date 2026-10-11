@@ -18,9 +18,12 @@ public partial class CloudListings : UserControl
 {
     private static Localizer Loc => Localizer.Instance;
 
+    private readonly RowDragSource<DriveNodeViewModel> _rowDrag;
+
     public CloudListings()
     {
         InitializeComponent();
+        _rowDrag = new RowDragSource<DriveNodeViewModel>(CreateTransfer, ex => ReportDragFailure(DataContext, ex));
 
         // Tunnel, not the plain bubble subscription a XAML PointerPressed/PointerMoved attribute
         // on the row Button itself would give: ButtonBase marks these events Handled as part of
@@ -29,7 +32,7 @@ public partial class CloudListings : UserControl
         // at the ListBox with Tunnel runs this before that happens (docs/INTERFACE_IMPROVEMENT_PLAN.md
         // Task 5).
         ListModeListing.AddHandler(InputElement.PointerPressedEvent, OnCloudRowPointerPressed, RoutingStrategies.Tunnel);
-        ListModeListing.AddHandler(InputElement.PointerMovedEvent, OnCloudRowPointerMoved, RoutingStrategies.Tunnel);
+        ListModeListing.AddHandler(InputElement.PointerMovedEvent, _rowDrag.OnPointerMoved, RoutingStrategies.Tunnel);
 
         // The tile modes get exactly the same gestures as list mode (docs/PLAN-UX-ROUND-3.md X2).
         // They had none: an ItemsRepeater has no selection or keyboard model of its own, and the
@@ -40,7 +43,7 @@ public partial class CloudListings : UserControl
         foreach (var tiles in new Control[] { IconsModeListing, GalleryModeListing })
         {
             tiles.AddHandler(InputElement.PointerPressedEvent, OnCloudRowPointerPressed, RoutingStrategies.Tunnel);
-            tiles.AddHandler(InputElement.PointerMovedEvent, OnCloudRowPointerMoved, RoutingStrategies.Tunnel);
+            tiles.AddHandler(InputElement.PointerMovedEvent, _rowDrag.OnPointerMoved, RoutingStrategies.Tunnel);
         }
 
         // Double click opens, in all three modes and in both panes. Bubble, and only Bubble:
@@ -189,12 +192,6 @@ public partial class CloudListings : UserControl
         return viewModel.CurrentPath;
     }
 
-    private Point? _cloudDragStartPoint;
-
-    private DriveNodeViewModel? _cloudDragCandidate;
-
-    private PointerPressedEventArgs? _cloudDragPressedArgs;
-
     private void OnCloudRowPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         // Attached at the listing container (see the constructor), not the row itself — see the
@@ -211,9 +208,7 @@ public partial class CloudListings : UserControl
             return;
         }
 
-        _cloudDragStartPoint = e.GetPosition(null);
-        _cloudDragCandidate = node;
-        _cloudDragPressedArgs = e;
+        _rowDrag.Arm(e, node);
     }
 
     /// <summary>
@@ -221,46 +216,10 @@ public partial class CloudListings : UserControl
     /// (verified in docs/PLAN-LOCAL-SYNC.md), unlike the row's own manual `DownloadCommand`, which
     /// is folder-restricted for an unrelated, app-level reason (docs/ARCHITECTURE.md §9 item 11).
     /// </summary>
-    private async void OnCloudRowPointerMoved(object? sender, PointerEventArgs e)
+    private static DataTransfer CreateTransfer(DriveNodeViewModel node)
     {
-        if (_cloudDragStartPoint is not { } start || _cloudDragCandidate is not { } node || _cloudDragPressedArgs is not { } pressedArgs)
-        {
-            return;
-        }
-
-        if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
-        {
-            _cloudDragStartPoint = null;
-            _cloudDragCandidate = null;
-            _cloudDragPressedArgs = null;
-            return;
-        }
-
-        var current = e.GetPosition(null);
-        var dx = current.X - start.X;
-        var dy = current.Y - start.Y;
-        if (Math.Sqrt(dx * dx + dy * dy) < DragStartThresholdPixels)
-        {
-            return;
-        }
-
-        _cloudDragStartPoint = null;
-        _cloudDragCandidate = null;
-        _cloudDragPressedArgs = null;
-
         var transfer = new DataTransfer();
         transfer.Add(DataTransferItem.Create(CloudItemsDataFormat, new[] { node.Item }));
-        try
-        {
-            await DragDrop.DoDragDropAsync(pressedArgs, transfer, DragDropEffects.Copy);
-        }
-        catch (Exception ex)
-        {
-            // This is async void — an exception escaping here would otherwise crash the process.
-            if (DataContext is MainWindowViewModel vm)
-            {
-                vm.StatusMessage = Loc.F(StringKeys.Drop.Error, ex.Message);
-            }
-        }
+        return transfer;
     }
 }

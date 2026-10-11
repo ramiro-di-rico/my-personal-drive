@@ -18,9 +18,12 @@ public partial class LocalPane : UserControl
 {
     private static Localizer Loc => Localizer.Instance;
 
+    private readonly RowDragSource<LocalNodeViewModel> _rowDrag;
+
     public LocalPane()
     {
         InitializeComponent();
+        _rowDrag = new RowDragSource<LocalNodeViewModel>(CreateTransfer, ex => ReportDragFailure(DataContext, ex));
 
         // Tunnel, not the plain bubble subscription a XAML PointerPressed/PointerMoved attribute
         // on the row Button itself would give: ButtonBase marks these events Handled as part of
@@ -29,7 +32,7 @@ public partial class LocalPane : UserControl
         // at the ListBox with Tunnel runs this before that happens (docs/INTERFACE_IMPROVEMENT_PLAN.md
         // Task 5).
         LocalListing.AddHandler(InputElement.PointerPressedEvent, OnLocalRowPointerPressed, RoutingStrategies.Tunnel);
-        LocalListing.AddHandler(InputElement.PointerMovedEvent, OnLocalRowPointerMoved, RoutingStrategies.Tunnel);
+        LocalListing.AddHandler(InputElement.PointerMovedEvent, _rowDrag.OnPointerMoved, RoutingStrategies.Tunnel);
 
         // Double click opens. Bubble, and only Bubble: DoubleTappedEvent is registered with
         // RoutingStrategies.Bubble alone, so a handler added for Tunnel is attached to a phase the
@@ -50,12 +53,6 @@ public partial class LocalPane : UserControl
         }
     }
 
-    private Point? _localDragStartPoint;
-
-    private LocalNodeViewModel? _localDragCandidate;
-
-    private PointerPressedEventArgs? _localDragPressedArgs;
-
     private void OnLocalRowPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         // Attached at the ListBox (see the constructor), not the row itself, so the row has to be
@@ -74,9 +71,7 @@ public partial class LocalPane : UserControl
             return;
         }
 
-        _localDragStartPoint = e.GetPosition(null);
-        _localDragCandidate = node;
-        _localDragPressedArgs = e;
+        _rowDrag.Arm(e, node);
     }
 
     /// <summary>
@@ -85,47 +80,11 @@ public partial class LocalPane : UserControl
     /// row's own manual <c>DownloadCommand</c>, which is folder-restricted for an unrelated reason
     /// (no UI need for it before now, not a CLI limitation — see docs/ARCHITECTURE.md §9 item 11).
     /// </summary>
-    private async void OnLocalRowPointerMoved(object? sender, PointerEventArgs e)
+    private static DataTransfer CreateTransfer(LocalNodeViewModel node)
     {
-        if (_localDragStartPoint is not { } start || _localDragCandidate is not { } node || _localDragPressedArgs is not { } pressedArgs)
-        {
-            return;
-        }
-
-        if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
-        {
-            _localDragStartPoint = null;
-            _localDragCandidate = null;
-            _localDragPressedArgs = null;
-            return;
-        }
-
-        var current = e.GetPosition(null);
-        var dx = current.X - start.X;
-        var dy = current.Y - start.Y;
-        if (Math.Sqrt(dx * dx + dy * dy) < DragStartThresholdPixels)
-        {
-            return;
-        }
-
-        _localDragStartPoint = null;
-        _localDragCandidate = null;
-        _localDragPressedArgs = null;
-
         var transfer = new DataTransfer();
         transfer.Add(DataTransferItem.Create(LocalPathsDataFormat, new[] { node.Item.Path }));
-        try
-        {
-            await DragDrop.DoDragDropAsync(pressedArgs, transfer, DragDropEffects.Copy);
-        }
-        catch (Exception ex)
-        {
-            // This is async void — an exception escaping here would otherwise crash the process.
-            if (DataContext is MainWindowViewModel vm)
-            {
-                vm.StatusMessage = Loc.F(StringKeys.Drop.Error, ex.Message);
-            }
-        }
+        return transfer;
     }
 
     private Control? _localHighlightedDropRow;

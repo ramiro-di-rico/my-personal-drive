@@ -927,62 +927,7 @@
         </Grid>
         </Grid>
 
-        <Border Grid.Column="3" Margin="0,0,16,16" Padding="16" Width="340" Background="{DynamicResource CardBackgroundBrush}" IsVisible="{Binding IsStatusPanelVisible}">
-          <!-- Scrollable since the metrics section landed: status + selection + metrics is taller
-               than the panel on a short window, and a clipped histogram is worse than a scrollbar. -->
-          <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-          <StackPanel Spacing="10">
-            <TextBlock FontSize="18" Text="{Binding Loc[status.title]}" />
-
-            <views:TransferQueuePanel IsVisible="{Binding TransferQueue.HasItems}" />
-
-            <!-- Progress and results only. A warning goes to the window-level alert strip
-                 instead (docs/PLAN-UX-ROUND-3.md X1), so the same sentence is never rendered
-                 twice on one screen — and so hiding this panel cannot hide a failure. -->
-            <Border Name="StatusBorder"
-                    Padding="8"
-                    CornerRadius="4"
-                    IsVisible="{Binding IsInformationalStatus}">
-              <TextBlock Name="StatusText"
-                         TextWrapping="Wrap"
-                         Text="{Binding StatusMessage}"
-                         VerticalAlignment="Center" />
-            </Border>
-
-            <TextBlock Opacity="0.7"
-                       TextWrapping="Wrap"
-                       Text="{Binding Loc[status.empty.details]}"
-                       IsVisible="{Binding !HasSelection}" />
-
-            <!-- Multi-select summary (docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2) replaces the
-                 single-item details below once more than one row is marked — "the size" of three
-                 different files isn't one field. -->
-            <StackPanel Spacing="10" IsVisible="{Binding HasMultipleSelected}">
-              <TextBlock FontWeight="Bold" Text="{Binding SelectionSummaryText}" />
-              <TextBlock Opacity="0.7" TextWrapping="Wrap" Text="{Binding Loc[status.empty.hint]}" />
-            </StackPanel>
-
-            <StackPanel Spacing="10" IsVisible="{Binding IsSingleSelected}">
-              <TextBlock FontWeight="Bold" Text="{Binding Loc[status.selected.title]}" />
-              <TextBlock Text="{Binding SelectedName}" />
-              <TextBlock FontWeight="Bold" Text="{Binding Loc[common.type]}" />
-              <TextBlock Text="{Binding SelectedKind}" />
-              <TextBlock FontWeight="Bold" Text="{Binding Loc[common.path]}" />
-              <TextBlock TextWrapping="Wrap" Text="{Binding SelectedPath}" />
-              <TextBlock FontWeight="Bold" Text="{Binding Loc[common.size]}" />
-              <TextBlock Text="{Binding SelectedSize}" />
-              <TextBlock FontWeight="Bold" Text="{Binding Loc[common.modified]}" />
-              <TextBlock TextWrapping="Wrap" Text="{Binding SelectedModified}" />
-              <TextBlock FontWeight="Bold" Text="{Binding Loc[common.owner]}" />
-              <TextBlock TextWrapping="Wrap" Text="{Binding SelectedOwner}" />
-              <TextBlock FontWeight="Bold" Text="{Binding Loc[common.shared]}" />
-              <TextBlock Text="{Binding SelectedShared}" />
-            </StackPanel>
-
-            <views:FolderMetricsPanel />
-          </StackPanel>
-          </ScrollViewer>
-        </Border>
+        <views:StatusPanel Grid.Column="3" IsVisible="{Binding IsStatusPanelVisible}" />
       </Grid>
 
       <Border Grid.Row="1" Margin="16,0,16,16" Padding="12" Background="{DynamicResource ConsoleBackgroundBrush}" CornerRadius="6">

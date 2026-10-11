@@ -13,6 +13,7 @@ using MyPersonalDrive.Services.Localization;
 using MyPersonalDrive.ViewModels;
 using MyPersonalDrive.ViewModels.Local;
 using MyPersonalDrive.ViewModels.Sync;
+using static MyPersonalDrive.Views.RowGestures;
 
 namespace MyPersonalDrive.Views;
 
@@ -80,54 +81,6 @@ public partial class MainWindow : Window
         // one ListBox before, and the reason the tile modes never got it (an ItemsRepeater takes no
         // focus, so it has no KeyDown of its own to hang anything on).
         KeyDown += OnWindowKeyDown;
-    }
-
-    /// <summary>
-    /// The node a pointer event landed on, whichever container materialized it — a ListBoxItem in
-    /// list mode, a tile Border in the other two. DataContext is inherited, so walking up from the
-    /// hit element (usually a TextBlock or a Path) finds the node without knowing the container
-    /// type at all.
-    /// </summary>
-    private static T? NodeUnder<T>(object? source) where T : class
-    {
-        var visual = source as Visual;
-        while (visual is not null)
-        {
-            if (visual is StyledElement { DataContext: T node })
-            {
-                return node;
-            }
-
-            visual = visual.GetVisualParent();
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// The row or tile itself: the outermost element still bound to <paramref name="node"/>. The
-    /// innermost one is whatever was hit, which is no use for a highlight class — that has to go on
-    /// the container the .dropTarget styles select.
-    /// </summary>
-    private static Control? ContainerFor(object? source, object node)
-    {
-        Control? outermost = null;
-        var visual = source as Visual;
-        while (visual is not null)
-        {
-            if (visual is Control control && ReferenceEquals(control.DataContext, node))
-            {
-                outermost = control;
-            }
-            else if (outermost is not null)
-            {
-                break;
-            }
-
-            visual = visual.GetVisualParent();
-        }
-
-        return outermost;
     }
 
     /// <summary>Double click on a row or tile: open the folder, or preview the file (X2).</summary>
@@ -448,15 +401,6 @@ public partial class MainWindow : Window
         local.Width = newLocal;
     }
 
-    // In-process only — never crosses the app boundary, so an arbitrary string identifier (not a
-    // registered clipboard/OS format) is fine as the payload's identity.
-    private static readonly DataFormat<string[]> LocalPathsDataFormat = DataFormat.CreateInProcessFormat<string[]>("application/x-mypersonaldrive-local-paths");
-
-    // How far the pointer has to move, while pressed, before a local-pane row press is treated as
-    // a drag rather than the click that navigates into a folder (docs/INTERFACE_IMPROVEMENT_PLAN.md
-    // Task 5 Phase 2). Below this, PointerReleased still reaches the row's own Button normally.
-    private const double DragStartThresholdPixels = 4;
-
     private Point? _localDragStartPoint;
     private LocalNodeViewModel? _localDragCandidate;
     private PointerPressedEventArgs? _localDragPressedArgs;
@@ -482,31 +426,6 @@ public partial class MainWindow : Window
         _localDragStartPoint = e.GetPosition(null);
         _localDragCandidate = node;
         _localDragPressedArgs = e;
-    }
-
-    /// <summary>
-    /// Shared Ctrl/Shift-click routing for both panes' row-pressed handlers. Returns true (and
-    /// marks the event handled) when a modifier gesture was recognized and acted on, so the caller
-    /// skips its own plain-click handling (drag-start tracking, which would otherwise arm on a
-    /// selection gesture too).
-    /// </summary>
-    private static bool HandleMultiSelectGesture(PointerPressedEventArgs e, Action toggleSelection, Action selectRange)
-    {
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
-        {
-            selectRange();
-        }
-        else if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
-        {
-            toggleSelection();
-        }
-        else
-        {
-            return false;
-        }
-
-        e.Handled = true;
-        return true;
     }
 
     /// <summary>
@@ -636,19 +555,6 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>"the current folder" for the folder already open, otherwise that folder's own name.</summary>
-    private static string DisplayNameForDropTarget(string targetPath, string currentPath)
-    {
-        if (string.Equals(targetPath, currentPath, StringComparison.Ordinal))
-        {
-            return Loc.T(StringKeys.Drop.CurrentFolder);
-        }
-
-        var trimmed = targetPath.TrimEnd('/');
-        var lastSeparator = trimmed.LastIndexOf('/');
-        return lastSeparator >= 0 && lastSeparator < trimmed.Length - 1 ? trimmed[(lastSeparator + 1)..] : trimmed;
-    }
-
     /// <summary>The folder row under the drop point, if any — otherwise the currently browsed folder.</summary>
     private static string ResolveCloudDropTargetPath(DragEventArgs e, MainWindowViewModel viewModel)
     {
@@ -659,10 +565,6 @@ public partial class MainWindow : Window
 
         return viewModel.CurrentPath;
     }
-
-    // Same in-process-only reasoning as LocalPathsDataFormat, for the opposite direction
-    // (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 3).
-    private static readonly DataFormat<DriveItem[]> CloudItemsDataFormat = DataFormat.CreateInProcessFormat<DriveItem[]>("application/x-mypersonaldrive-cloud-items");
 
     private Point? _cloudDragStartPoint;
     private DriveNodeViewModel? _cloudDragCandidate;

@@ -1,0 +1,110 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:MyPersonalDrive.ViewModels"
+             x:Class="MyPersonalDrive.Views.CompactStrip"
+             x:DataType="vm:MainWindowViewModel">
+  <!--
+    The compact strip (docs/PLAN-COMPACT-VIEW.md). The window collapses to this one row: the active
+    provider, the connection badge the full header already maintains, whatever is transferring, and
+    the way back out. It is deliberately not a fourth view alongside Explorador/Previsualización/
+    Sincronización — it replaces the whole window, tabs included, which is why it sits here as the
+    full layout's sibling rather than inside it.
+
+    It shows activity and not just a logo on purpose: the point of leaving a strip on screen instead
+    of minimising is to be able to see, without clicking anything, that sync is running and that
+    nothing is failing. ConnectionStatus already folds "syncing", "degraded", "rate limited" and
+    "disconnected" into one maintained line (UpdateConnectionTelemetry), so the strip reads the same
+    source the big badge does rather than inventing a second, divergent answer.
+  -->
+  <Border Padding="10,6"
+          Background="{DynamicResource PanelBackgroundBrush}">
+    <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" ColumnSpacing="10" VerticalAlignment="Center">
+      <Path Grid.Column="0"
+            Classes="icon"
+            Data="{StaticResource IconCloud}"
+            Width="16"
+            Height="16"
+            Stroke="{DynamicResource AccentBrush}"
+            VerticalAlignment="Center" />
+
+      <TextBlock Grid.Column="1"
+                 Text="{Binding ActiveProviderDisplayName}"
+                 FontSize="12"
+                 FontWeight="SemiBold"
+                 VerticalAlignment="Center" />
+
+      <!-- Same dot vocabulary as the header badge, same bound state. Kept as its own small copy
+           rather than factored into a shared control: five Classes bindings and one TextBlock is
+           less indirection than a UserControl plus the five properties it would have to surface. -->
+      <StackPanel Grid.Column="2"
+                  Orientation="Horizontal"
+                  Spacing="6"
+                  VerticalAlignment="Center"
+                  ToolTip.Tip="{Binding ConnectionStatusDescription}">
+        <Ellipse Width="8" Height="8" VerticalAlignment="Center">
+          <Ellipse.Styles>
+            <Style Selector="Ellipse.online">
+              <Setter Property="Fill" Value="{DynamicResource StatusOkBrush}" />
+            </Style>
+            <Style Selector="Ellipse.syncing">
+              <Setter Property="Fill" Value="{DynamicResource StatusSyncingBrush}" />
+            </Style>
+            <Style Selector="Ellipse.ratelimited">
+              <Setter Property="Fill" Value="{DynamicResource StatusWarningBrush}" />
+            </Style>
+            <Style Selector="Ellipse.disconnected">
+              <Setter Property="Fill" Value="{DynamicResource StatusErrorBrush}" />
+            </Style>
+            <Style Selector="Ellipse.degraded">
+              <Setter Property="Fill" Value="{DynamicResource StatusDegradedBrush}" />
+            </Style>
+          </Ellipse.Styles>
+          <Classes.online>
+            <Binding Path="IsOnline" />
+          </Classes.online>
+          <Classes.syncing>
+            <Binding Path="IsSyncing" />
+          </Classes.syncing>
+          <Classes.ratelimited>
+            <Binding Path="IsRateLimited" />
+          </Classes.ratelimited>
+          <Classes.disconnected>
+            <Binding Path="IsDisconnected" />
+          </Classes.disconnected>
+          <Classes.degraded>
+            <Binding Path="IsDegraded" />
+          </Classes.degraded>
+        </Ellipse>
+        <TextBlock Text="{Binding ConnectionStatus}"
+                   FontSize="12"
+                   VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis" />
+        <TextBlock Text="{Binding TransferQueue.Summary}"
+                   FontSize="11"
+                   Opacity="0.75"
+                   VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis"
+                   IsVisible="{Binding TransferQueue.HasItems}" />
+      </StackPanel>
+
+      <!-- The one thing the strip must not hide: a pair that has been failing. Same dot as the
+           Sincronización tab's, because in compact mode that tab is not on screen to carry it. -->
+      <Ellipse Grid.Column="3"
+               Width="8"
+               Height="8"
+               Fill="{DynamicResource StatusErrorBrush}"
+               VerticalAlignment="Center"
+               IsVisible="{Binding SyncPanel.HasFailingPairs}"
+               ToolTip.Tip="{Binding Loc[nav.sync.failures.tooltip]}"
+               AutomationProperties.Name="{Binding Loc[nav.sync.failures.tooltip]}" />
+
+      <Button Grid.Column="4"
+              Command="{Binding ToggleCompactModeCommand}"
+              ToolTip.Tip="{Binding Loc[compact.exit.tooltip]}"
+              AutomationProperties.Name="{Binding Loc[compact.exit.tooltip]}"
+              Padding="6,4">
+        <Path Classes="icon" Data="{StaticResource IconExpand}" Width="14" Height="14" />
+      </Button>
+    </Grid>
+  </Border>
+</UserControl>

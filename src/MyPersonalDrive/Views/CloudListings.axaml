@@ -43,8 +43,7 @@
              DragDrop.AllowDrop="True"
              DragDrop.DragOver="OnCloudListingDragOver"
              DragDrop.DragLeave="OnCloudListingDragLeave"
-             DragDrop.Drop="OnCloudListingDrop">
-    </ListBox>
+             DragDrop.Drop="OnCloudListingDrop" />
 
     <!-- Icons mode: a dense grid. The five row actions don't fit on a 112px tile, so they
          move into a context menu bound to the same commands.

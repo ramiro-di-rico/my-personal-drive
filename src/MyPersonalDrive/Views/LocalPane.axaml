@@ -6,6 +6,13 @@
              xmlns:views="clr-namespace:MyPersonalDrive.Views"
              x:Class="MyPersonalDrive.Views.LocalPane"
              x:DataType="vm:MainWindowViewModel">
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://MyPersonalDrive/Views/Templates/LocalListRow.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </UserControl.Resources>
   <!-- Local pane: read-only browsing only (navigate, breadcrumb, home, hidden-files toggle,
        free space). File operations and drag-and-drop transfer are separate plan tasks.
        Hidden/shown via ToggleLocalExplorerPanelCommand; ExplorerColumnsGrid's own Column[2]
@@ -104,94 +111,11 @@
                Grid.Row="2"
                Classes="driveListing"
                ItemsSource="{Binding Items}"
+               ItemTemplate="{StaticResource LocalListRow}"
                DragDrop.AllowDrop="True"
                DragDrop.DragOver="OnLocalListingDragOver"
                DragDrop.DragLeave="OnLocalListingDragLeave"
-               DragDrop.Drop="OnLocalListingDrop">
-        <ListBox.ItemTemplate>
-          <DataTemplate x:DataType="local:LocalNodeViewModel">
-            <!-- HorizontalAlignment as well as HorizontalContentAlignment: Fluent's Button
-                 aligns itself Left, so the row hugged its own text and stopped there. The
-                 ListBox and the ListBoxItem were already full width — measured, after a
-                 first attempt at this fixed the wrong two of the three
-                 (docs/PLAN-UX-ROUND-3.md X7). Without it the local pane's Size and Modified
-                 columns land at a different x on every line, and the hover highlight covers
-                 only the name. The cloud pane's rows never had this: their root is a Grid,
-                 which stretches by default. -->
-            <Button Classes="hoverGroup"
-                    Classes.selected="{Binding IsSelected}"
-                    Command="{Binding SelectCommand}"
-                    HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch">
-              <Button.ContextMenu>
-                <ContextMenu>
-                  <MenuItem Header="{Binding Loc[menu.copypath]}" Command="{Binding CopyPathCommand}" />
-                  <MenuItem Header="{Binding Loc[menu.rename]}" Command="{Binding RenameCommand}" />
-                  <Separator IsVisible="{Binding IsFolder}" />
-                  <MenuItem Header="{Binding Loc[menu.syncpath]}" Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
-                  <MenuItem Header="{Binding Loc[menu.syncnow]}" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
-                  <MenuItem Header="{Binding Loc[menu.syncpause]}" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
-                  <MenuItem Header="{Binding Loc[menu.syncresume]}" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
-                  <Separator />
-                  <MenuItem Header="{Binding Loc[menu.delete]}" Command="{Binding DeleteCommand}" />
-                  <MenuItem Header="{Binding Loc[menu.properties]}" Command="{Binding PropertiesCommand}" />
-                </ContextMenu>
-              </Button.ContextMenu>
-              <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
-                <Path Grid.Column="0"
-                      Classes="icon"
-                      Width="18"
-                      Height="18"
-                      Data="{Binding FileKind, Converter={x:Static conv:FileKindIconConverter.Instance}}" />
-                <TextBlock Grid.Column="1"
-                           VerticalAlignment="Center"
-                           TextTrimming="CharacterEllipsis"
-                           Text="{Binding DisplayName}" />
-                <!-- One stack, not three elements overlapping in the same cell: the pair
-                     badges answer "is this a pair, and is it running", the status badge
-                     answers "is this row's content up to date", and both can be true. -->
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                  <Path Classes="icon"
-                        Width="12"
-                        Height="12"
-                        Opacity="0.7"
-                        Data="{StaticResource IconRefresh}"
-                        IsVisible="{Binding IsSyncPairActive}"
-                        ToolTip.Tip="{Binding Loc[explorer.row.syncactive.tooltip]}" />
-                  <Path Classes="icon"
-                        Width="12"
-                        Height="12"
-                        Opacity="0.7"
-                        Data="{StaticResource IconPause}"
-                        IsVisible="{Binding IsSyncPairPaused}"
-                        ToolTip.Tip="{Binding Loc[explorer.row.syncpaused.tooltip]}" />
-                  <!-- This row's own sync state across every provider that maps this folder
-                       (docs/PLAN-SYNC-VISIBILITY.md S4). Distinct shape per state, and an
-                       accessible name because for a screen reader the glyph is all there is. -->
-                  <Path Classes="icon"
-                        Width="13"
-                        Height="13"
-                        Data="{Binding SyncStatus, Converter={x:Static conv:SyncStatusIconConverter.Instance}}"
-                        Stroke="{Binding SyncStatus, Converter={x:Static conv:SyncStatusBrushConverter.Instance}}"
-                        IsVisible="{Binding HasSyncStatus}"
-                        ToolTip.Tip="{Binding SyncStatusTooltip}"
-                        AutomationProperties.Name="{Binding SyncStatusText}" />
-                </StackPanel>
-                <TextBlock Grid.Column="3"
-                           VerticalAlignment="Center"
-                           FontSize="12"
-                           Opacity="0.8"
-                           Text="{Binding SizeText}" />
-                <TextBlock Grid.Column="4"
-                           VerticalAlignment="Center"
-                           FontSize="12"
-                           Opacity="0.7"
-                           Text="{Binding ModifiedText}" />
-              </Grid>
-            </Button>
-          </DataTemplate>
-        </ListBox.ItemTemplate>
-      </ListBox>
+               DragDrop.Drop="OnLocalListingDrop" />
 
       <!-- Empty state, mirroring the cloud pane's (docs/PLAN-UX-ROUND-3.md X3). No filter
            button: this pane has a search box and no kind chips, so clearing the box is the

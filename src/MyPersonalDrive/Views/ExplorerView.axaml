@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:MyPersonalDrive.ViewModels"
+             xmlns:views="clr-namespace:MyPersonalDrive.Views"
+             x:Class="MyPersonalDrive.Views.ExplorerView"
+             x:DataType="vm:MainWindowViewModel">
+  <!-- Explorer view: breadcrumbs, folder browser, status panel and CLI activity log. -->
+  <Grid RowDefinitions="*,Auto">
+    <Grid x:Name="ExplorerColumnsGrid" Grid.Row="0" ColumnDefinitions="*,Auto,*,Auto">
+      <views:CloudPane Grid.Column="0" x:Name="CloudPaneView" />
+
+      <!-- Adjustable split between the cloud and local panes (docs/INTERFACE_IMPROVEMENT_PLAN.md
+           Task 3). Drag resizes both star-sized columns automatically; double-click resets them
+           to 50/50 via ExplorerSplitter_DoubleTapped (Avalonia's GridSplitter has no built-in
+           reset gesture). -->
+      <GridSplitter x:Name="ExplorerSplitter"
+                    Grid.Column="1"
+                    Width="6"
+                    Margin="4,16"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    Background="{DynamicResource CardBackgroundBrush}"
+                    Cursor="SizeWestEast"
+                    ResizeDirection="Columns"
+                    DoubleTapped="ExplorerSplitter_DoubleTapped"
+                    IsVisible="{Binding IsLocalExplorerPanelVisible}"
+                    ToolTip.Tip="{Binding Loc[explorer.splitter.tooltip]}" />
+
+      <views:LocalPane Grid.Column="2" IsVisible="{Binding IsLocalExplorerPanelVisible}" x:Name="LocalPaneView" />
+
+      <views:StatusPanel Grid.Column="3" IsVisible="{Binding IsStatusPanelVisible}" />
+    </Grid>
+
+    <views:ActivityConsolePanel Grid.Row="1" />
+
+    <views:FilePreviewPanel Grid.Row="0" IsVisible="{Binding Preview.IsViewerVisible}" />
+  </Grid>
+</UserControl>

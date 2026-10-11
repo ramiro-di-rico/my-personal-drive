@@ -227,6 +227,29 @@ public class WindowLayoutTests : IDisposable
     }
 
     /// <summary>
+    /// The icons and gallery modes had no test that ever drew them: every other test here runs in
+    /// list mode, so a tile template that failed to load — a missing resource, a binding that no
+    /// longer compiles — would have shipped as a blank pane. One tile per item, and the icon the
+    /// template resolves from the app's resources actually present, is the whole assertion.
+    /// </summary>
+    [AvaloniaTheory]
+    [InlineData(DriveViewMode.Icons, "IconsModeListing")]
+    [InlineData(DriveViewMode.Gallery, "GalleryModeListing")]
+    public async Task TheTileModes_RenderOneTilePerItem(DriveViewMode mode, string listingName)
+    {
+        var (window, viewModel) = Show();
+        await (mode == DriveViewMode.Icons ? viewModel.ShowIconsViewCommand : viewModel.ShowGalleryViewCommand).ExecuteAsync();
+        viewModel.DisplayItems([RemoteItem("Development", isFolder: true), RemoteItem("notes.txt")]);
+        Layout(window);
+
+        var listing = Named<ItemsRepeater>(window, listingName);
+        var tiles = listing.GetVisualDescendants().OfType<Border>().Where(border => border.Classes.Contains("tile")).ToList();
+
+        Assert.Equal(2, tiles.Count);
+        Assert.All(tiles, tile => Assert.Contains(tile.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>(), path => path.Data is not null));
+    }
+
+    /// <summary>
     /// Not a defect — a decision, pinned so it is not "fixed" later. The gap to the right of a
     /// remote row is the space its hover actions occupy; the row itself is full width. This was
     /// misread as a layout bug once already.

@@ -202,38 +202,7 @@
             </StackPanel>
           </Border>
 
-          <!-- Filter by type. The chips come from the metrics histogram, so they only ever offer
-               kinds the folder actually contains (docs/PLAN-BROWSER-VIEWS.md M6). Filtering is a
-               view of what was already loaded - it makes no CLI call, and it does not change the
-               metrics panel, which keeps describing the whole folder. -->
-          <ItemsControl Grid.Row="3" ItemsSource="{Binding KindFilters}" Margin="0,0,0,8">
-            <ItemsControl.Styles>
-              <Style Selector="Button.kindChip">
-                <Setter Property="Padding" Value="8,3" />
-                <Setter Property="FontSize" Value="12" />
-                <Setter Property="Margin" Value="0,0,6,6" />
-              </Style>
-              <Style Selector="Button.kindChip.active">
-                <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
-                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-                <Setter Property="FontWeight" Value="Bold" />
-              </Style>
-            </ItemsControl.Styles>
-            <ItemsControl.ItemsPanel>
-              <ItemsPanelTemplate>
-                <WrapPanel />
-              </ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="vm:KindFilterViewModel">
-                <Button Classes="kindChip"
-                        Classes.active="{Binding IsActive}"
-                        Command="{Binding ApplyCommand}"
-                        Content="{Binding LabelWithCount}"
-                        ToolTip.Tip="{Binding Loc[explorer.kindfilter.tooltip]}" />
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
+          <views:KindFilterBar Grid.Row="3" />
 
           <views:CloudListings Grid.Row="4" x:Name="CloudListingsView" />
         </Grid>

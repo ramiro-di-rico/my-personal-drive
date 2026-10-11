@@ -80,20 +80,6 @@ public partial class MainWindow : Window
         // one ListBox before, and the reason the tile modes never got it (an ItemsRepeater takes no
         // focus, so it has no KeyDown of its own to hang anything on).
         KeyDown += OnWindowKeyDown;
-
-        // One write per gesture, not one per tick — same reasoning as the console handle below
-        // (docs/PLAN-UX-ROUND-4.md Y6). PointerCaptureLost is the slider's end-of-drag; LostFocus
-        // covers the arrow keys, which change the value without a pointer ever being involved.
-        ViewerZoomSlider.PointerCaptureLost += (_, _) => CommitZoom();
-        ViewerZoomSlider.LostFocus += (_, _) => CommitZoom();
-    }
-
-    private void CommitZoom()
-    {
-        if (DataContext is MainWindowViewModel viewModel)
-        {
-            viewModel.Preview.CommitViewerZoom();
-        }
     }
 
     /// <summary>

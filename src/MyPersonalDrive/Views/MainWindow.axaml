@@ -37,61 +37,7 @@
     <Grid Grid.Row="3" RowDefinitions="*,Auto" IsVisible="{Binding IsExplorerView}">
       <Grid x:Name="ExplorerColumnsGrid" Grid.Row="0" ColumnDefinitions="*,Auto,*,Auto">
         <Grid Grid.Column="0" Margin="16,0,16,16" RowDefinitions="Auto,Auto,Auto,Auto,*">
-          <!-- This pane's own header, mirroring the local pane's (docs/PLAN-UX-ROUND-2.md §14).
-               It used to be a full-window-width row above both panes, which pushed these six
-               buttons — every one of which acts on THIS pane — against the right edge of the
-               window, directly above the local pane and its separate toolbar. -->
-          <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,8">
-            <Grid.Styles>
-              <Style Selector="Button.viewMode.active">
-                <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
-                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-              </Style>
-            </Grid.Styles>
-
-            <Border Grid.Column="0" Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6">
-              <views:BreadcrumbBar ItemsSource="{Binding BreadcrumbItems}"
-                                   Label="{Binding ActiveProviderDisplayName}"
-                                   Icon="{StaticResource IconCloud}" />
-            </Border>
-
-            <Button Grid.Column="1" ToolTip.Tip="{Binding Loc[explorer.back.tooltip]}" AutomationProperties.Name="{Binding Loc[explorer.back.tooltip]}" Command="{Binding BackCommand}">
-              <Path Classes="icon" Data="{StaticResource IconArrowLeft}" />
-            </Button>
-            <Button Grid.Column="2" ToolTip.Tip="{Binding Loc[explorer.newfolder.tooltip]}" AutomationProperties.Name="{Binding Loc[explorer.newfolder.tooltip]}" Command="{Binding CreateFolderCommand}">
-              <Path Classes="icon" Data="{StaticResource IconFolderPlus}" />
-            </Button>
-            <Button Grid.Column="3" ToolTip.Tip="{Binding Loc[explorer.upload.tooltip]}" AutomationProperties.Name="{Binding Loc[explorer.upload.tooltip]}" Command="{Binding UploadCommand}">
-              <Path Classes="icon" Data="{StaticResource IconUpload}" />
-            </Button>
-
-            <!-- View mode: list / icons / gallery. Only the presentation changes; the listing and
-                 the current selection are untouched (docs/PLAN-BROWSER-VIEWS.md V1). -->
-            <Button Grid.Column="4"
-                    Classes="viewMode"
-                    Classes.active="{Binding IsListView}"
-                    ToolTip.Tip="{Binding Loc[explorer.view.list.tooltip]}"
-                    AutomationProperties.Name="{Binding Loc[explorer.view.list.tooltip]}"
-                    Command="{Binding ShowListViewCommand}">
-              <Path Classes="icon" Data="{StaticResource IconViewList}" />
-            </Button>
-            <Button Grid.Column="5"
-                    Classes="viewMode"
-                    Classes.active="{Binding IsIconsView}"
-                    ToolTip.Tip="{Binding Loc[explorer.view.icons.tooltip]}"
-                    AutomationProperties.Name="{Binding Loc[explorer.view.icons.tooltip]}"
-                    Command="{Binding ShowIconsViewCommand}">
-              <Path Classes="icon" Data="{StaticResource IconViewGrid}" />
-            </Button>
-            <Button Grid.Column="6"
-                    Classes="viewMode"
-                    Classes.active="{Binding IsGalleryView}"
-                    ToolTip.Tip="{Binding Loc[explorer.view.gallery.tooltip]}"
-                    AutomationProperties.Name="{Binding Loc[explorer.view.gallery.tooltip]}"
-                    Command="{Binding ShowGalleryViewCommand}">
-              <Path Classes="icon" Data="{StaticResource IconViewGallery}" />
-            </Button>
-          </Grid>
+          <views:CloudToolbar Grid.Row="0" />
 
           <!-- One sort control for all three modes rather than column headers in list mode plus a
                separate control for the tiles: the state is the same either way, and two ways to set

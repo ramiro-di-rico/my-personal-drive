@@ -87,7 +87,7 @@ public partial class LocalPane : UserControl
         return transfer;
     }
 
-    private Control? _localHighlightedDropRow;
+    private readonly DropHighlight _dropHighlight = new();
 
     /// <summary>Mirrors <see cref="OnCloudListingDragOver"/> for the opposite direction — see its doc comment.</summary>
     private void OnLocalListingDragOver(object? sender, DragEventArgs e)
@@ -102,16 +102,8 @@ public partial class LocalPane : UserControl
         }
 
         e.DragEffects = DragDropEffects.Copy;
-        listBox?.Classes.Add("dropTarget");
-
         var hoveredRow = e.Source is Visual visual ? visual.FindAncestorOfType<ListBoxItem>(includeSelf: true) : null;
-        var targetsAFolderRow = hoveredRow?.DataContext is LocalNodeViewModel { IsFolder: true };
-        if (!ReferenceEquals(hoveredRow, _localHighlightedDropRow) || !targetsAFolderRow)
-        {
-            _localHighlightedDropRow?.Classes.Remove("dropTarget");
-            _localHighlightedDropRow = targetsAFolderRow ? hoveredRow : null;
-            _localHighlightedDropRow?.Classes.Add("dropTarget");
-        }
+        _dropHighlight.Show(listBox, hoveredRow?.DataContext is LocalNodeViewModel { IsFolder: true } ? hoveredRow : null);
 
         var targetPath = ResolveLocalDropTargetPath(e, viewModel);
         LocalDropOverlayText.Text = Loc.F(StringKeys.Drop.DownloadTo, DisplayNameForDropTarget(targetPath, viewModel.LocalExplorer.CurrentPath));
@@ -122,9 +114,7 @@ public partial class LocalPane : UserControl
 
     private void ClearLocalDropHighlight(ListBox? listBox)
     {
-        listBox?.Classes.Remove("dropTarget");
-        _localHighlightedDropRow?.Classes.Remove("dropTarget");
-        _localHighlightedDropRow = null;
+        _dropHighlight.Clear(listBox);
         LocalDropOverlay.IsVisible = false;
     }
 

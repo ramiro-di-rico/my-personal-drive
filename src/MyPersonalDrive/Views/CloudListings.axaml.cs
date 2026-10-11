@@ -103,7 +103,7 @@ public partial class CloudListings : UserControl
         node.ActivateCommand.Execute(null);
     }
 
-    private Control? _cloudHighlightedDropRow;
+    private readonly DropHighlight _dropHighlight = new();
 
     /// <summary>
     /// The three-part drop-target affordance (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4):
@@ -125,17 +125,8 @@ public partial class CloudListings : UserControl
         }
 
         e.DragEffects = DragDropEffects.Copy;
-        listing?.Classes.Add("dropTarget");
-
         var hoveredNode = NodeUnder<DriveNodeViewModel>(e.Source);
-        var targetsAFolderRow = hoveredNode is { IsFolder: true };
-        var hoveredRow = targetsAFolderRow ? ContainerFor(e.Source, hoveredNode!) : null;
-        if (!ReferenceEquals(hoveredRow, _cloudHighlightedDropRow) || !targetsAFolderRow)
-        {
-            _cloudHighlightedDropRow?.Classes.Remove("dropTarget");
-            _cloudHighlightedDropRow = targetsAFolderRow ? hoveredRow : null;
-            _cloudHighlightedDropRow?.Classes.Add("dropTarget");
-        }
+        _dropHighlight.Show(listing, hoveredNode is { IsFolder: true } ? ContainerFor(e.Source, hoveredNode) : null);
 
         var targetPath = ResolveCloudDropTargetPath(e, viewModel);
         CloudDropOverlayText.Text = Loc.F(StringKeys.Drop.UploadTo, DisplayNameForDropTarget(targetPath, viewModel.CurrentPath));
@@ -146,9 +137,7 @@ public partial class CloudListings : UserControl
 
     private void ClearCloudDropHighlight(Control? listing)
     {
-        listing?.Classes.Remove("dropTarget");
-        _cloudHighlightedDropRow?.Classes.Remove("dropTarget");
-        _cloudHighlightedDropRow = null;
+        _dropHighlight.Clear(listing);
         CloudDropOverlay.IsVisible = false;
     }
 

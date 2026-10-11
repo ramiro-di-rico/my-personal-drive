@@ -4,6 +4,13 @@
              xmlns:conv="clr-namespace:MyPersonalDrive.Views.Converters"
              x:Class="MyPersonalDrive.Views.CloudListings"
              x:DataType="vm:MainWindowViewModel">
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://MyPersonalDrive/Views/Templates/CloudGalleryTile.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </UserControl.Resources>
   <Grid>
     <!-- Unauthenticated / Expired Session Fallback Card -->
     <Border IsVisible="{Binding !IsAuthenticated}"
@@ -288,101 +295,10 @@
                   DragDrop.DragOver="OnCloudListingDragOver"
                   DragDrop.DragLeave="OnCloudListingDragLeave"
                   DragDrop.Drop="OnCloudListingDrop">
-    <ItemsRepeater x:Name="GalleryModeListing" ItemsSource="{Binding RootItems}">
+    <ItemsRepeater x:Name="GalleryModeListing" ItemsSource="{Binding RootItems}" ItemTemplate="{StaticResource CloudGalleryTile}">
       <ItemsRepeater.Layout>
         <UniformGridLayout ItemsStretch="Fill" MinItemWidth="176" MinItemHeight="200" />
       </ItemsRepeater.Layout>
-      <ItemsRepeater.ItemTemplate>
-        <DataTemplate x:DataType="vm:DriveNodeViewModel">
-          <Border Classes="tile" Classes.selected="{Binding IsSelected}">
-            <Border.ContextMenu>
-              <ContextMenu>
-                <MenuItem Header="{Binding Loc[menu.open]}" Command="{Binding ActivateCommand}" />
-                <MenuItem Header="{Binding Loc[menu.preview]}" Command="{Binding PreviewCommand}" IsVisible="{Binding CanPreview}" />
-                <MenuItem Header="{Binding Loc[menu.copy]}" Command="{Binding CopyCommand}" />
-                <MenuItem Header="{Binding Loc[menu.moveto]}"
-                          Command="{Binding MoveCommand}"
-                          IsEnabled="{Binding CanMove}"
-                          ToolTip.Tip="{Binding MoveTooltip}"
-                          ToolTip.ShowOnDisabled="True" />
-                <MenuItem Header="{Binding Loc[menu.rename]}" Command="{Binding RenameCommand}" />
-                <MenuItem Header="{Binding Loc[menu.download]}"
-                          Command="{Binding DownloadCommand}"
-                          IsVisible="{Binding IsFile}"
-                          IsEnabled="{Binding CanDownload}"
-                          ToolTip.Tip="{Binding DownloadTooltip}"
-                          ToolTip.ShowOnDisabled="True" />
-                <MenuItem Header="{Binding Loc[menu.downloadhere]}" Command="{Binding DownloadHereCommand}" />
-                <MenuItem Header="{Binding Loc[menu.uploadhere]}" Command="{Binding UploadToFolderCommand}" IsVisible="{Binding IsFolder}" />
-                <MenuItem Header="{Binding Loc[menu.copypath]}" Command="{Binding CopyPathCommand}" />
-                <MenuItem Header="{Binding Loc[menu.copysharelink]}"
-                          Command="{Binding ShareLinkCommand}"
-                          IsEnabled="{Binding CanShareLink}"
-                          ToolTip.Tip="{Binding ShareLinkTooltip}"
-                          ToolTip.ShowOnDisabled="True" />
-                <Separator IsVisible="{Binding IsFolder}" />
-                <MenuItem Header="{Binding Loc[menu.syncpath]}" Command="{Binding SyncSelectedPathCommand}" IsVisible="{Binding CanCreateSyncPair}" />
-                <MenuItem Header="{Binding Loc[menu.syncnow]}" Command="{Binding SyncPair.SyncNowCommand}" IsVisible="{Binding HasSyncPair}" />
-                <MenuItem Header="{Binding Loc[menu.syncpause]}" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairActive}" />
-                <MenuItem Header="{Binding Loc[menu.syncresume]}" Command="{Binding TogglePauseSyncCommand}" IsVisible="{Binding IsSyncPairPaused}" />
-                <Separator />
-                <MenuItem Header="{Binding Loc[menu.trash]}" Command="{Binding TrashCommand}" />
-                <MenuItem Header="{Binding Loc[menu.properties]}" Command="{Binding PropertiesCommand}" />
-              </ContextMenu>
-            </Border.ContextMenu>
-            <Button Command="{Binding SelectCommand}"
-                    ToolTip.Tip="{Binding DisplayName}"
-                    Background="Transparent"
-                    BorderThickness="0"
-                    Padding="0"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Stretch">
-              <StackPanel Spacing="10" VerticalAlignment="Center">
-                <Border Background="{DynamicResource CardBackgroundBrush}"
-                        CornerRadius="6"
-                        Height="96"
-                        Padding="12">
-                  <Path Classes="icon"
-                        Width="64"
-                        Height="64"
-                        Stretch="Uniform"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        Data="{Binding FileKind, Converter={x:Static conv:FileKindIconConverter.Instance}}" />
-                </Border>
-                <TextBlock Text="{Binding DisplayName}"
-                           TextAlignment="Center"
-                           TextWrapping="Wrap"
-                           MaxLines="2"
-                           TextTrimming="CharacterEllipsis" />
-                <TextBlock Text="{Binding SizeText}"
-                           TextAlignment="Center"
-                           Opacity="0.7"
-                           FontSize="12"
-                           IsVisible="{Binding SizeText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                <TextBlock Text="{Binding DeepSizeText}"
-                           TextAlignment="Center"
-                           Opacity="0.7"
-                           FontSize="12"
-                           IsVisible="{Binding HasDeepSize}" />
-                <!-- This row's own sync state (docs/PLAN-SYNC-VISIBILITY.md S3). Distinct shape per
-                     state, not just a distinct colour, and an accessible name because for a screen
-                     reader the glyph is the only thing saying it. -->
-                <Path Classes="icon"
-                      Width="13"
-                      Height="13"
-                      VerticalAlignment="Center"
-                HorizontalAlignment="Center"
-                      Data="{Binding SyncStatus, Converter={x:Static conv:SyncStatusIconConverter.Instance}}"
-                      Stroke="{Binding SyncStatus, Converter={x:Static conv:SyncStatusBrushConverter.Instance}}"
-                      IsVisible="{Binding HasSyncStatus}"
-                      ToolTip.Tip="{Binding SyncStatusTooltip}"
-                      AutomationProperties.Name="{Binding SyncStatusText}" />
-              </StackPanel>
-            </Button>
-          </Border>
-        </DataTemplate>
-      </ItemsRepeater.ItemTemplate>
     </ItemsRepeater>
     </ScrollViewer>
 

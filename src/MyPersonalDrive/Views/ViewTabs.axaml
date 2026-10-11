@@ -1,0 +1,52 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:MyPersonalDrive.ViewModels"
+             x:Class="MyPersonalDrive.Views.ViewTabs"
+             x:DataType="vm:MainWindowViewModel">
+  <StackPanel Orientation="Horizontal" Spacing="8" Margin="16,12,16,0">
+    <StackPanel.Styles>
+      <Style Selector="Button.active">
+        <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="FontWeight" Value="Bold" />
+      </Style>
+    </StackPanel.Styles>
+    <Button Command="{Binding ShowExplorerCommand}"
+            Classes.active="{Binding IsExplorerView}">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Path Classes="icon" Data="{StaticResource IconExplorer}" />
+        <TextBlock Text="{Binding Loc[nav.explorer]}" />
+      </StackPanel>
+    </Button>
+    <!-- Opens the viewer on whatever row is selected. A menu entry and not only a per-row action,
+         so it's discoverable without hovering a row or opening a context menu; it stays disabled
+         until the selection is something the viewer can actually show (TextPreviewPolicy /
+         ImagePreviewPolicy). -->
+    <Button Command="{Binding ViewSelectedFileCommand}"
+            Classes.active="{Binding Preview.IsViewerVisible}"
+            ToolTip.Tip="{Binding Loc[nav.viewer.tooltip]}">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Path Classes="icon" Data="{StaticResource IconEye}" />
+        <TextBlock Text="{Binding Loc[nav.viewer]}" />
+      </StackPanel>
+    </Button>
+    <!-- The failure dot is the point of promoting sync up here: previously you had to open
+         Configuración and scroll past the whole Conexión block to discover a pair had been
+         failing since last week (docs/PLAN-UX-ROUND-2.md §5). -->
+    <Button Command="{Binding ShowSyncCommand}"
+            Classes.active="{Binding IsSyncView}"
+            ToolTip.Tip="{Binding Loc[nav.sync.tooltip]}">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Path Classes="icon" Data="{StaticResource IconSync}" />
+        <TextBlock Text="{Binding Loc[nav.sync]}" />
+        <Ellipse Width="8"
+                 Height="8"
+                 Fill="{DynamicResource StatusErrorBrush}"
+                 VerticalAlignment="Center"
+                 IsVisible="{Binding SyncPanel.HasFailingPairs}"
+                 ToolTip.Tip="{Binding Loc[nav.sync.failures.tooltip]}"
+                 AutomationProperties.Name="{Binding Loc[nav.sync.failures.tooltip]}" />
+      </StackPanel>
+    </Button>
+  </StackPanel>
+</UserControl>

@@ -1,0 +1,114 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!--
+    Per-row icon-only actions (copy/rename/download/trash on a folder row, preview/sync-now/
+    pause/remove on a sync pair) stay invisible until the row is hovered or one of them gets
+    keyboard focus. Opacity (not IsVisible) keeps their layout space reserved, so nothing
+    shifts when they fade in — and ":pointerover" on the row container already cascades from
+    any descendant the pointer is over, so hovering the row's label is enough.
+  -->
+  <Style Selector=".hoverGroup Button.rowAction">
+    <Setter Property="Opacity" Value="0" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector=".hoverGroup:pointerover Button.rowAction">
+    <Setter Property="Opacity" Value="1" />
+  </Style>
+  <!-- A listing row's five inline actions are not tab stops (docs/PLAN-UX-ROUND-3.md X5). They
+       were, which put five stops on every row: tabbing past a fifty-item folder took some 250
+       presses to reach whatever came after the list. Every one of them is in the row's context
+       menu — reachable with Shift+F10 — and rename and trash also have F2 and Delete now, so
+       nothing became unreachable by dropping them out of the traversal. The sync panel's own
+       .rowAction buttons are deliberately untouched: a sync pair has no context menu, so there
+       they are the only way in. -->
+  <Style Selector="ListBox.driveListing Button.rowAction">
+    <Setter Property="IsTabStop" Value="False" />
+  </Style>
+
+  <!--
+    Row background tint: a neutral tint on hover so any row reads as interactive, and the
+    accent — reserved for "this is the important one" — on the row actually selected. Order
+    matters here: ".selected" is declared after ":pointerover" so it still wins when a selected
+    row is also under the pointer.
+  -->
+  <Style Selector="Grid.hoverGroup">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Grid.hoverGroup:pointerover">
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+  </Style>
+  <Style Selector="Grid.hoverGroup.selected">
+    <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+  </Style>
+
+  <!-- The local pane's row root is a Button rather than a Grid (docs/INTERFACE_IMPROVEMENT_PLAN.md
+       §2.2's multi-select needed a highlight there too, which it never had before). Button
+       already supplies its own hover/pressed states from the theme, so only .selected needs its
+       own rule here. -->
+  <Style Selector="Button.hoverGroup.selected">
+    <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+  </Style>
+
+  <!--
+    The listing is hosted in a ListBox for its panel and keyboard focus handling, but the row
+    chrome is entirely ours (.hoverGroup / .selected above, driven by the view model's own
+    selection). Flatten the ListBoxItem so the theme's padding and selection brush don't fight
+    that: without this, a selected row shows two overlapping highlights of different shapes.
+  -->
+  <Style Selector="ListBox.driveListing">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+  </Style>
+  <Style Selector="ListBox.driveListing ListBoxItem">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="ListBox.driveListing ListBoxItem:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <!-- Drop-target highlighting (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 5 Phase 4): the whole
+       pane while a valid drag is over it anywhere, and additionally the specific folder row
+       when the drop would land inside that folder rather than the pane's current path. Classes
+       toggled imperatively from code-behind's DragOver/DragLeave handlers — this is transient
+       gesture feedback, not state the view model has any reason to know about. -->
+  <Style Selector="ListBox.driveListing.dropTarget">
+    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+  </Style>
+  <Style Selector="ListBox.driveListing ListBoxItem.dropTarget">
+    <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+  </Style>
+  <!-- The tile modes' equivalents: the whole pane while a drag is over it, the tile itself when
+       the drop would land inside that folder (docs/PLAN-UX-ROUND-3.md X2). -->
+  <Style Selector="ScrollViewer.dropTarget">
+    <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+  </Style>
+  <Style Selector="Border.tile.dropTarget">
+    <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+  </Style>
+
+  <!-- Tile chrome, shared by the icons and gallery modes. -->
+  <Style Selector="Border.tile">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Padding" Value="8" />
+    <Setter Property="Margin" Value="4" />
+  </Style>
+  <Style Selector="Border.tile:pointerover">
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+  </Style>
+  <Style Selector="Border.tile.selected">
+    <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+  </Style>
+</Styles>

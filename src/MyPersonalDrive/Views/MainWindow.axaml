@@ -76,52 +76,7 @@
       </Button>
     </StackPanel>
 
-    <!-- The alert strip (docs/PLAN-UX-ROUND-3.md X1). Belongs to the window, not to a view and not
-         to the status panel: U1 put the recovery button inside that panel, which is a preference
-         the user can switch off and which only exists in the explorer view — so a failed load was
-         silent for anyone who had hidden it, and every failure raised while the user was in
-         Configuración or Sincronización was silent for everyone. Only warnings land here; ordinary
-         progress keeps the panel's own card, which is what IsInformationalStatus splits off. -->
-    <Border Grid.Row="2"
-            Margin="16,12,16,0"
-            Padding="12,10"
-            CornerRadius="6"
-            Background="{DynamicResource WarningCardBackgroundBrush}"
-            IsVisible="{Binding IsStatusBannerVisible}">
-      <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
-        <Path Grid.Column="0"
-              Classes="icon"
-              Data="{StaticResource IconWarning}"
-              Stroke="{DynamicResource WarningCardForegroundBrush}"
-              VerticalAlignment="Center" />
-        <TextBlock Grid.Column="1"
-                   Text="{Binding StatusMessage}"
-                   Foreground="{DynamicResource WarningCardForegroundBrush}"
-                   TextWrapping="Wrap"
-                   VerticalAlignment="Center" />
-        <Button Grid.Column="2"
-                Classes="primary"
-                Padding="12,4"
-                FontSize="12"
-                VerticalAlignment="Center"
-                IsVisible="{Binding HasStatusAction}"
-                Content="{Binding StatusActionLabel}"
-                Command="{Binding StatusActionCommand}"
-                ToolTip.Tip="{Binding Loc[status.action.tooltip]}" />
-        <Button Grid.Column="3"
-                Padding="6"
-                VerticalAlignment="Center"
-                Command="{Binding DismissStatusBannerCommand}"
-                ToolTip.Tip="{Binding Loc[status.banner.dismiss.tooltip]}"
-                AutomationProperties.Name="{Binding Loc[status.banner.dismiss.tooltip]}">
-          <Path Classes="icon"
-                Data="{StaticResource IconClear}"
-                Width="12"
-                Height="12"
-                Stroke="{DynamicResource WarningCardForegroundBrush}" />
-        </Button>
-      </Grid>
-    </Border>
+    <views:AlertStrip Grid.Row="2" />
 
     <!-- Explorer view: breadcrumbs, folder browser, status panel and CLI activity log. -->
     <Grid Grid.Row="3" RowDefinitions="*,Auto" IsVisible="{Binding IsExplorerView}">

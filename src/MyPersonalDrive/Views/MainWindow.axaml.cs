@@ -888,65 +888,6 @@ public partial class MainWindow : Window
         return viewModel.LocalExplorer.CurrentPath;
     }
 
-    private async void BrowseCliPath(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (DataContext is not MainWindowViewModel viewModel)
-        {
-            return;
-        }
-
-        // async void: the picker goes through the desktop portal, which can fail, and the assignment
-        // below writes settings.json (docs/PLAN-UX-ROUND-4.md Z1).
-        try
-        {
-            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-            {
-                Title = Loc.T(StringKeys.Picker.CliPathTitle),
-                AllowMultiple = false
-            });
-
-            if (files.Count == 0)
-            {
-                return;
-            }
-
-            viewModel.CliPath = files[0].Path.LocalPath;
-        }
-        catch (Exception ex)
-        {
-            viewModel.ReportHandlerFailure(ex);
-        }
-    }
-
-    private async void BrowseDefaultSyncFolder(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (DataContext is not MainWindowViewModel viewModel)
-        {
-            return;
-        }
-
-        // See BrowseCliPath.
-        try
-        {
-            var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-            {
-                Title = Loc.T(StringKeys.Picker.DefaultSyncFolderTitle),
-                AllowMultiple = false
-            });
-
-            if (folders.Count == 0)
-            {
-                return;
-            }
-
-            viewModel.DefaultSyncFolder = folders[0].Path.LocalPath;
-        }
-        catch (Exception ex)
-        {
-            viewModel.ReportHandlerFailure(ex);
-        }
-    }
-
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
         if (DataContext is not MainWindowViewModel viewModel)

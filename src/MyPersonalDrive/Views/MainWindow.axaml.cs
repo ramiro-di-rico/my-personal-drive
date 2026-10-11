@@ -25,9 +25,12 @@ public partial class MainWindow : Window
     /// </summary>
     private static Localizer Loc => Localizer.Instance;
 
+    private readonly MainWindowDialogs _dialogs;
+
     public MainWindow()
     {
         InitializeComponent();
+        _dialogs = new MainWindowDialogs(this);
         DataContextChanged += OnDataContextChanged;
         Opened += OnOpened;
 
@@ -163,41 +166,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        viewModel.RequestUploadFilesAsync = PickUploadFilesAsync;
-        viewModel.RequestConflictStrategyAsync = files => Dialogs.UploadConflictDialog.ShowAsync(this, files);
-        viewModel.RequestRenameAsync = PromptForRenameAsync;
-        viewModel.RequestCopyNameAsync = PromptForCopyNameAsync;
-        viewModel.RequestCreateFolderAsync = PromptForNewFolderNameAsync;
-        viewModel.RequestDownloadFolderAsync = PickDownloadFolderAsync;
-        viewModel.Console.RequestSaveActivityAsync = PickSaveActivityAsync;
-        viewModel.RequestConfirmationAsync = question => Dialogs.ConfirmDialog.ShowAsync(this, question);
-        viewModel.RequestCopyToClipboardAsync = CopyToClipboardAsync;
-        viewModel.RequestShowPropertiesAsync = (title, fields, syncStatuses) => Dialogs.PropertiesDialog.ShowAsync(this, title, fields, syncStatuses);
-        viewModel.RequestPdfMergeAsync = (names, suggested) => Dialogs.PdfMergeDialog.ShowAsync(this, names, suggested);
-        viewModel.RequestMoveTargetAsync = (what, startPath) => Dialogs.RemoteFolderPickerDialog.ShowAsync(
-            this,
-            viewModel.ListRemoteFolderAsync,
-            Localizer.Instance.F(StringKeys.Dialog.MoveTargetPrompt, what),
-            startPath);
-
-        viewModel.LocalExplorer.RequestConfirmationAsync = question => Dialogs.ConfirmDialog.ShowAsync(this, question);
-        viewModel.LocalExplorer.RequestRenameAsync = PromptForRenameAsync;
-        viewModel.LocalExplorer.RequestCopyToClipboardAsync = CopyToClipboardAsync;
-        viewModel.LocalExplorer.RequestShowPropertiesAsync = (title, fields, syncStatuses) => Dialogs.PropertiesDialog.ShowAsync(this, title, fields, syncStatuses);
-        viewModel.LocalExplorer.RequestPdfMergeAsync = (names, suggested) => Dialogs.PdfMergeDialog.ShowAsync(this, names, suggested);
-
+        _dialogs.Attach(viewModel);
 
         viewModel.PropertyChanged -= OnMainWindowViewModelPropertyChanged;
         viewModel.PropertyChanged += OnMainWindowViewModelPropertyChanged;
         ApplyCompactMode(viewModel, viewModel.IsCompactMode);
-
-        viewModel.SyncPanel.RequestNewPairAsync = prefill => Dialogs.SyncPairDialog.ShowAddAsync(this, viewModel.SyncPanel, viewModel.RootPath, prefill);
-        viewModel.SyncPanel.RequestPreviewConfirmationAsync = (plan, warnings) => Dialogs.SyncPreviewDialog.ShowAsync(this, plan, warnings);
-        viewModel.SyncPanel.RequestConflictResolutionsAsync = conflicts => Dialogs.SyncConflictsDialog.ShowAsync(this, conflicts);
-        viewModel.SyncPanel.RequestFailureReviewAsync = failures => Dialogs.SyncFailuresDialog.ShowAsync(this, failures);
-        viewModel.SyncPanel.RequestConfirmationAsync = question => Dialogs.ConfirmDialog.ShowAsync(this, question);
-        viewModel.SyncPanel.RequestEditPairAsync = pair => Dialogs.SyncPairDialog.ShowEditAsync(this, pair);
-        viewModel.SyncPanel.RequestAlertAsync = message => Dialogs.AlertDialog.ShowAsync(this, message);
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -224,90 +197,5 @@ public partial class MainWindow : Window
             }
         }
     }
-
-    private async Task<IReadOnlyList<string>> PickUploadFilesAsync()
-    {
-        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = Loc.T(StringKeys.Picker.UploadTitle),
-            AllowMultiple = true
-        });
-
-        return files.Select(file => file.Path.LocalPath).ToList();
-    }
-
-    private async Task<string?> PickDownloadFolderAsync()
-    {
-        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = Loc.T(StringKeys.Picker.DownloadFolderTitle),
-            AllowMultiple = false
-        });
-
-        return folders.Count == 0 ? null : folders[0].Path.LocalPath;
-    }
-
-    private Task<string?> PromptForRenameAsync(string currentName)
-        => Dialogs.NamePromptDialog.ShowAsync(
-            this,
-            Loc.T(StringKeys.Dialog.RenameTitle),
-            Loc.F(StringKeys.Dialog.RenamePrompt, currentName),
-            Loc.T(StringKeys.Menu.Rename),
-            initialText: currentName,
-            placeholder: null,
-            mustDifferFrom: currentName);
-
-    private Task<string?> PromptForNewFolderNameAsync()
-        => Dialogs.NamePromptDialog.ShowAsync(
-            this,
-            Loc.T(StringKeys.Dialog.NewFolderTitle),
-            Loc.T(StringKeys.Dialog.NewFolderPrompt),
-            Loc.T(StringKeys.Common.Create),
-            initialText: null,
-            placeholder: Loc.T(StringKeys.Dialog.NewFolderPlaceholder));
-
-    private Task<string?> PromptForCopyNameAsync(string currentName)
-        => Dialogs.NamePromptDialog.ShowAsync(
-            this,
-            Loc.T(StringKeys.Menu.Copy),
-            Loc.F(StringKeys.Dialog.CopyPrompt, currentName),
-            Loc.T(StringKeys.Common.Copy),
-            initialText: null,
-            placeholder: Loc.T(StringKeys.Dialog.CopyPlaceholder),
-            mustDifferFrom: currentName);
-
-
-
-    private async Task<string?> PickSaveActivityAsync()
-    {
-        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title = Loc.T(StringKeys.Picker.SaveLogTitle),
-            SuggestedFileName = "cli-activity.log",
-            DefaultExtension = "log"
-        });
-
-        return file?.Path.LocalPath;
-    }
-
-
-
-
-
-
-
-    /// <summary>Puts text on the system clipboard — "Copiar ruta" (docs/INTERFACE_IMPROVEMENT_PLAN.md Task 6). Silently a no-op if the platform offers no clipboard (e.g. a headless test host).</summary>
-    private async Task CopyToClipboardAsync(string text)
-    {
-        var clipboard = Clipboard;
-        if (clipboard is not null)
-        {
-            await clipboard.SetTextAsync(text);
-        }
-    }
-
-
-
-
 
 }

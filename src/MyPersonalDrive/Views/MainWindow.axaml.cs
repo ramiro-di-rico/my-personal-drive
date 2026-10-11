@@ -1,30 +1,17 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input;
-using Avalonia.Input.Platform;
-using Avalonia.Interactivity;
-using Avalonia.Layout;
-using Avalonia.Platform.Storage;
-using Avalonia.Threading;
-using Avalonia.VisualTree;
-using MyPersonalDrive.Models;
-using MyPersonalDrive.Services;
-using MyPersonalDrive.Services.Localization;
 using MyPersonalDrive.ViewModels;
-using MyPersonalDrive.ViewModels.Local;
-using MyPersonalDrive.ViewModels.Sync;
-using static MyPersonalDrive.Views.RowGestures;
 
 namespace MyPersonalDrive.Views;
 
+/// <summary>
+/// The shell. The views it hosts are UserControls of their own; what stays here is what only a
+/// window can do — the compact strip's size, position and always-on-top (docs/PLAN-COMPACT-VIEW.md),
+/// the dialogs the view models ask for (<see cref="MainWindowDialogs"/>), the window-level key
+/// handler and starting the view model once the window is open.
+/// </summary>
 public partial class MainWindow : Window
 {
-    /// <summary>
-    /// The string table. Code-behind builds a dozen dialogs by hand, so it needs the same access
-    /// the view models get through <c>ObservableObject.Loc</c>.
-    /// </summary>
-    private static Localizer Loc => Localizer.Instance;
-
     private readonly MainWindowDialogs _dialogs;
 
     public MainWindow()

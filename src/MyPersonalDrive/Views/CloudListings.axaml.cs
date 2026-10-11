@@ -2,7 +2,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using MyPersonalDrive.Models;
 using MyPersonalDrive.Services.Localization;
 using MyPersonalDrive.ViewModels;
 using static MyPersonalDrive.Views.RowGestures;

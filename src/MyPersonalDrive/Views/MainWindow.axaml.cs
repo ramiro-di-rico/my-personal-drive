@@ -89,7 +89,7 @@ public partial class MainWindow : Window
                 }
                 else
                 {
-                    CloudSearchBox.Focus();
+                    CloudPaneView.FocusSearch();
                 }
 
                 e.Handled = true;
@@ -390,7 +390,7 @@ public partial class MainWindow : Window
             // pane anyway, so the tile modes lose nothing by starting unfocused.
             if (viewModel.IsListView)
             {
-                CloudListingsView.FocusList();
+                CloudPaneView.FocusList();
             }
         }
     }

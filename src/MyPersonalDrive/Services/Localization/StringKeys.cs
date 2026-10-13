@@ -82,6 +82,7 @@ public static class StringKeys
     /// <summary>Both explorer panes: toolbars, search, sorting, row affordances.</summary>
     public static class Explorer
     {
+        public const string AddMenuTooltip = "explorer.add.menu.tooltip";
         public const string BackTooltip = "explorer.back.tooltip";
         public const string DownloadSelected = "explorer.download.selected";
         public const string EmptyClearFilters = "explorer.empty.clearfilters";
@@ -113,6 +114,7 @@ public static class StringKeys
         public const string ViewGalleryTooltip = "explorer.view.gallery.tooltip";
         public const string ViewIconsTooltip = "explorer.view.icons.tooltip";
         public const string ViewListTooltip = "explorer.view.list.tooltip";
+        public const string ViewMenuTooltip = "explorer.view.menu.tooltip";
     }
 
     /// <summary>A listing row’s own affordances and the tooltips explaining a disabled one.</summary>

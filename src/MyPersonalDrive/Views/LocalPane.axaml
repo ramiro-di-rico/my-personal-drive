@@ -68,6 +68,10 @@
               <Setter Property="FontSize" Value="12" />
               <Setter Property="Margin" Value="0,0,4,0" />
             </Style>
+            <Style Selector="Button.sortKey.active">
+              <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+              <Setter Property="FontWeight" Value="Bold" />
+            </Style>
           </WrapPanel.Styles>
           <TextBlock Text="{Binding Loc[explorer.sort.label]}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
             <Button Classes="sortKey" Classes.active="{Binding IsSortedByName}" Command="{Binding SortByNameCommand}">

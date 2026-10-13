@@ -5,14 +5,14 @@
              x:Class="MyPersonalDrive.Views.CloudToolbar"
              x:DataType="vm:MainWindowViewModel">
   <!-- This pane's own header, mirroring the local pane's (docs/PLAN-UX-ROUND-2.md §14).
-       It used to be a full-window-width row above both panes, which pushed these six
+       It used to be a full-window-width row above both panes, which pushed these
        buttons — every one of which acts on THIS pane — against the right edge of the
        window, directly above the local pane and its separate toolbar. -->
-  <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,8">
+  <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,8">
     <Grid.Styles>
-      <Style Selector="Button.viewMode.active">
-        <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
+      <Style Selector="MenuItem.active">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="FontWeight" Value="Bold" />
       </Style>
     </Grid.Styles>
 
@@ -25,38 +25,51 @@
     <Button Grid.Column="1" ToolTip.Tip="{Binding Loc[explorer.back.tooltip]}" AutomationProperties.Name="{Binding Loc[explorer.back.tooltip]}" Command="{Binding BackCommand}">
       <Path Classes="icon" Data="{StaticResource IconArrowLeft}" />
     </Button>
-    <Button Grid.Column="2" ToolTip.Tip="{Binding Loc[explorer.newfolder.tooltip]}" AutomationProperties.Name="{Binding Loc[explorer.newfolder.tooltip]}" Command="{Binding CreateFolderCommand}">
-      <Path Classes="icon" Data="{StaticResource IconFolderPlus}" />
-    </Button>
-    <Button Grid.Column="3" ToolTip.Tip="{Binding Loc[explorer.upload.tooltip]}" AutomationProperties.Name="{Binding Loc[explorer.upload.tooltip]}" Command="{Binding UploadCommand}">
-      <Path Classes="icon" Data="{StaticResource IconUpload}" />
+    <!-- Create folder and upload share one button: both add something to this folder, and
+         neither is used often enough to earn a permanent slot. -->
+    <Button Grid.Column="2"
+            ToolTip.Tip="{Binding Loc[explorer.add.menu.tooltip]}"
+            AutomationProperties.Name="{Binding Loc[explorer.add.menu.tooltip]}">
+      <Path Classes="icon" Data="{StaticResource IconPlus}" />
+      <Button.Flyout>
+        <MenuFlyout Placement="BottomEdgeAlignedRight">
+          <MenuItem Header="{Binding Loc[explorer.newfolder.tooltip]}" Command="{Binding CreateFolderCommand}">
+            <MenuItem.Icon><Path Classes="icon" Data="{StaticResource IconFolderPlus}" /></MenuItem.Icon>
+          </MenuItem>
+          <MenuItem Header="{Binding Loc[explorer.upload.tooltip]}" Command="{Binding UploadCommand}">
+            <MenuItem.Icon><Path Classes="icon" Data="{StaticResource IconUpload}" /></MenuItem.Icon>
+          </MenuItem>
+        </MenuFlyout>
+      </Button.Flyout>
     </Button>
 
     <!-- View mode: list / icons / gallery. Only the presentation changes; the listing and
-         the current selection are untouched (docs/PLAN-BROWSER-VIEWS.md V1). -->
-    <Button Grid.Column="4"
-            Classes="viewMode"
-            Classes.active="{Binding IsListView}"
-            ToolTip.Tip="{Binding Loc[explorer.view.list.tooltip]}"
-            AutomationProperties.Name="{Binding Loc[explorer.view.list.tooltip]}"
-            Command="{Binding ShowListViewCommand}">
-      <Path Classes="icon" Data="{StaticResource IconViewList}" />
-    </Button>
-    <Button Grid.Column="5"
-            Classes="viewMode"
-            Classes.active="{Binding IsIconsView}"
-            ToolTip.Tip="{Binding Loc[explorer.view.icons.tooltip]}"
-            AutomationProperties.Name="{Binding Loc[explorer.view.icons.tooltip]}"
-            Command="{Binding ShowIconsViewCommand}">
-      <Path Classes="icon" Data="{StaticResource IconViewGrid}" />
-    </Button>
-    <Button Grid.Column="6"
-            Classes="viewMode"
-            Classes.active="{Binding IsGalleryView}"
-            ToolTip.Tip="{Binding Loc[explorer.view.gallery.tooltip]}"
-            AutomationProperties.Name="{Binding Loc[explorer.view.gallery.tooltip]}"
-            Command="{Binding ShowGalleryViewCommand}">
-      <Path Classes="icon" Data="{StaticResource IconViewGallery}" />
+         the current selection are untouched (docs/PLAN-BROWSER-VIEWS.md V1). The button shows
+         the icon of the mode in force, and the menu marks it. -->
+    <Button Grid.Column="3"
+            ToolTip.Tip="{Binding Loc[explorer.view.menu.tooltip]}"
+            AutomationProperties.Name="{Binding Loc[explorer.view.menu.tooltip]}">
+      <Panel>
+        <Path Classes="icon" Data="{StaticResource IconViewList}" IsVisible="{Binding IsListView}" />
+        <Path Classes="icon" Data="{StaticResource IconViewGrid}" IsVisible="{Binding IsIconsView}" />
+        <Path Classes="icon" Data="{StaticResource IconViewGallery}" IsVisible="{Binding IsGalleryView}" />
+      </Panel>
+      <Button.Flyout>
+        <MenuFlyout Placement="BottomEdgeAlignedRight">
+          <MenuItem Header="{Binding Loc[explorer.view.list.tooltip]}" Command="{Binding ShowListViewCommand}"
+                    Classes.active="{Binding IsListView}">
+            <MenuItem.Icon><Path Classes="icon" Data="{StaticResource IconViewList}" /></MenuItem.Icon>
+          </MenuItem>
+          <MenuItem Header="{Binding Loc[explorer.view.icons.tooltip]}" Command="{Binding ShowIconsViewCommand}"
+                    Classes.active="{Binding IsIconsView}">
+            <MenuItem.Icon><Path Classes="icon" Data="{StaticResource IconViewGrid}" /></MenuItem.Icon>
+          </MenuItem>
+          <MenuItem Header="{Binding Loc[explorer.view.gallery.tooltip]}" Command="{Binding ShowGalleryViewCommand}"
+                    Classes.active="{Binding IsGalleryView}">
+            <MenuItem.Icon><Path Classes="icon" Data="{StaticResource IconViewGallery}" /></MenuItem.Icon>
+          </MenuItem>
+        </MenuFlyout>
+      </Button.Flyout>
     </Button>
   </Grid>
 </UserControl>

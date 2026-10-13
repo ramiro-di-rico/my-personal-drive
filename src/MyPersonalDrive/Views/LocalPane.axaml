@@ -57,6 +57,44 @@
                      Opacity="0.7"
                      FontSize="12" />
         </StackPanel>
+        <!-- Same four keys as the cloud pane, with their own state: the panes list different
+             things, so ordering one should not reorder the other. -->
+        <WrapPanel Orientation="Horizontal">
+          <WrapPanel.Styles>
+            <Style Selector="Button.sortKey">
+              <Setter Property="Background" Value="Transparent" />
+              <Setter Property="BorderThickness" Value="0" />
+              <Setter Property="Padding" Value="8,4" />
+              <Setter Property="FontSize" Value="12" />
+              <Setter Property="Margin" Value="0,0,4,0" />
+            </Style>
+          </WrapPanel.Styles>
+          <TextBlock Text="{Binding Loc[explorer.sort.label]}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
+            <Button Classes="sortKey" Classes.active="{Binding IsSortedByName}" Command="{Binding SortByNameCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="{Binding Loc[common.name]}" />
+                <TextBlock Text="{Binding SortDirectionGlyph}" IsVisible="{Binding IsSortedByName}" FontSize="10" />
+              </StackPanel>
+            </Button>
+            <Button Classes="sortKey" Classes.active="{Binding IsSortedBySize}" Command="{Binding SortBySizeCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="{Binding Loc[common.size]}" />
+                <TextBlock Text="{Binding SortDirectionGlyph}" IsVisible="{Binding IsSortedBySize}" FontSize="10" />
+              </StackPanel>
+            </Button>
+            <Button Classes="sortKey" Classes.active="{Binding IsSortedByModified}" Command="{Binding SortByModifiedCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="{Binding Loc[common.modified]}" />
+                <TextBlock Text="{Binding SortDirectionGlyph}" IsVisible="{Binding IsSortedByModified}" FontSize="10" />
+              </StackPanel>
+            </Button>
+            <Button Classes="sortKey" Classes.active="{Binding IsSortedByKind}" Command="{Binding SortByKindCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="{Binding Loc[common.type]}" />
+                <TextBlock Text="{Binding SortDirectionGlyph}" IsVisible="{Binding IsSortedByKind}" FontSize="10" />
+              </StackPanel>
+            </Button>
+        </WrapPanel>
         </StackPanel>
       </Border>
 

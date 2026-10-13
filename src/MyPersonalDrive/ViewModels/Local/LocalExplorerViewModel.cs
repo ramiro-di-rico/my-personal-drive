@@ -29,6 +29,8 @@ public sealed class LocalExplorerViewModel : ObservableObject
     private string _searchText = string.Empty;
     private bool _hasRenderedListing;
     private string? _selectionAnchorPath;
+    private DriveSortKey _sortKey;
+    private bool _sortDescending;
 
     /// <summary>Everything the current folder holds, before filtering — mirrors <c>MainWindowViewModel._loadedItems</c>, and for the same reason: <see cref="Items"/> is a filtered view of this, never the source of truth for what's actually in the folder.</summary>
     private IReadOnlyList<DriveItem> _loadedItems = [];
@@ -47,7 +49,10 @@ public sealed class LocalExplorerViewModel : ObservableObject
         _onError = onError;
         HomePath = service.GetHomeDirectory();
         _currentPath = HomePath;
-        _showHiddenFiles = settings.Load().ShowHiddenLocalFiles;
+        var loaded = settings.Load();
+        _showHiddenFiles = loaded.ShowHiddenLocalFiles;
+        _sortKey = loaded.LocalSortKeyOrDefault();
+        _sortDescending = loaded.LocalSortDescending;
         Items = new ObservableCollection<LocalNodeViewModel>();
         BreadcrumbItems = new ObservableCollection<BreadcrumbSegmentViewModel>();
 
@@ -59,6 +64,10 @@ public sealed class LocalExplorerViewModel : ObservableObject
         DeleteSelectedCommand = new AsyncCommand(DeleteSelectedAsync, () => SelectedCount > 0, onError);
         MergeSelectedCommand = new AsyncCommand(MergeSelectedAsync, () => SelectedMergeableCount >= 2, onError);
         ClearSearchCommand = new AsyncCommand(ClearSearchAsync, () => HasSearchText, onError);
+        SortByNameCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Name), onError: onError);
+        SortBySizeCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Size), onError: onError);
+        SortByModifiedCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Modified), onError: onError);
+        SortByKindCommand = new AsyncCommand(() => SortByAsync(DriveSortKey.Kind), onError: onError);
 
         // Long-lived, like the window itself, so subscribing without unsubscribing is not a leak.
         // Deliberately not done in ObservableObject: a row view model is recreated on every
@@ -175,6 +184,63 @@ public sealed class LocalExplorerViewModel : ObservableObject
 
     /// <summary>Empties this pane's search box (docs/PLAN-UX-ROUND-2.md §9).</summary>
     public AsyncCommand ClearSearchCommand { get; }
+
+    public AsyncCommand SortByNameCommand { get; }
+
+    public AsyncCommand SortBySizeCommand { get; }
+
+    public AsyncCommand SortByModifiedCommand { get; }
+
+    public AsyncCommand SortByKindCommand { get; }
+
+    public DriveSortKey SortKey => _sortKey;
+
+    public bool SortDescending => _sortDescending;
+
+    public bool IsSortedByName => _sortKey == DriveSortKey.Name;
+
+    public bool IsSortedBySize => _sortKey == DriveSortKey.Size;
+
+    public bool IsSortedByModified => _sortKey == DriveSortKey.Modified;
+
+    public bool IsSortedByKind => _sortKey == DriveSortKey.Kind;
+
+    public string SortDirectionGlyph => _sortDescending ? "▼" : "▲";
+
+    /// <summary>
+    /// Same rule as the cloud pane's: choosing the active key flips the direction, a new key starts
+    /// ascending — except size and date, where the reason to sort is usually the biggest or newest.
+    /// Re-sorted from what was loaded, so the search filter keeps its rows.
+    /// </summary>
+    private Task SortByAsync(DriveSortKey key)
+    {
+        if (_sortKey == key)
+        {
+            _sortDescending = !_sortDescending;
+        }
+        else
+        {
+            _sortKey = key;
+            _sortDescending = key is DriveSortKey.Size or DriveSortKey.Modified;
+        }
+
+        _settings.Update(s =>
+        {
+            s.LocalSortKey = _sortKey.ToString();
+            s.LocalSortDescending = _sortDescending;
+        });
+
+        _loadedItems = DriveItemSorter.Sort(_loadedItems, _sortKey, _sortDescending);
+        OnPropertyChanged(nameof(SortKey));
+        OnPropertyChanged(nameof(SortDescending));
+        OnPropertyChanged(nameof(IsSortedByName));
+        OnPropertyChanged(nameof(IsSortedBySize));
+        OnPropertyChanged(nameof(IsSortedByModified));
+        OnPropertyChanged(nameof(IsSortedByKind));
+        OnPropertyChanged(nameof(SortDirectionGlyph));
+        RenderItems();
+        return Task.CompletedTask;
+    }
 
     /// <summary>How many rows are currently selected — docs/INTERFACE_IMPROVEMENT_PLAN.md §2.2.</summary>
     public int SelectedCount => Items.Count(i => i.IsSelected);
@@ -319,7 +385,7 @@ public sealed class LocalExplorerViewModel : ObservableObject
         try
         {
             var items = await Task.Run(() => _service.ListDirectory(path, ShowHiddenFiles));
-            _loadedItems = DriveItemSorter.Sort(items, DriveSortKey.Name, descending: false);
+            _loadedItems = DriveItemSorter.Sort(items, _sortKey, _sortDescending);
 
             CurrentPath = path;
             // A search term belongs to the folder it was typed in — carrying it into the next one

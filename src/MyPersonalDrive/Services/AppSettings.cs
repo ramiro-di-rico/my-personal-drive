@@ -29,6 +29,11 @@ public sealed class AppSettings
 
     public bool SortDescending { get; set; }
 
+    /// <summary>The local pane's sort key, kept apart from <see cref="SortKey"/>: the two panes list different things, and ordering one should not reorder the other.</summary>
+    public string LocalSortKey { get; set; } = nameof(Models.DriveSortKey.Name);
+
+    public bool LocalSortDescending { get; set; }
+
     /// <summary>
     /// The user's chosen provider, as the name of a <see cref="Providers.ProviderId"/>. Same
     /// string-not-enum reasoning as <see cref="ViewMode"/>, plus one more: a value naming a
@@ -197,6 +202,11 @@ public sealed class AppSettings
 
     public Models.DriveSortKey SortKeyOrDefault()
         => Enum.TryParse<Models.DriveSortKey>(SortKey, ignoreCase: true, out var key)
+            ? key
+            : Models.DriveSortKey.Name;
+
+    public Models.DriveSortKey LocalSortKeyOrDefault()
+        => Enum.TryParse<Models.DriveSortKey>(LocalSortKey, ignoreCase: true, out var key)
             ? key
             : Models.DriveSortKey.Name;
 

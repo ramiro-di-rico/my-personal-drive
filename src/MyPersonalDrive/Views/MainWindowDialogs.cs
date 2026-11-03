@@ -35,6 +35,7 @@ internal sealed class MainWindowDialogs
         viewModel.RequestCreateFolderAsync = PromptForNewFolderNameAsync;
         viewModel.RequestDownloadFolderAsync = PickDownloadFolderAsync;
         viewModel.Console.RequestSaveActivityAsync = PickSaveActivityAsync;
+        viewModel.Console.RequestShowOperationsAsync = () => Dialogs.OperationsWindow.ShowAsync(_window, viewModel);
         viewModel.RequestConfirmationAsync = question => Dialogs.ConfirmDialog.ShowAsync(_window, question);
         viewModel.RequestCopyToClipboardAsync = CopyToClipboardAsync;
         viewModel.RequestShowPropertiesAsync = (title, fields, syncStatuses) => Dialogs.PropertiesDialog.ShowAsync(_window, title, fields, syncStatuses);

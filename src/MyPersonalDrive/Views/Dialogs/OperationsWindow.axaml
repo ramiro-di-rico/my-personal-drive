@@ -1,0 +1,41 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:MyPersonalDrive.ViewModels"
+        xmlns:views="clr-namespace:MyPersonalDrive.Views"
+        x:Class="MyPersonalDrive.Views.Dialogs.OperationsWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="{Binding Loc[operations.title]}"
+        Width="520"
+        Height="460"
+        WindowStartupLocation="CenterOwner">
+  <!-- Transfers (cancellable) above, provider requests (read-only) below. Reuses
+       TransferQueuePanel so a row here and a row in the status panel are the same control. -->
+  <Grid RowDefinitions="*,Auto" Margin="20">
+    <ScrollViewer Grid.Row="0" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Spacing="16">
+        <StackPanel Spacing="8">
+          <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+            <TextBlock FontSize="16" FontWeight="Bold" VerticalAlignment="Center" Text="{Binding Loc[operations.transfers]}" />
+            <Button Grid.Column="1" Content="{Binding Loc[transfer.cancelall]}" Command="{Binding TransferQueue.CancelAllCommand}" />
+            <Button Grid.Column="2" Content="{Binding Loc[transfer.clearfinished]}" Command="{Binding TransferQueue.ClearFinishedCommand}" />
+          </Grid>
+          <views:TransferQueuePanel IsVisible="{Binding TransferQueue.HasItems}" />
+          <TextBlock Opacity="0.7" Text="{Binding Loc[operations.none]}" IsVisible="{Binding !TransferQueue.HasItems}" />
+        </StackPanel>
+
+        <StackPanel Spacing="8">
+          <TextBlock FontSize="16" FontWeight="Bold" Text="{Binding Loc[operations.provider]}" />
+          <TextBlock Opacity="0.7" FontSize="12" TextWrapping="Wrap" Text="{Binding Loc[operations.provider.note]}" />
+          <ItemsControl ItemsSource="{Binding Console.ActiveOperations}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ActiveOperationViewModel">
+                <TextBlock Margin="0,0,0,4" FontSize="12" TextTrimming="CharacterEllipsis" Text="{Binding Display}" ToolTip.Tip="{Binding Display}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+    <Button Grid.Row="1" Name="CloseButton" HorizontalAlignment="Right" Margin="0,12,0,0" Width="100" IsCancel="True" IsDefault="True" Content="{Binding Loc[common.close]}" />
+  </Grid>
+</Window>

@@ -25,7 +25,7 @@
         <TextBlock VerticalAlignment="Center" Text="{Binding Loc[common.loading]}" />
       </StackPanel>
 
-      <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
         <Grid.Styles>
           <Style Selector="Button.viewMode.active">
             <Setter Property="Background" Value="{DynamicResource AccentMutedBrush}" />
@@ -40,6 +40,12 @@
                   AutomationProperties.Name="{Binding Loc[console.search.placeholder]}"
                   Text="{Binding Console.LogSearchText, Mode=TwoWay}" />
         <Button Grid.Column="3"
+                Command="{Binding Console.ShowOperationsCommand}"
+                ToolTip.Tip="{Binding Loc[console.operations.tooltip]}"
+                AutomationProperties.Name="{Binding Loc[console.operations.tooltip]}">
+          <TextBlock Text="{Binding Console.ActiveOperationsText}" />
+        </Button>
+        <Button Grid.Column="4"
                 Classes="viewMode"
                 Classes.active="{Binding Console.ShowOnlyWarningsAndErrors}"
                 Command="{Binding Console.ToggleLogFilterCommand}"
@@ -47,18 +53,18 @@
                 AutomationProperties.Name="{Binding Loc[console.warningsonly.tooltip]}">
           <Path Classes="icon" Data="{StaticResource IconWarning}" />
         </Button>
-        <Button Grid.Column="4"
+        <Button Grid.Column="5"
                 Command="{Binding Console.ToggleCommandConsoleCommand}"
                 ToolTip.Tip="{Binding Console.CommandConsoleToggleLabel}">
           <TextBlock Text="{Binding Console.CommandConsoleToggleGlyph}" />
         </Button>
-        <Button Grid.Column="5"
+        <Button Grid.Column="6"
                 Command="{Binding Console.DownloadActivityCommand}"
                 ToolTip.Tip="{Binding Loc[console.download.tooltip]}"
                 AutomationProperties.Name="{Binding Loc[console.download.tooltip]}">
           <Path Classes="icon" Data="{StaticResource IconSave}" />
         </Button>
-        <Button Grid.Column="6"
+        <Button Grid.Column="7"
                 Command="{Binding Console.ClearActivityCommand}"
                 ToolTip.Tip="{Binding Loc[console.clear.tooltip]}"
                 AutomationProperties.Name="{Binding Loc[console.clear.tooltip]}">

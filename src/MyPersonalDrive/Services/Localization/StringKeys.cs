@@ -374,6 +374,8 @@ public static class StringKeys
         public const string QueuedCount = "transfer.queuedcount";
         public const string Transferring = "transfer.transferring";
         public const string Uploading = "transfer.uploading";
+        public const string CancelAll = "transfer.cancelall";
+        public const string ClearFinished = "transfer.clearfinished";
     }
 
     /// <summary>The CLI activity console.</summary>
@@ -388,6 +390,12 @@ public static class StringKeys
         public const string ResizeTooltip = "console.resize.tooltip";
         public const string SearchPlaceholder = "console.search.placeholder";
         public const string Title = "console.title";
+        public const string OperationsTooltip = "console.operations.tooltip";
+        public const string OperationsTitle = "operations.title";
+        public const string OperationsTransfers = "operations.transfers";
+        public const string OperationsProvider = "operations.provider";
+        public const string OperationsProviderNote = "operations.provider.note";
+        public const string OperationsNone = "operations.none";
         public const string ToggleHide = "console.toggle.hide";
         public const string ToggleShow = "console.toggle.show";
         public const string WarningsOnlyTooltip = "console.warningsonly.tooltip";

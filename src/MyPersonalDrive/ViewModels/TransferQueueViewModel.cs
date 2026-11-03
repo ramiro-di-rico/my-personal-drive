@@ -28,7 +28,37 @@ public sealed class TransferQueueViewModel : ObservableObject
 
     public TransferQueueViewModel()
     {
-        Items.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasItems));
+        Items.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasItems));
+            CancelAllCommand.RaiseCanExecuteChanged();
+            ClearFinishedCommand.RaiseCanExecuteChanged();
+        };
+        CancelAllCommand = new AsyncCommand(CancelAllAsync, () => Items.Any(i => !i.IsFinished));
+        ClearFinishedCommand = new AsyncCommand(ClearFinishedAsync, () => Items.Any(i => i.IsFinished));
+    }
+
+    public AsyncCommand CancelAllCommand { get; }
+
+    public AsyncCommand ClearFinishedCommand { get; }
+
+    private async Task CancelAllAsync()
+    {
+        foreach (var item in Items.Where(i => !i.IsFinished).ToList())
+        {
+            await item.CancelCommand.ExecuteAsync();
+        }
+    }
+
+    private Task ClearFinishedAsync()
+    {
+        foreach (var item in Items.Where(i => i.IsFinished).ToList())
+        {
+            Items.Remove(item);
+        }
+
+        OnPropertyChanged(nameof(Summary));
+        return Task.CompletedTask;
     }
 
     public ObservableCollection<TransferItemViewModel> Items { get; } = new();
@@ -87,6 +117,8 @@ public sealed class TransferQueueViewModel : ObservableObject
             if (e.PropertyName == nameof(TransferItemViewModel.Status))
             {
                 OnPropertyChanged(nameof(Summary));
+                CancelAllCommand.RaiseCanExecuteChanged();
+                ClearFinishedCommand.RaiseCanExecuteChanged();
             }
         };
 
@@ -153,6 +185,7 @@ public sealed class TransferQueueViewModel : ObservableObject
             }
             catch (InvalidOperationException ex)
             {
+                item.Failure = ex;
                 item.Status = TransferStatus.Failed;
                 item.ErrorMessage = ex.DescribeForUser().Render();
             }

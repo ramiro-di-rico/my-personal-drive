@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using Avalonia.Threading;
 using MyPersonalDrive.Services;
 using MyPersonalDrive.Services.Localization;
@@ -69,7 +70,21 @@ public sealed class ActivityConsoleViewModel : ObservableObject
         ToggleLogFilterCommand = new AsyncCommand(ToggleLogFilterAsync, onError: onError);
         DownloadActivityCommand = new AsyncCommand(DownloadActivityAsync, CanDownloadActivity, onError);
         ClearActivityCommand = new AsyncCommand(ClearActivityAsync, CanClearActivity, onError);
+        ShowOperationsCommand = new AsyncCommand(() => RequestShowOperationsAsync?.Invoke() ?? Task.CompletedTask, onError: onError);
     }
+
+    /// <summary>Opens the operations window; null when the view has not wired one.</summary>
+    public Func<Task>? RequestShowOperationsAsync { get; set; }
+
+    public AsyncCommand ShowOperationsCommand { get; }
+
+    /// <summary>
+    /// Provider calls currently mid-flight, one row each — the same Started/Finished pairs that
+    /// drive <see cref="ActiveOperationCount"/>, kept as rows so the operations window can say
+    /// *what* is running. Read-only: the activity feed carries a label, not a handle, so there is
+    /// nothing here to cancel. Cancellable work is the transfer queue's (<see cref="TransferQueueViewModel"/>).
+    /// </summary>
+    public ObservableCollection<ActiveOperationViewModel> ActiveOperations { get; } = new();
 
     /// <summary>What the console's own padding and border add on top of the scrolling body.</summary>
     private const double ConsoleChromeHeight = 40;
@@ -409,7 +424,11 @@ public sealed class ActivityConsoleViewModel : ObservableObject
         {
             case ActivityKind.Started:
                 Dispatcher.UIThread.Post(() => ActiveCommand = $"[{accountLabel}] {activity.Label}");
-                Dispatcher.UIThread.Post(() => ActiveOperationCount++);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    ActiveOperationCount++;
+                    ActiveOperations.Add(new ActiveOperationViewModel(accountLabel, activity.Label ?? string.Empty));
+                });
                 Append($"[{accountLabel}] > {activity.Label}");
                 break;
 
@@ -427,7 +446,15 @@ public sealed class ActivityConsoleViewModel : ObservableObject
                 // Clamped rather than trusting Started/Finished to always balance: a session added
                 // mid-flight (AddBrowsableAccount) only starts observing from that point on, so its
                 // first-ever event could be a Finished with no matching Started counted yet.
-                Dispatcher.UIThread.Post(() => ActiveOperationCount = Math.Max(0, ActiveOperationCount - 1));
+                Dispatcher.UIThread.Post(() =>
+                {
+                    ActiveOperationCount = Math.Max(0, ActiveOperationCount - 1);
+                    var finished = ActiveOperations.FirstOrDefault(o => o.Account == accountLabel && o.Label == (activity.Label ?? string.Empty));
+                    if (finished is not null)
+                    {
+                        ActiveOperations.Remove(finished);
+                    }
+                });
                 break;
         }
     }

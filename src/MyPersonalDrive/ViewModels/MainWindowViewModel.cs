@@ -1966,6 +1966,39 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Runs a toolbar upload through <see cref="TransferQueue"/> so it shows in the operations
+    /// window and can be cancelled there. Returns false when the user cancelled (status already
+    /// set); a failure is rethrown as the original exception so callers keep their existing
+    /// <see cref="SetFailure"/> handling and its error kind.
+    /// </summary>
+    private async Task<bool> UploadViaQueueAsync(IReadOnlyList<string> files, string targetPath, UploadConflictStrategy strategy)
+    {
+        var result = await TransferQueue.EnqueueUpload(_provider.Operations, files, targetPath, strategy);
+        return SettleQueuedTransfer(result, () => LocalizedText.Of(StringKeys.Status.UploadCancelledItem, DescribeBatchForStatus(files)));
+    }
+
+    private async Task<bool> DownloadViaQueueAsync(DriveItem item, string localFolder)
+    {
+        var result = await TransferQueue.EnqueueDownload(_provider.Operations, item, localFolder);
+        return SettleQueuedTransfer(result, () => LocalizedText.Of(StringKeys.Status.DownloadCancelledTo, localFolder));
+    }
+
+    private bool SettleQueuedTransfer(TransferItemViewModel result, Func<LocalizedText> cancelledText)
+    {
+        switch (result.Status)
+        {
+            case TransferStatus.Done:
+                return true;
+            case TransferStatus.Failed when result.Failure is { } failure:
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+                return false;
+            default:
+                SetStatus(cancelledText());
+                return false;
+        }
+    }
+
     private async Task UploadAsync()
     {
         var picker = RequestUploadFilesAsync;
@@ -1992,7 +2025,11 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             SetStatusPlural(StringKeys.Status.UploadProgress, files.Count, CurrentPath);
-            await _provider.Operations.UploadFilesAsync(files, CurrentPath, strategy.Value);
+            if (!await UploadViaQueueAsync(files, CurrentPath, strategy.Value))
+            {
+                return;
+            }
+
             SetStatusPlural(StringKeys.Status.UploadDone, files.Count, CurrentPath);
             await InvalidateDeepMetricsAsync(CurrentPath);
 
@@ -2223,7 +2260,11 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             SetStatus(StringKeys.Status.DownloadProgress, item.Name);
-            await _provider.Operations.DownloadFileAsync(item.Path, folder);
+            if (!await DownloadViaQueueAsync(item, folder))
+            {
+                return;
+            }
+
             SetStatus(StringKeys.Status.DownloadDoneTo, item.Name, folder);
         }
         catch (InvalidOperationException ex)
@@ -2638,7 +2679,11 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsLoading = true;
             SetStatusPlural(StringKeys.Status.UploadProgress, files.Count, folder.Path);
-            await _provider.Operations.UploadFilesAsync(files, folder.Path, strategy.Value);
+            if (!await UploadViaQueueAsync(files, folder.Path, strategy.Value))
+            {
+                return;
+            }
+
             SetStatusPlural(StringKeys.Status.UploadDone, files.Count, folder.Path);
             await InvalidateDeepMetricsAsync(folder.Path);
 
@@ -3002,7 +3047,10 @@ public sealed class MainWindowViewModel : ObservableObject
                 try
                 {
                     SetStatus(StringKeys.Status.DownloadProgress, file.Name);
-                    await _provider.Operations.DownloadFileAsync(file.Path, folder);
+                    if (!await DownloadViaQueueAsync(file, folder))
+                    {
+                        break;
+                    }
                 }
                 catch (InvalidOperationException ex)
                 {

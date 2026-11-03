@@ -35,6 +35,7 @@ public sealed class TransferItemViewModel : ObservableObject
             if (SetProperty(ref _status, value))
             {
                 OnPropertyChanged(nameof(StatusText));
+                OnPropertyChanged(nameof(IsFinished));
                 CancelCommand.RaiseCanExecuteChanged();
             }
         }
@@ -55,6 +56,11 @@ public sealed class TransferItemViewModel : ObservableObject
         get => _errorMessage;
         internal set => SetProperty(ref _errorMessage, value);
     }
+
+    /// <summary>The exception behind a <see cref="TransferStatus.Failed"/> item, so a caller that awaited the transfer can report it with its real error kind instead of a rendered string.</summary>
+    public Exception? Failure { get; internal set; }
+
+    public bool IsFinished => Status is TransferStatus.Done or TransferStatus.Failed or TransferStatus.Cancelled;
 
     public AsyncCommand CancelCommand { get; }
 

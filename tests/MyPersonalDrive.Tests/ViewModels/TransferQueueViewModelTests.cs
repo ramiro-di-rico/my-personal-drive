@@ -55,6 +55,44 @@ public class TransferQueueViewModelTests
     }
 
     [Fact]
+    public async Task CancelAll_CancelsRunningAndQueuedItems_AndClearFinishedRemovesThem()
+    {
+        var ops = new FakeDriveOperations();
+        ops.NextCallHonorsCancellation = true;
+
+        var sut = new TransferQueueViewModel();
+        var first = sut.EnqueueDownload(ops, new DriveItem("/my-files/a.txt", "a.txt", IsFolder: false), "/home/user/Downloads");
+        var second = sut.EnqueueDownload(ops, new DriveItem("/my-files/b.txt", "b.txt", IsFolder: false), "/home/user/Downloads");
+
+        Assert.True(sut.CancelAllCommand.CanExecute(null));
+        Assert.False(sut.ClearFinishedCommand.CanExecute(null));
+
+        await sut.CancelAllCommand.ExecuteAsync();
+        await Task.WhenAll(first, second);
+
+        Assert.All(sut.Items, i => Assert.Equal(TransferStatus.Cancelled, i.Status));
+        Assert.False(sut.CancelAllCommand.CanExecute(null));
+
+        await sut.ClearFinishedCommand.ExecuteAsync();
+
+        Assert.Empty(sut.Items);
+        Assert.False(sut.HasItems);
+    }
+
+    [Fact]
+    public async Task FailedTransfer_KeepsTheOriginalException()
+    {
+        var ops = new FakeDriveOperations();
+        var failure = new DriveException("filesystem download", 1, string.Empty, "nope", "nope", DriveErrorKind.NotFound);
+        ops.NextCallThrows = failure;
+        var sut = new TransferQueueViewModel();
+
+        var item = await sut.EnqueueDownload(ops, new DriveItem("/my-files/x.txt", "x.txt", IsFolder: false), "/home/user/Downloads");
+
+        Assert.Same(failure, item.Failure);
+    }
+
+    [Fact]
     public async Task CancellingAQueuedItem_SkipsItWithoutCallingTheOperation()
     {
         var ops = new FakeDriveOperations();
